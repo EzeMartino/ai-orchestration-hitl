@@ -3,6 +3,9 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
 using System.Text.Json;
+using Orchestration.Application.Agents.Planner;
+using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Legal;
 
 namespace Orchestration.Application.AnalysisSessions
 {
@@ -11,15 +14,18 @@ namespace Orchestration.Application.AnalysisSessions
         private readonly IOrchestrationDbContext _dbContext;
         private readonly AnalysisSessionWorkflowService _workflow;
         private readonly IActivityEventPublisher _activityPublisher;
+        private readonly IPlannerAgent _plannerAgent;
 
         public AnalysisOrchestratorService(
             IOrchestrationDbContext dbContext,
             AnalysisSessionWorkflowService workflow,
-            IActivityEventPublisher activityPublisher)
+            IActivityEventPublisher activityPublisher,
+            IPlannerAgent plannerAgent)
         {
             _dbContext = dbContext;
             _workflow = workflow;
             _activityPublisher = activityPublisher;
+            _plannerAgent = plannerAgent;
         }
 
         public async Task<AnalysisSessionDto?> StartAnalysisAsync(
@@ -60,56 +66,67 @@ namespace Orchestration.Application.AnalysisSessions
                 cancellationToken
             );
 
-            await PublishAsync(
-                session.Id,
-                "agent_started",
-                "PlannerAgent",
-                "PlannerAgent initialized. Preparing analysis plan.",
-                cancellationToken
-            );
-
-            await PublishAsync(
-                session.Id,
-                "agent_started",
-                "DataAgent",
-                "DataAgent started anomaly detection over financial signals.",
-                cancellationToken
-            );
-
-            await Task.Delay(800, cancellationToken);
-
-            await PublishAsync(
-                session.Id,
-                "anomaly_detected",
-                "DataAgent",
-                "High-severity anomaly detected. Human approval is required.",
-                cancellationToken
-            );
-
-            var awaitingApprovalStatus = _workflow.ApplyTrigger(
+            var plannerResult = await _plannerAgent.RunAsync(
                 session,
-                AnalysisSessionTrigger.AnomalyDetected
+                cancellationToken
             );
 
-            session.SetStatus(awaitingApprovalStatus);
-            session.SetCurrentAgent(null);
-            session.SetContext(BuildAnomalyContext());
+            session.SetContext(BuildAnalysisContext(plannerResult));
+
+            if (plannerResult.RequiresHumanApproval)
+            {
+                var awaitingApprovalStatus = _workflow.ApplyTrigger(
+                    session,
+                    AnalysisSessionTrigger.AnomalyDetected
+                );
+
+                session.SetStatus(awaitingApprovalStatus);
+                session.SetCurrentAgent(null);
+
+                await _dbContext.SaveChangesAsync(cancellationToken);
+
+                await PublishAsync(
+                    session.Id,
+                    "human_approval_required",
+                    "Orchestrator",
+                    "Execution paused. Waiting for human auditor approval.",
+                    cancellationToken
+                );
+
+                await PublishAsync(
+                    session.Id,
+                    "state_changed",
+                    "Orchestrator",
+                    $"Session moved to {session.Status}.",
+                    cancellationToken
+                );
+
+                return ToDto(session);
+            }
+
+            var completedStatus = _workflow.ApplyTrigger(
+                session,
+                AnalysisSessionTrigger.DataCollected
+            );
+
+            session.SetStatus(completedStatus);
+            session.SetCurrentAgent("Orchestrator");
 
             await _dbContext.SaveChangesAsync(cancellationToken);
-
-            await PublishAsync(
-                session.Id,
-                "human_approval_required",
-                "Orchestrator",
-                "Execution paused. Waiting for human auditor approval.",
-                cancellationToken
-            );
 
             await PublishAsync(
                 session.Id,
                 "state_changed",
                 "Orchestrator",
                 $"Session moved to {session.Status}.",
+                cancellationToken
+            );
+
+            await PublishAsync(
+                session.Id,
+                "analysis_completed",
+                "Orchestrator",
+                "Analysis completed without requiring human approval.",
                 cancellationToken
             );
 
@@ -248,34 +265,40 @@ namespace Orchestration.Application.AnalysisSessions
             );
         }
 
-        private static string BuildAnomalyContext()
+        private static string BuildAnalysisContext(PlannerAgentResult plannerResult)
         {
             var context = new
             {
+                summary = plannerResult.Summary,
                 anomaly = new
                 {
-                    detected = true,
-                    severity = "High",
+                    detected = plannerResult.DataResult.HasAnomaly,
+                    severity = plannerResult.DataResult.Severity,
                     category = "FinancialTransactionAnomaly",
-                    summary = "Unusual transaction pattern detected in the submitted financial report.",
-                    evidence = new[]
+                    summary = plannerResult.DataResult.Summary,
+                    evidence = plannerResult.DataResult.Evidence.Select(e => new
                     {
-                new
-                {
-                    metric = "TransactionAmountZScore",
-                    value = 4.7,
-                    threshold = 3.0,
-                    interpretation = "Transaction amount is significantly above expected range."
+                        metric = e.Metric,
+                        value = e.Value,
+                        threshold = e.Threshold,
+                        interpretation = e.Interpretation
+                    }),
+                    recommendation = plannerResult.RequiresHumanApproval
+                        ? "Human approval is required before continuing the analysis."
+                        : "No human approval is required based on the current data analysis."
                 },
-                new
+                compliance = new
                 {
-                    metric = "VelocityScore",
-                    value = 0.91,
-                    threshold = 0.75,
-                    interpretation = "Transaction frequency increased abnormally in a short time window."
-                }
-            },
-                    recommendation = "Human approval is required before continuing the analysis."
+                    riskDetected = plannerResult.LegalResult.HasComplianceRisk,
+                    riskLevel = plannerResult.LegalResult.RiskLevel,
+                    summary = plannerResult.LegalResult.Summary,
+                    evidence = plannerResult.LegalResult.Evidence.Select(e => new
+                    {
+                        regulation = e.Regulation,
+                        section = e.Section,
+                        finding = e.Finding,
+                        source = e.Source
+                    })
                 }
             };
 
