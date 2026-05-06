@@ -19,6 +19,15 @@ type AnalysisSessionResponse = {
   contextJson?: string;
 };
 
+type AnalysisSessionSummary = {
+  id: string;
+  status: string;
+  currentAgent?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
 type AnomalyEvidenceItem = {
   metric: string;
   value: number;
@@ -187,7 +196,10 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [decisionReason, setDecisionReason] = useState("");
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
-  const [sessionIdToLoad, setSessionIdToLoad] = useState("");
+  const [savedSessions, setSavedSessions] = useState<AnalysisSessionSummary[]>(
+    []
+  );
+  const [selectedSessionId, setSelectedSessionId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -260,6 +272,12 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    loadSavedSessions().catch((error) => {
+      console.error("Failed to load saved sessions:", error);
+    });
+  }, []);
+
   async function loadSessionEvents(sessionId: string) {
     const response = await fetch(
       `${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`
@@ -272,6 +290,22 @@ function App() {
     const historicalEvents = (await response.json()) as ActivityEvent[];
 
     setEvents(historicalEvents);
+  }
+
+  async function loadSavedSessions() {
+    const response = await fetch(`${apiBaseUrl}/api/analysis-sessions`);
+
+    if (!response.ok) {
+      throw new Error("Failed to load saved analysis sessions.");
+    }
+
+    const sessions = (await response.json()) as AnalysisSessionSummary[];
+
+    setSavedSessions(sessions);
+
+    if (sessions.length > 0 && !selectedSessionId) {
+      setSelectedSessionId(sessions[0].id);
+    }
   }
 
   async function createSession() {
@@ -292,6 +326,9 @@ function App() {
 
       setSession(createdSession);
       setEvents([]);
+      setSelectedSessionId(createdSession.id);
+
+      await loadSavedSessions();
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not create the analysis session.");
@@ -329,6 +366,8 @@ function App() {
       }));
 
       await loadSessionEvents(updatedSession.id);
+
+      await loadSavedSessions();
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not start the analysis session.");
@@ -378,6 +417,8 @@ function App() {
 
       await loadSessionEvents(updatedSession.id);
 
+      await loadSavedSessions();
+
       setDecisionReason("");
     } catch (error) {
       console.error(error);
@@ -387,10 +428,10 @@ function App() {
     }
   }
 
-  async function loadExistingSession() {
-    const trimmedSessionId = sessionIdToLoad.trim();
+  async function loadExistingSession(sessionId?: string) {
+    const idToLoad = sessionId ?? selectedSessionId;
 
-    if (!trimmedSessionId) {
+    if (!idToLoad) {
       return;
     }
 
@@ -398,7 +439,7 @@ function App() {
 
     try {
       const sessionResponse = await fetch(
-        `${apiBaseUrl}/api/analysis-sessions/${trimmedSessionId}`
+        `${apiBaseUrl}/api/analysis-sessions/${idToLoad}`
       );
 
       if (!sessionResponse.ok) {
@@ -453,13 +494,30 @@ function App() {
           <label>
             Review previous analysis
             <div className="loadSessionRow">
-              <input
-                value={sessionIdToLoad}
-                onChange={(event) => setSessionIdToLoad(event.target.value)}
-                placeholder="Paste analysis session ID"
-              />
+              <select
+                value={selectedSessionId}
+                onChange={(event) => setSelectedSessionId(event.target.value)}
+              >
+                {savedSessions.length === 0 ? (
+                  <option value="">No saved sessions yet</option>
+                ) : (
+                  savedSessions.map((savedSession) => (
+                    <option key={savedSession.id} value={savedSession.id}>
+                      {new Date(savedSession.createdAt).toLocaleString()} ·{" "}
+                      {savedSession.status} · {savedSession.id.slice(0, 8)}
+                    </option>
+                  ))
+                )}
+              </select>
 
-              <button onClick={loadExistingSession}>Load Session</button>
+              <button
+                onClick={() => loadExistingSession()}
+                disabled={!selectedSessionId}
+              >
+                Load Session
+              </button>
+
+              <button onClick={loadSavedSessions}>Refresh</button>
             </div>
           </label>
         </section>

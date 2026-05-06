@@ -20,7 +20,24 @@ public class AnalysisSessionsController : ControllerBase
         _orchestrator = orchestrator;
     }
 
+    [HttpGet]
+    public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
+    {
+        var sessions = await _dbContext.AnalysisSessions
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => new
+            {
+                x.Id,
+                Status = x.Status.ToString(),
+                x.CurrentAgent,
+                x.CreatedAt,
+                x.UpdatedAt,
+                x.CompletedAt
+            })
+            .ToListAsync(cancellationToken);
 
+        return Ok(sessions);
+    }
 
     [HttpPost]
     public async Task<IActionResult> CreateSession(CancellationToken cancellationToken)

@@ -101,7 +101,8 @@ h1 {
   gap: 0.75rem;
 }
 
-.loadSessionRow input {
+.loadSessionRow input,
+.loadSessionRow select {
   flex: 1;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -111,7 +112,8 @@ h1 {
   background: #f8fafc;
 }
 
-.loadSessionRow input:focus {
+.loadSessionRow input:focus,
+.loadSessionRow select:focus {
   outline: 2px solid #2563eb;
   border-color: #2563eb;
 }
