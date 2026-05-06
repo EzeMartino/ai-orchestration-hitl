@@ -1,0 +1,522 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #eef2f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  border: 0;
+  border-radius: 12px;
+  background: #0f2747;
+  color: white;
+  padding: 0.8rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.shell {
+  max-width: 1050px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: #2563eb;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  color: #071426;
+}
+
+.subtitle {
+  margin: 0.6rem 0 0;
+  color: #475569;
+}
+
+.connectionBadge {
+  background: white;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.sessionCard,
+.activityPanel {
+  background: white;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.sessionCard {
+  margin-bottom: 1rem;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+code {
+  display: block;
+  color: #1e293b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.8rem;
+  overflow-x: auto;
+}
+
+.statusRow {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panelHeader h2 {
+  margin: 0;
+}
+
+.panelHeader span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.emptyState {
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.eventList {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.eventCard {
+  border: 1px solid #e2e8f0;
+  border-left: 5px solid #0f2747;
+  border-radius: 16px;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.eventMeta {
+  display: flex;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.eventCard h3 {
+  margin: 0.5rem 0;
+  color: #0f2747;
+}
+
+.eventCard p {
+  margin: 0;
+  color: #334155;
+}
+
+.approvalPanel {
+  margin-bottom: 1rem;
+  background: #ffffff;
+  border: 1px solid #f59e0b;
+  border-left: 6px solid #f59e0b;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.approvalEyebrow {
+  margin: 0 0 0.4rem;
+  color: #b45309;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.approvalPanel h2 {
+  margin: 0;
+  color: #78350f;
+}
+
+.approvalPanel p {
+  color: #475569;
+}
+
+.reasonField {
+  display: grid;
+  gap: 0.5rem;
+  color: #334155;
+  font-weight: 700;
+  margin-top: 1rem;
+}
+
+.reasonField textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 0.8rem;
+  font: inherit;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.reasonField textarea:focus {
+  outline: 2px solid #f59e0b;
+  border-color: #f59e0b;
+}
+
+.approvalActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.approveButton {
+  background: #14532d;
+}
+
+.rejectButton {
+  background: #7f1d1d;
+}
+
+.latestEventSummary {
+  margin-top: 0.4rem;
+}
+
+.latestEventSummary span {
+  display: block;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.latestEventSummary strong {
+  display: block;
+  color: #0f172a;
+  margin-top: 0.2rem;
+}
+
+.latestEventSummary p {
+  margin: 0.4rem 0 0;
+  color: #334155;
+}
+
+.finalDecision {
+  margin-bottom: 1rem;
+  border-radius: 16px;
+  padding: 1rem;
+  font-weight: 700;
+}
+
+.finalDecisionSuccess {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.finalDecisionDanger {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.sessionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.sessionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.sessionGrid div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 0.9rem;
+}
+
+.sessionGrid span {
+  display: block;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.sessionGrid strong {
+  color: #0f172a;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.status-Pending {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.status-DataGathering {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.status-AwaitingHumanApproval {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.status-Completed {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.status-Failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.evidencePanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.evidenceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.evidenceEyebrow {
+  margin: 0 0 0.4rem;
+  color: #2563eb;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.evidenceHeader h2 {
+  margin: 0;
+  color: #0f2747;
+}
+
+.evidenceHeader p {
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+
+.severityBadge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.severity-High {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.severity-Medium {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.severity-Low {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.evidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.metricCard {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.metricName {
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.metricValues {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 0.6rem 0;
+}
+
+.metricValues strong {
+  color: #0f2747;
+  font-size: 1.7rem;
+}
+
+.metricValues span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.metricCard p {
+  margin: 0;
+  color: #334155;
+}
+
+.recommendationBox {
+  margin-top: 1rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.recommendationBox strong {
+  color: #1d4ed8;
+}
+
+.recommendationBox p {
+  margin: 0.35rem 0 0;
+  color: #334155;
+}
+
+.event-neutral {
+  border-left-color: #0f2747;
+}
+
+.event-warning {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.event-danger {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+.event-success {
+  border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+
+@media (max-width: 800px) {
+  .header,
+  .sessionHeader,
+  .evidenceHeader {
+    flex-direction: column;
+  }
+
+  .sessionGrid,
+  .evidenceGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions,
+  .approvalActions {
+    flex-direction: column;
+  }
+
+  button {
+    width: 100%;
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "Orchestration.AppHost.csproj"
+  }
+}
