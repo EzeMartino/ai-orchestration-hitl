@@ -499,10 +499,121 @@ code {
   background: #f0fdf4;
 }
 
+.compliancePanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.complianceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.complianceEyebrow {
+  margin: 0 0 0.4rem;
+  color: #4f46e5;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.complianceHeader h2 {
+  margin: 0;
+  color: #111827;
+}
+
+.complianceHeader p {
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+
+.riskBadge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.risk-High {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.risk-Medium {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.risk-Low {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.complianceEvidenceList {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.complianceEvidenceCard {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 5px solid #4f46e5;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.complianceEvidenceTop {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.complianceEvidenceTop strong {
+  color: #111827;
+}
+
+.complianceEvidenceTop span {
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.complianceEvidenceCard p {
+  margin: 0.7rem 0;
+  color: #334155;
+}
+
+.sourceLine {
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.sourceLine span {
+  color: #334155;
+}
+
 @media (max-width: 800px) {
   .header,
   .sessionHeader,
-  .evidenceHeader {
+  .evidenceHeader,
+  .complianceHeader {
     flex-direction: column;
   }
 

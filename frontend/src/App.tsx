@@ -26,7 +26,22 @@ type AnomalyEvidenceItem = {
   interpretation: string;
 };
 
+type ComplianceEvidenceItem = {
+  regulation: string;
+  section: string;
+  finding: string;
+  source: string;
+};
+
+type ComplianceContext = {
+  riskDetected: boolean;
+  riskLevel: string;
+  summary: string;
+  evidence: ComplianceEvidenceItem[];
+};
+
 type AnomalyContext = {
+  summary?: string;
   anomaly?: {
     detected: boolean;
     severity: string;
@@ -35,6 +50,7 @@ type AnomalyContext = {
     evidence: AnomalyEvidenceItem[];
     recommendation: string;
   };
+  compliance?: ComplianceContext;
 };
 
 const apiBaseUrl = "https://localhost:7020";
@@ -92,6 +108,52 @@ function EvidencePanel({ anomaly }: { anomaly: AnomalyContext["anomaly"] }) {
       <div className="recommendationBox">
         <strong>Recommendation</strong>
         <p>{anomaly.recommendation}</p>
+      </div>
+    </section>
+  );
+}
+
+function CompliancePanel({
+  compliance,
+}: {
+  compliance?: ComplianceContext;
+}) {
+  if (!compliance) {
+    return null;
+  }
+
+  return (
+    <section className="compliancePanel">
+      <div className="complianceHeader">
+        <div>
+          <p className="complianceEyebrow">Compliance review</p>
+          <h2>LegalAgent assessment</h2>
+          <p>{compliance.summary}</p>
+        </div>
+
+        <span className={`riskBadge risk-${compliance.riskLevel}`}>
+          {compliance.riskLevel}
+        </span>
+      </div>
+
+      <div className="complianceEvidenceList">
+        {compliance.evidence.map((item, index) => (
+          <article
+            className="complianceEvidenceCard"
+            key={`${item.regulation}-${item.section}-${index}`}
+          >
+            <div className="complianceEvidenceTop">
+              <strong>{item.regulation}</strong>
+              <span>{item.section}</span>
+            </div>
+
+            <p>{item.finding}</p>
+
+            <div className="sourceLine">
+              Source: <span>{item.source}</span>
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );
@@ -294,6 +356,7 @@ function App() {
   const latestEvent = events[0];
   const anomalyContext = parseAnomalyContext(session?.contextJson);
   const anomaly = anomalyContext?.anomaly;
+  const compliance = anomalyContext?.compliance;
 
   return (
     <main className="page">
@@ -364,6 +427,7 @@ function App() {
           )}
 
           <EvidencePanel anomaly={anomaly} />
+          <CompliancePanel compliance={compliance} />
 
           {session?.status === "Completed" && (
             <div className="finalDecision finalDecisionSuccess">
