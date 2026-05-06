@@ -3,6 +3,9 @@ using Orchestration.Application.AnalysisSessions;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Persistence;
+using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Planner;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +19,9 @@ builder.Services.AddScoped<AnalysisSessionWorkflowService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublisher>();
 builder.Services.AddScoped<AnalysisOrchestratorService>();
+builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
+builder.Services.AddScoped<IDataAgent, MockDataAgent>();
+builder.Services.AddScoped<ILegalAgent, MockLegalAgent>();
 
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
