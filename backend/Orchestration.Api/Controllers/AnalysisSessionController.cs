@@ -156,4 +156,33 @@ public class AnalysisSessionsController : ControllerBase
             });
         }
     }
+
+    [HttpGet("{id:guid}/events")]
+    public async Task<IActionResult> GetSessionEvents(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
+        }
+
+        var events = await _dbContext.ActivityEvents
+            .Where(x => x.SessionId == id)
+            .OrderByDescending(x => x.Timestamp)
+            .Select(x => new
+            {
+                x.SessionId,
+                x.Type,
+                x.Agent,
+                x.Message,
+                x.Timestamp
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(events);
+    }
 }

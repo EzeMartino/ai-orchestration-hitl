@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Domain.Activity;
 
 namespace Orchestration.Infrastructure.Persistence;
 
@@ -12,6 +13,7 @@ public class OrchestrationDbContext : DbContext, IOrchestrationDbContext
     }
 
     public DbSet<AnalysisSession> AnalysisSessions => Set<AnalysisSession>();
+    public DbSet<ActivityEventLog> ActivityEvents => Set<ActivityEventLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,6 +43,35 @@ public class OrchestrationDbContext : DbContext, IOrchestrationDbContext
 
             builder.Property(x => x.UpdatedAt)
                 .IsRequired();
+        });
+
+        modelBuilder.Entity<ActivityEventLog>(builder =>
+        {
+            builder.ToTable("ActivityEvents");
+
+            builder.HasKey(x => x.Id);
+
+            builder.Property(x => x.SessionId)
+                .IsRequired();
+
+            builder.Property(x => x.Type)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            builder.Property(x => x.Agent)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            builder.Property(x => x.Message)
+                .HasMaxLength(2000)
+                .IsRequired();
+
+            builder.Property(x => x.Timestamp)
+                .IsRequired();
+
+            builder.HasIndex(x => x.SessionId);
+
+            builder.HasIndex(x => new { x.SessionId, x.Timestamp });
         });
     }
 }
