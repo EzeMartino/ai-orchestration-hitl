@@ -187,6 +187,7 @@ function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [decisionReason, setDecisionReason] = useState("");
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
+  const [sessionIdToLoad, setSessionIdToLoad] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -198,7 +199,22 @@ function App() {
       .build();
 
     const handleActivityEvent = (event: ActivityEvent) => {
-      setEvents((currentEvents) => [event, ...currentEvents]);
+      setEvents((currentEvents) => {
+        const alreadyExists = currentEvents.some(
+          (currentEvent) =>
+            currentEvent.sessionId === event.sessionId &&
+            currentEvent.type === event.type &&
+            currentEvent.agent === event.agent &&
+            currentEvent.message === event.message &&
+            currentEvent.timestamp === event.timestamp
+        );
+
+        if (alreadyExists) {
+          return currentEvents;
+        }
+
+        return [event, ...currentEvents];
+      });
     };
 
     connection.on("activityEventReceived", handleActivityEvent);
@@ -243,6 +259,20 @@ function App() {
       void connection.stop();
     };
   }, []);
+
+  async function loadSessionEvents(sessionId: string) {
+    const response = await fetch(
+      `${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to load session events.");
+    }
+
+    const historicalEvents = (await response.json()) as ActivityEvent[];
+
+    setEvents(historicalEvents);
+  }
 
   async function createSession() {
     setIsCreating(true);
@@ -297,6 +327,8 @@ function App() {
         ...currentSession,
         ...updatedSession,
       }));
+
+      await loadSessionEvents(updatedSession.id);
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not start the analysis session.");
@@ -344,12 +376,44 @@ function App() {
         ...updatedSession,
       }));
 
+      await loadSessionEvents(updatedSession.id);
+
       setDecisionReason("");
     } catch (error) {
       console.error(error);
       setErrorMessage(`Could not ${decision} the analysis session.`);
     } finally {
       setIsSubmittingDecision(false);
+    }
+  }
+
+  async function loadExistingSession() {
+    const trimmedSessionId = sessionIdToLoad.trim();
+
+    if (!trimmedSessionId) {
+      return;
+    }
+
+    setErrorMessage(null);
+
+    try {
+      const sessionResponse = await fetch(
+        `${apiBaseUrl}/api/analysis-sessions/${trimmedSessionId}`
+      );
+
+      if (!sessionResponse.ok) {
+        throw new Error("Failed to load analysis session.");
+      }
+
+      const loadedSession =
+        (await sessionResponse.json()) as AnalysisSessionResponse;
+
+      setSession(loadedSession);
+
+      await loadSessionEvents(loadedSession.id);
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Could not load the analysis session.");
     }
   }
 
@@ -383,6 +447,21 @@ function App() {
           <button onClick={startSession} disabled={!session || isStarting}>
             {isStarting ? "Starting..." : "Start Session"}
           </button>
+        </section>
+
+        <section className="loadSessionPanel">
+          <label>
+            Review previous analysis
+            <div className="loadSessionRow">
+              <input
+                value={sessionIdToLoad}
+                onChange={(event) => setSessionIdToLoad(event.target.value)}
+                placeholder="Paste analysis session ID"
+              />
+
+              <button onClick={loadExistingSession}>Load Session</button>
+            </div>
+          </label>
         </section>
 
         {errorMessage && <p className="errorMessage">{errorMessage}</p>}

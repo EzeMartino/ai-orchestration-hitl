@@ -80,6 +80,42 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.loadSessionPanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  padding: 1rem;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.loadSessionPanel label {
+  display: grid;
+  gap: 0.5rem;
+  color: #334155;
+  font-weight: 800;
+}
+
+.loadSessionRow {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.loadSessionRow input {
+  flex: 1;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.8rem;
+  font: inherit;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.loadSessionRow input:focus {
+  outline: 2px solid #2563eb;
+  border-color: #2563eb;
+}
+
 .sessionCard,
 .activityPanel {
   background: white;
@@ -623,7 +659,8 @@ code {
   }
 
   .actions,
-  .approvalActions {
+  .approvalActions,
+  .loadSessionRow {
     flex-direction: column;
   }
 
