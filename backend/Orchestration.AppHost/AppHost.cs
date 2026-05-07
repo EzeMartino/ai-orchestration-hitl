@@ -5,8 +5,10 @@ var postgres = builder
     .WithDataVolume();
 
 var orchestrationDb = postgres.AddDatabase("orchestrationdb");
-var pythonHome = builder.Configuration["Python:Home"] ?? Path.GetFullPath(
-    Path.Combine(builder.AppHostDirectory, "..", "..", "python-agents"));
+var defaultPythonHome = Path.GetFullPath(
+    Path.Combine(builder.AppHostDirectory, "..", "..", "python-agents", "data_agent"));
+var pythonHome = ResolvePythonHome(
+    builder.Configuration["Python:Home"] ?? defaultPythonHome);
 
 var api = builder
     .AddProject<Projects.Orchestration_Api>("orchestration-api")
@@ -35,3 +37,22 @@ builder
     .WaitFor(api);
 
 builder.Build().Run();
+
+static string ResolvePythonHome(string pythonHome)
+{
+    var resolvedPath = Path.GetFullPath(pythonHome);
+
+    if (File.Exists(Path.Combine(resolvedPath, "anomaly_detection.py")))
+    {
+        return resolvedPath;
+    }
+
+    var dataAgentPath = Path.Combine(resolvedPath, "data_agent");
+
+    if (File.Exists(Path.Combine(dataAgentPath, "anomaly_detection.py")))
+    {
+        return dataAgentPath;
+    }
+
+    return resolvedPath;
+}

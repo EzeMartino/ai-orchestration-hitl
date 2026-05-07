@@ -99,6 +99,15 @@ lcov.info
 playwright-report/
 test-results/
 
+# Python generated files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Local agent tooling
+.agents/
+skills-lock.json
+
 # Local process and temporary files
 *.pid
 *.seed

@@ -30,8 +30,9 @@ builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
 
 var defaultPythonHome = Path.GetFullPath(
-    Path.Combine(builder.Environment.ContentRootPath, "..", "..", "python-agents"));
-var pythonHome = builder.Configuration["Python:Home"] ?? defaultPythonHome;
+    Path.Combine(builder.Environment.ContentRootPath, "..", "..", "python-agents", "data_agent"));
+var pythonHome = ResolvePythonHome(
+    builder.Configuration["Python:Home"] ?? defaultPythonHome);
 
 if (string.IsNullOrWhiteSpace(pythonHome) || !Directory.Exists(pythonHome))
 {
@@ -72,3 +73,22 @@ app.MapControllers();
 app.MapHub<ActivityHub>("/hubs/activity");
 
 app.Run();
+
+static string ResolvePythonHome(string pythonHome)
+{
+    var resolvedPath = Path.GetFullPath(pythonHome);
+
+    if (File.Exists(Path.Combine(resolvedPath, "anomaly_detection.py")))
+    {
+        return resolvedPath;
+    }
+
+    var dataAgentPath = Path.Combine(resolvedPath, "data_agent");
+
+    if (File.Exists(Path.Combine(dataAgentPath, "anomaly_detection.py")))
+    {
+        return dataAgentPath;
+    }
+
+    return resolvedPath;
+}
