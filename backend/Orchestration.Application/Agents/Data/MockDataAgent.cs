@@ -12,6 +12,7 @@ public sealed class MockDataAgent : IDataAgent
             HasAnomaly: true,
             Severity: "High",
             Summary: "Unusual transaction pattern detected in the submitted financial report.",
+            Engine: "Mock",
             Evidence:
             [
                 new AnomalyEvidence(

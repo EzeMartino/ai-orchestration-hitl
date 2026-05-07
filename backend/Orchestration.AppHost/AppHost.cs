@@ -5,9 +5,12 @@ var postgres = builder
     .WithDataVolume();
 
 var orchestrationDb = postgres.AddDatabase("orchestrationdb");
+var pythonHome = builder.Configuration["Python:Home"] ?? Path.GetFullPath(
+    Path.Combine(builder.AppHostDirectory, "..", "..", "python-agents"));
 
 var api = builder
     .AddProject<Projects.Orchestration_Api>("orchestration-api")
+    .WithEnvironment("Python__Home", pythonHome)
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb);
 

@@ -6,6 +6,8 @@ using Orchestration.Application.Persistence;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
+using Orchestration.Infrastructure.Agents.Data;
+using CSnakes.Runtime;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,12 +22,27 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublisher>();
 builder.Services.AddScoped<AnalysisOrchestratorService>();
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
-builder.Services.AddScoped<IDataAgent, MockDataAgent>();
+builder.Services.AddScoped<IDataAgent, CSnakesDataAgent>();
 builder.Services.AddScoped<ILegalAgent, MockLegalAgent>();
 
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
+
+var defaultPythonHome = Path.GetFullPath(
+    Path.Combine(builder.Environment.ContentRootPath, "..", "..", "python-agents"));
+var pythonHome = builder.Configuration["Python:Home"] ?? defaultPythonHome;
+
+if (string.IsNullOrWhiteSpace(pythonHome) || !Directory.Exists(pythonHome))
+{
+    throw new InvalidOperationException(
+        $"Python:Home configuration is missing or points to a directory that does not exist. Resolved value: '{pythonHome}'.");
+}
+
+builder.Services
+    .WithPython()
+    .WithHome(pythonHome)
+    .FromRedistributable();
 
 builder.Services.AddCors(options =>
 {

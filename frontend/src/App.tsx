@@ -54,6 +54,7 @@ type AnomalyContext = {
   anomaly?: {
     detected: boolean;
     severity: string;
+    engine?: string;
     category: string;
     summary: string;
     evidence: AnomalyEvidenceItem[];
@@ -92,6 +93,12 @@ function EvidencePanel({ anomaly }: { anomaly: AnomalyContext["anomaly"] }) {
           <p className="evidenceEyebrow">Risk evidence</p>
           <h2>{anomaly.category}</h2>
           <p>{anomaly.summary}</p>
+
+          {anomaly.engine && (
+            <div className="engineBadge">
+              Analysis engine: <strong>{anomaly.engine}</strong>
+            </div>
+          )}
         </div>
 
         <span className={`severityBadge severity-${anomaly.severity}`}>

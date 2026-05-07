@@ -274,6 +274,7 @@ namespace Orchestration.Application.AnalysisSessions
                 {
                     detected = plannerResult.DataResult.HasAnomaly,
                     severity = plannerResult.DataResult.Severity,
+                    engine = plannerResult.DataResult.Engine,
                     category = "FinancialTransactionAnomaly",
                     summary = plannerResult.DataResult.Summary,
                     evidence = plannerResult.DataResult.Evidence.Select(e => new

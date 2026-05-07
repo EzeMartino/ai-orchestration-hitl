@@ -51,6 +51,14 @@ public sealed class PlannerAgent : IPlannerAgent
 
         await PublishAsync(
             session.Id,
+            "tool_executed",
+            "DataAgent",
+            $"Anomaly detection completed using {dataResult.Engine}.",
+            cancellationToken
+        );
+
+        await PublishAsync(
+            session.Id,
             "agent_completed",
             "DataAgent",
             dataResult.Summary,
