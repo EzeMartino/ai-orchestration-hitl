@@ -5,4 +5,5 @@
   <Project Path="Orchestration.Domain/Orchestration.Domain.csproj" />
   <Project Path="Orchestration.Infrastructure/Orchestration.Infrastructure.csproj" />
   <Project Path="Orchestration.ServiceDefaults/Orchestration.ServiceDefaults.csproj" />
+  <Project Path="Orchestration.Tests/Orchestration.Tests.csproj" />
 </Solution>
