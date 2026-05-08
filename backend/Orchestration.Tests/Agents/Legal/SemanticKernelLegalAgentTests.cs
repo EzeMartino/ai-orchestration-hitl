@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Legal;
+using Orchestration.Application.Agents.Legal.Regulations;
+using Orchestration.Infrastructure.Agents.Legal.Regulations;
 
 namespace Orchestration.Tests.Agents.Legal;
 
@@ -13,6 +15,7 @@ public class SemanticKernelLegalAgentTests
     {
         var services = new ServiceCollection();
 
+        services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
         services.AddScoped<LegalCompliancePlugin>();
         services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
 
@@ -33,7 +36,7 @@ public class SemanticKernelLegalAgentTests
             CancellationToken.None
         );
 
-        result.Engine.Should().Be("Semantic Kernel + Mock Compliance Knowledge Base");
+        result.Engine.Should().Be("Semantic Kernel + Mock Regulatory Knowledge Source");
         result.HasComplianceRisk.Should().BeTrue();
         result.RiskLevel.Should().Be("Medium");
         result.Evidence.Should().NotBeEmpty();

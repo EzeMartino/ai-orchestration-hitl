@@ -1,13 +1,23 @@
 ﻿using System.ComponentModel;
 using Microsoft.SemanticKernel;
+using Orchestration.Application.Agents.Legal.Regulations;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Legal;
 
 public sealed class LegalCompliancePlugin
 {
+    private readonly IRegulatoryKnowledgeSource _regulatoryKnowledgeSource;
+
+    public LegalCompliancePlugin(
+        IRegulatoryKnowledgeSource regulatoryKnowledgeSource)
+    {
+        _regulatoryKnowledgeSource = regulatoryKnowledgeSource;
+    }
+
     [KernelFunction("review_financial_compliance")]
     [Description("Reviews a financial report summary against compliance rules.")]
-    public Task<LegalCompliancePluginResult> ReviewFinancialComplianceAsync(
+    public async Task<LegalCompliancePluginResult> ReviewFinancialComplianceAsync(
         [Description("Name of the financial report.")]
         string reportName,
         [Description("Total amount of all transactions in the report.")]
@@ -16,50 +26,32 @@ public sealed class LegalCompliancePlugin
         int transactionCount,
         CancellationToken cancellationToken = default)
     {
-        var hasComplianceRisk = totalAmount >= 100000 || transactionCount >= 40;
-
-        var riskLevel = hasComplianceRisk
-            ? "Medium"
-            : "Low";
-
-        var summary = hasComplianceRisk
-            ? "The anomaly may require compliance review before operational action is taken."
-            : "No significant compliance risk detected for the submitted financial report.";
-
-        IReadOnlyList<LegalComplianceEvidenceResult> evidence = hasComplianceRisk
-            ?
-            [
-                new LegalComplianceEvidenceResult(
-                    Regulation: "Internal AML Policy",
-                    Section: "Transaction Monitoring",
-                    Finding: "High-risk transaction patterns require human review before account-level action.",
-                    Source: "Semantic Kernel mock compliance knowledge base"
-                ),
-                new LegalComplianceEvidenceResult(
-                    Regulation: "Operational Risk Control",
-                    Section: "Human Approval Safeguards",
-                    Finding: "Automated systems must pause before irreversible operational actions when anomaly severity is elevated.",
-                    Source: "Semantic Kernel mock compliance knowledge base"
-                )
-            ]
-            :
-            [
-                new LegalComplianceEvidenceResult(
-                    Regulation: "Internal AML Policy",
-                    Section: "Transaction Monitoring",
-                    Finding: "No escalation threshold was reached.",
-                    Source: "Semantic Kernel mock compliance knowledge base"
-                )
-            ];
-
-        var result = new LegalCompliancePluginResult(
-            HasComplianceRisk: hasComplianceRisk,
-            RiskLevel: riskLevel,
-            Summary: summary,
-            Engine: "Semantic Kernel + Mock Compliance Knowledge Base",
-            Evidence: evidence
+        var report = new FinancialReportContext(
+            SessionId: Guid.Empty,
+            ReportName: reportName,
+            TotalAmount: Convert.ToDecimal(totalAmount),
+            TransactionCount: transactionCount,
+            SubmittedAt: DateTimeOffset.UtcNow
         );
 
-        return Task.FromResult(result);
+        var review = await _regulatoryKnowledgeSource.ReviewAsync(
+            report,
+            cancellationToken
+        );
+
+        return new LegalCompliancePluginResult(
+            HasComplianceRisk: review.HasComplianceRisk,
+            RiskLevel: review.RiskLevel,
+            Summary: review.Summary,
+            Engine: $"Semantic Kernel + {review.SourceEngine}",
+            Evidence: review.Findings
+                .Select(x => new LegalComplianceEvidenceResult(
+                    x.Regulation,
+                    x.Section,
+                    x.Finding,
+                    x.Source
+                ))
+                .ToList()
+        );
     }
 }
