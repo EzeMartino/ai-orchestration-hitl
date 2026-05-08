@@ -2,6 +2,7 @@ using System.Reflection;
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Repositories;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
@@ -39,6 +40,8 @@ public sealed class CnvRegulationToolsRegistrationTests
             .AddCnvRegulationMcpServices()
             .BuildServiceProvider();
 
+        provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<InMemoryRegulationRepository>();
+        provider.GetRequiredService<IRegulationIngestionService>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<InMemoryRegulationSearchService>();
         provider.GetRequiredService<IRegulationDocumentService>().Should().BeOfType<InMemoryRegulationDocumentService>();
         provider.GetRequiredService<IRegulationArticleService>().Should().BeOfType<InMemoryRegulationArticleService>();
@@ -49,7 +52,7 @@ public sealed class CnvRegulationToolsRegistrationTests
     [Fact]
     public async Task SearchCnvRegulationAsync_ShouldUseApplicationService()
     {
-        var service = new InMemoryRegulationSearchService();
+        var service = new InMemoryRegulationSearchService(new InMemoryRegulationRepository());
 
         var response = await CnvRegulationTools.SearchCnvRegulationAsync(
             service,

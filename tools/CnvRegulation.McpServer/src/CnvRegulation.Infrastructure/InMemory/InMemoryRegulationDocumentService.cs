@@ -4,12 +4,12 @@ using CnvRegulation.Application.Contracts;
 namespace CnvRegulation.Infrastructure.InMemory;
 
 /// <summary>
-/// Mock in-memory document implementation for the first CNV MCP MVP.
+/// In-memory document implementation for locally ingested and mock CNV documents.
 /// </summary>
-public sealed class InMemoryRegulationDocumentService : IRegulationDocumentService
+public sealed class InMemoryRegulationDocumentService(IRegulationRepository repository) : IRegulationDocumentService
 {
     /// <inheritdoc />
-    public Task<GetRegulationDocumentResponse> GetDocumentAsync(
+    public async Task<GetRegulationDocumentResponse> GetDocumentAsync(
         GetRegulationDocumentRequest request,
         CancellationToken cancellationToken)
     {
@@ -20,13 +20,14 @@ public sealed class InMemoryRegulationDocumentService : IRegulationDocumentServi
             ? "unknown"
             : request.DocumentId.Trim();
 
-        var document = MockRegulationData.GetDocumentOrDefault(documentId);
+        var document = await repository.GetByIdAsync(documentId, cancellationToken).ConfigureAwait(false)
+            ?? MockRegulationData.GetDocumentOrDefault(documentId);
 
-        return Task.FromResult(new GetRegulationDocumentResponse
+        return new GetRegulationDocumentResponse
         {
             Document = document,
             Citations = [MockRegulationData.CreateDocumentCitation(document)],
             Warnings = [MockRegulationData.MockWarning]
-        });
+        };
     }
 }

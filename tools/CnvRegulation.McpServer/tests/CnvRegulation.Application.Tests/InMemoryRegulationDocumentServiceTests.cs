@@ -1,5 +1,6 @@
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Repositories;
 using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
@@ -9,7 +10,7 @@ public sealed class InMemoryRegulationDocumentServiceTests
     [Fact]
     public async Task GetDocumentAsync_ShouldReturnDocumentMetadataContentAndCitations()
     {
-        var service = new InMemoryRegulationDocumentService();
+        var service = new InMemoryRegulationDocumentService(new InMemoryRegulationRepository());
         var request = new GetRegulationDocumentRequest
         {
             DocumentId = "cnv-nt-2013"

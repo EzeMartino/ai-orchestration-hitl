@@ -1,5 +1,6 @@
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Repositories;
 using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
@@ -9,7 +10,7 @@ public sealed class InMemoryRegulationSearchServiceTests
     [Fact]
     public async Task SearchAsync_ShouldReturnMockResults_WhenQueryIsValid()
     {
-        var service = new InMemoryRegulationSearchService();
+        var service = new InMemoryRegulationSearchService(new InMemoryRegulationRepository());
         var request = new SearchRegulationRequest
         {
             Query = "obligaciones de agentes ALyC",

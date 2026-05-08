@@ -1,5 +1,7 @@
 using CnvRegulation.Application.Abstractions;
+using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CnvRegulation.McpServer;
@@ -18,6 +20,11 @@ public static class CnvRegulationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddSingleton<IRegulationRepository, InMemoryRegulationRepository>();
+        services.AddSingleton<PlainTextRegulationParser>();
+        services.AddSingleton<HtmlRegulationParser>();
+        services.AddSingleton<SidecarMetadataReader>();
+        services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();
         services.AddSingleton<IRegulationSearchService, InMemoryRegulationSearchService>();
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();
         services.AddSingleton<IRegulationArticleService, InMemoryRegulationArticleService>();

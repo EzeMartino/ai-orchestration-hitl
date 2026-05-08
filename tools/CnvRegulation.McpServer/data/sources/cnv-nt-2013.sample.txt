@@ -1,0 +1,4 @@
+Mock regulatory text for local ingestion.
+
+This sample mentions obligaciones de agentes ALyC only to exercise parsing and search behavior.
+It is not official CNV text and must not be used for real regulatory decisions.
