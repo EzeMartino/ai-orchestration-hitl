@@ -36,6 +36,8 @@ You can pass a custom source directory:
 dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources
 ```
 
+During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks in memory for citation and search.
+
 ## Test
 
 ```powershell
@@ -44,11 +46,31 @@ dotnet test
 
 ## Project layout
 
-- `src/CnvRegulation.Domain`: regulatory document, search result, and citation models.
-- `src/CnvRegulation.Application`: request/response contracts and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory repository, local ingestion, parsers, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
+- `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
+- `src/CnvRegulation.Infrastructure`: in-memory repository, local ingestion, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, and MCP tool registration.
+
+## Chunking MVP
+
+The current chunker is intentionally simple and local-only. It detects article boundaries like:
+
+```text
+ARTÍCULO 1°.-
+Artículo 1
+ARTICULO 99.-
+```
+
+It also tracks current markers for:
+
+```text
+TÍTULO I
+CAPÍTULO I
+SECCIÓN I
+```
+
+When chunks exist, `search_cnv_regulation` returns chunk-level results first, including article-level citations. `get_cnv_article` also checks ingested chunks before using mock fallback data.
 
 ## Local source format
 

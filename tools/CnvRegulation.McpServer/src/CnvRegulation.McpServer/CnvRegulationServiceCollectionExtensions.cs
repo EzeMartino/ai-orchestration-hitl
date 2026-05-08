@@ -1,4 +1,5 @@
 using CnvRegulation.Application.Abstractions;
+using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Repositories;
@@ -20,7 +21,11 @@ public static class CnvRegulationServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton<IRegulationRepository, InMemoryRegulationRepository>();
+        services.AddSingleton<InMemoryRegulationRepository>();
+        services.AddSingleton<IRegulationRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
+        services.AddSingleton<IRegulationChunkRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
+        services.AddSingleton<LegalStructureDetector>();
+        services.AddSingleton<IRegulationChunker, CnvRegulationChunker>();
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
         services.AddSingleton<SidecarMetadataReader>();

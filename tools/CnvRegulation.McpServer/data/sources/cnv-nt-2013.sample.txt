@@ -1,4 +1,16 @@
-Mock regulatory text for local ingestion.
+TÍTULO I
+DISPOSICIONES GENERALES
 
-This sample mentions obligaciones de agentes ALyC only to exercise parsing and search behavior.
-It is not official CNV text and must not be used for real regulatory decisions.
+CAPÍTULO I
+ÁMBITO DE APLICACIÓN
+
+ARTÍCULO 1°.- Este es el primer artículo de prueba para local ingestion.
+
+ARTÍCULO 2°.- Este es el segundo artículo de prueba para local ingestion.
+
+CAPÍTULO II
+OTRAS DISPOSICIONES
+
+ARTÍCULO 3°.- Este es el tercer artículo de prueba para local ingestion.
+
+This sample is not official CNV text and must not be used for real regulatory decisions.

@@ -41,6 +41,8 @@ public sealed class CnvRegulationToolsRegistrationTests
             .BuildServiceProvider();
 
         provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<InMemoryRegulationRepository>();
+        provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<InMemoryRegulationRepository>();
+        provider.GetRequiredService<IRegulationChunker>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationIngestionService>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<InMemoryRegulationSearchService>();
         provider.GetRequiredService<IRegulationDocumentService>().Should().BeOfType<InMemoryRegulationDocumentService>();
@@ -52,7 +54,8 @@ public sealed class CnvRegulationToolsRegistrationTests
     [Fact]
     public async Task SearchCnvRegulationAsync_ShouldUseApplicationService()
     {
-        var service = new InMemoryRegulationSearchService(new InMemoryRegulationRepository());
+        var repository = new InMemoryRegulationRepository();
+        var service = new InMemoryRegulationSearchService(repository, repository);
 
         var response = await CnvRegulationTools.SearchCnvRegulationAsync(
             service,

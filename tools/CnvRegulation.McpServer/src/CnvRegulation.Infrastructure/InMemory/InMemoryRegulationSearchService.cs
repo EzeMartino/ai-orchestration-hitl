@@ -7,7 +7,9 @@ namespace CnvRegulation.Infrastructure.InMemory;
 /// <summary>
 /// In-memory search implementation for locally ingested and mock CNV documents.
 /// </summary>
-public sealed class InMemoryRegulationSearchService(IRegulationRepository repository) : IRegulationSearchService
+public sealed class InMemoryRegulationSearchService(
+    IRegulationRepository repository,
+    IRegulationChunkRepository chunkRepository) : IRegulationSearchService
 {
     /// <inheritdoc />
     public async Task<SearchRegulationResponse> SearchAsync(
@@ -20,14 +22,29 @@ public sealed class InMemoryRegulationSearchService(IRegulationRepository reposi
         var limit = request.Limit <= 0 ? 5 : Math.Min(request.Limit, 25);
         var query = string.IsNullOrWhiteSpace(request.Query) ? string.Empty : request.Query.Trim();
 
-        var ingestedResults = (await repository.ListAsync(cancellationToken).ConfigureAwait(false))
+        var documents = await repository.ListAsync(cancellationToken).ConfigureAwait(false);
+        var chunks = await chunkRepository.ListChunksAsync(cancellationToken).ConfigureAwait(false);
+        var documentLookup = documents.ToDictionary(document => document.Id, StringComparer.OrdinalIgnoreCase);
+        var chunkDocumentIds = chunks
+            .Select(chunk => chunk.DocumentId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var chunkResults = chunks
+            .Where(chunk => documentLookup.ContainsKey(chunk.DocumentId))
+            .Select(chunk => new { Chunk = chunk, Document = documentLookup[chunk.DocumentId] })
+            .Where(item => MatchesChunk(item.Chunk, item.Document, query, request.Area))
+            .Select(item => CreateSearchResult(item.Chunk, item.Document));
+
+        var documentResults = documents
+            .Where(document => !chunkDocumentIds.Contains(document.Id))
             .Where(document => MatchesDocument(document, query, request.Area))
             .Select(CreateSearchResult);
 
         var mockResults = MockRegulationData.SearchResults
             .Where(result => MatchesArea(result, request.Area));
 
-        var results = ingestedResults
+        var results = chunkResults
+            .Concat(documentResults)
             .Concat(mockResults)
             .Take(limit)
             .ToArray();
@@ -43,6 +60,11 @@ public sealed class InMemoryRegulationSearchService(IRegulationRepository reposi
     private static bool MatchesDocument(RegulationDocument document, string query, string? area)
     {
         return MatchesDocumentArea(document, area) && MatchesDocumentQuery(document, query);
+    }
+
+    private static bool MatchesChunk(RegulationChunk chunk, RegulationDocument document, string query, string? area)
+    {
+        return MatchesChunkArea(chunk, document, area) && MatchesChunkQuery(chunk, document, query);
     }
 
     private static bool MatchesDocumentArea(RegulationDocument document, string? area)
@@ -67,6 +89,37 @@ public sealed class InMemoryRegulationSearchService(IRegulationRepository reposi
         return document.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
             || document.Text.Contains(query, StringComparison.OrdinalIgnoreCase)
             || document.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || (document.ResolutionNumber?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static bool MatchesChunkArea(RegulationChunk chunk, RegulationDocument document, string? area)
+    {
+        if (string.IsNullOrWhiteSpace(area))
+        {
+            return true;
+        }
+
+        return document.Title.Contains(area, StringComparison.OrdinalIgnoreCase)
+            || document.DocumentType.Contains(area, StringComparison.OrdinalIgnoreCase)
+            || chunk.Text.Contains(area, StringComparison.OrdinalIgnoreCase)
+            || (chunk.Title?.Contains(area, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (chunk.Chapter?.Contains(area, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (chunk.Section?.Contains(area, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (chunk.Article?.Contains(area, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static bool MatchesChunkQuery(RegulationChunk chunk, RegulationDocument document, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return true;
+        }
+
+        return chunk.Text.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || chunk.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || document.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || document.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || (chunk.Article?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
             || (document.ResolutionNumber?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
@@ -103,6 +156,41 @@ public sealed class InMemoryRegulationSearchService(IRegulationRepository reposi
                     DocumentType = document.DocumentType,
                     ResolutionNumber = document.ResolutionNumber,
                     Title = document.Title,
+                    PublicationDate = document.PublicationDate,
+                    Url = document.Url,
+                    QuotedText = snippet
+                }
+            ]
+        };
+    }
+
+    private static RegulationSearchResult CreateSearchResult(RegulationChunk chunk, RegulationDocument document)
+    {
+        var snippet = CreateSnippet(chunk.Text);
+
+        return new RegulationSearchResult
+        {
+            DocumentId = document.Id,
+            ChunkId = chunk.Id,
+            Title = document.Title,
+            Chapter = chunk.Chapter,
+            Section = chunk.Section,
+            Article = chunk.Article,
+            Source = document.Source,
+            Url = document.Url,
+            Snippet = snippet,
+            Score = 0.81,
+            Citations =
+            [
+                new RegulationCitation
+                {
+                    Source = document.Source,
+                    DocumentType = document.DocumentType,
+                    ResolutionNumber = document.ResolutionNumber,
+                    Title = document.Title,
+                    Chapter = chunk.Chapter,
+                    Section = chunk.Section,
+                    Article = chunk.Article,
                     PublicationDate = document.PublicationDate,
                     Url = document.Url,
                     QuotedText = snippet

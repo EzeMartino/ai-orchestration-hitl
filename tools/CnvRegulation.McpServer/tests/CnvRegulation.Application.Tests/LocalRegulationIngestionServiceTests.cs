@@ -1,4 +1,5 @@
 using CnvRegulation.Application.Contracts;
+using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Repositories;
@@ -14,7 +15,7 @@ public sealed class LocalRegulationIngestionServiceTests
         using var testDirectory = TempSourceDirectory.Create();
         await testDirectory.WriteSourceAsync(
             "cnv-nt-2013.sample.txt",
-            "Mock regulatory text about obligaciones de agentes ALyC.",
+            CnvRegulationChunkerTests.SampleText,
             CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
         var repository = new InMemoryRegulationRepository();
         var service = CreateService(repository);
@@ -29,8 +30,33 @@ public sealed class LocalRegulationIngestionServiceTests
 
         var document = await repository.GetByIdAsync("cnv-nt-2013-sample", CancellationToken.None);
         document.Should().NotBeNull();
-        document!.Text.Should().Contain("obligaciones de agentes ALyC");
+        document!.Text.Should().Contain("primer artículo de prueba");
         document.Title.Should().Be("Normas CNV N.T. 2013 - Sample");
+    }
+
+    [Fact]
+    public async Task IngestAsync_ShouldCreateChunksForIngestedDocument()
+    {
+        using var testDirectory = TempSourceDirectory.Create();
+        await testDirectory.WriteSourceAsync(
+            "cnv-nt-2013.sample.txt",
+            CnvRegulationChunkerTests.SampleText,
+            CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+
+        var response = await service.IngestAsync(
+            new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
+            CancellationToken.None);
+
+        var chunks = await repository.ListByDocumentIdAsync("cnv-nt-2013-sample", CancellationToken.None);
+
+        response.DocumentsIngested.Should().Be(1);
+        chunks.Should().HaveCount(3);
+        chunks[0].Article.Should().Be("Artículo 1");
+        chunks[0].Chapter.Should().Be("Capítulo I");
+        chunks[2].Article.Should().Be("Artículo 3");
+        chunks[2].Chapter.Should().Be("Capítulo II");
     }
 
     [Fact]
@@ -113,36 +139,45 @@ public sealed class LocalRegulationIngestionServiceTests
     }
 
     [Fact]
-    public async Task SearchAsync_ShouldReturnIngestedDocument()
+    public async Task SearchAsync_ShouldReturnChunkLevelResult_WhenChunksExist()
     {
         using var testDirectory = TempSourceDirectory.Create();
         await testDirectory.WriteSourceAsync(
             "cnv-nt-2013.sample.txt",
-            "Mock regulatory text about obligaciones de agentes ALyC.",
+            CnvRegulationChunkerTests.SampleText,
             CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
         var repository = new InMemoryRegulationRepository();
         var ingestionService = CreateService(repository);
         await ingestionService.IngestAsync(
             new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
             CancellationToken.None);
-        var searchService = new InMemoryRegulationSearchService(repository);
+        var searchService = new InMemoryRegulationSearchService(repository, repository);
 
         var response = await searchService.SearchAsync(
             new SearchRegulationRequest
             {
-                Query = "obligaciones de agentes ALyC",
+                Query = "primer artículo de prueba",
                 Limit = 5
             },
             CancellationToken.None);
 
-        response.Results.Should().Contain(result => result.DocumentId == "cnv-nt-2013-sample");
-        response.Results.Single(result => result.DocumentId == "cnv-nt-2013-sample")
-            .Citations.Should().NotBeEmpty();
+        var result = response.Results.Should()
+            .ContainSingle(result => result.ChunkId == "cnv-nt-2013-sample-articulo-1")
+            .Which;
+
+        result.DocumentId.Should().Be("cnv-nt-2013-sample");
+        result.Title.Should().Be("Normas CNV N.T. 2013 - Sample");
+        result.Chapter.Should().Be("Capítulo I");
+        result.Article.Should().Be("Artículo 1");
+        result.Citations.Should().ContainSingle();
+        result.Citations[0].QuotedText.Should().Contain("primer artículo de prueba");
     }
 
     private static LocalRegulationIngestionService CreateService(InMemoryRegulationRepository repository) =>
         new(
             repository,
+            repository,
+            new CnvRegulationChunker(new LegalStructureDetector()),
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new SidecarMetadataReader());

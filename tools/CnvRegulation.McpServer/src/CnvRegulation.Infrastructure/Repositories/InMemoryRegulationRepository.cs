@@ -7,9 +7,10 @@ namespace CnvRegulation.Infrastructure.Repositories;
 /// <summary>
 /// In-memory repository for locally ingested regulation documents.
 /// </summary>
-public sealed class InMemoryRegulationRepository : IRegulationRepository
+public sealed class InMemoryRegulationRepository : IRegulationRepository, IRegulationChunkRepository
 {
     private readonly ConcurrentDictionary<string, RegulationDocument> documents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, RegulationChunk> chunks = new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public Task SaveAsync(RegulationDocument document, CancellationToken cancellationToken)
@@ -42,6 +43,64 @@ public sealed class InMemoryRegulationRepository : IRegulationRepository
 
         IReadOnlyList<RegulationDocument> snapshot = documents.Values
             .OrderBy(document => document.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return Task.FromResult(snapshot);
+    }
+
+    /// <inheritdoc />
+    public Task ReplaceForDocumentAsync(
+        string documentId,
+        IReadOnlyList<RegulationChunk> documentChunks,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
+        ArgumentNullException.ThrowIfNull(documentChunks);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        foreach (var chunk in chunks.Values
+            .Where(chunk => string.Equals(chunk.DocumentId, documentId, StringComparison.OrdinalIgnoreCase))
+            .ToArray())
+        {
+            chunks.TryRemove(chunk.Id, out _);
+        }
+
+        foreach (var chunk in documentChunks)
+        {
+            chunks[chunk.Id] = chunk;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<RegulationChunk>> ListByDocumentIdAsync(
+        string documentId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(documentId))
+        {
+            return Task.FromResult<IReadOnlyList<RegulationChunk>>([]);
+        }
+
+        IReadOnlyList<RegulationChunk> snapshot = chunks.Values
+            .Where(chunk => string.Equals(chunk.DocumentId, documentId.Trim(), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(chunk => chunk.ChunkIndex)
+            .ToArray();
+
+        return Task.FromResult(snapshot);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<RegulationChunk>> ListChunksAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        IReadOnlyList<RegulationChunk> snapshot = chunks.Values
+            .OrderBy(chunk => chunk.DocumentId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(chunk => chunk.ChunkIndex)
             .ToArray();
 
         return Task.FromResult(snapshot);

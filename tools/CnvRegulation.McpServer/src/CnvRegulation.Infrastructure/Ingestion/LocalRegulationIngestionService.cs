@@ -9,6 +9,8 @@ namespace CnvRegulation.Infrastructure.Ingestion;
 /// </summary>
 public sealed class LocalRegulationIngestionService(
     IRegulationRepository repository,
+    IRegulationChunkRepository chunkRepository,
+    IRegulationChunker chunker,
     PlainTextRegulationParser plainTextParser,
     HtmlRegulationParser htmlParser,
     SidecarMetadataReader metadataReader) : IRegulationIngestionService
@@ -66,6 +68,8 @@ public sealed class LocalRegulationIngestionService(
                     .ConfigureAwait(false);
 
                 await repository.SaveAsync(document, cancellationToken).ConfigureAwait(false);
+                var chunks = await chunker.ChunkAsync(document, cancellationToken).ConfigureAwait(false);
+                await chunkRepository.ReplaceForDocumentAsync(document.Id, chunks, cancellationToken).ConfigureAwait(false);
                 documentsIngested++;
             }
             catch (Exception exception) when (exception is IOException or InvalidDataException or JsonException)

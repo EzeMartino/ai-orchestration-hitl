@@ -10,7 +10,8 @@ public sealed class InMemoryRegulationSearchServiceTests
     [Fact]
     public async Task SearchAsync_ShouldReturnMockResults_WhenQueryIsValid()
     {
-        var service = new InMemoryRegulationSearchService(new InMemoryRegulationRepository());
+        var repository = new InMemoryRegulationRepository();
+        var service = new InMemoryRegulationSearchService(repository, repository);
         var request = new SearchRegulationRequest
         {
             Query = "obligaciones de agentes ALyC",
