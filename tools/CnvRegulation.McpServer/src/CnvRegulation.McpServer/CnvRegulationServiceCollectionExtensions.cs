@@ -3,8 +3,10 @@ using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Persistence;
 using CnvRegulation.Infrastructure.Repositories;
 using CnvRegulation.Infrastructure.Sources;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CnvRegulation.McpServer;
@@ -21,11 +23,47 @@ public static class CnvRegulationServiceCollectionExtensions
     /// <returns>The same service collection for chaining.</returns>
     public static IServiceCollection AddCnvRegulationMcpServices(this IServiceCollection services)
     {
+        return services.AddCnvRegulationMcpServices(configuration: null, storageProvider: "InMemory");
+    }
+
+    /// <summary>
+    /// Adds CNV regulation application services with optional storage configuration.
+    /// </summary>
+    /// <param name="services">The service collection to update.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="storageProvider">An explicit storage provider override.</param>
+    /// <returns>The same service collection for chaining.</returns>
+    public static IServiceCollection AddCnvRegulationMcpServices(
+        this IServiceCollection services,
+        IConfiguration? configuration,
+        string? storageProvider)
+    {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton<InMemoryRegulationRepository>();
-        services.AddSingleton<IRegulationRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
-        services.AddSingleton<IRegulationChunkRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
+        var dbOptions = RegulationDbOptions.Create(
+            storageProvider ?? configuration?["RegulationDb:Provider"],
+            configuration?["RegulationDb:ConnectionString"]);
+
+        services.AddSingleton(dbOptions);
+        if (ShouldUsePostgres(dbOptions, storageProvider))
+        {
+            services.AddSingleton<RegulationDbConnectionFactory>();
+            services.AddSingleton<IRegulationDatabaseMigrator, PostgresRegulationDatabaseMigrator>();
+            services.AddSingleton<PostgresRegulationRepository>();
+            services.AddSingleton<IRegulationRepository>(provider =>
+                provider.GetRequiredService<PostgresRegulationRepository>());
+            services.AddSingleton<IRegulationChunkRepository>(provider =>
+                provider.GetRequiredService<PostgresRegulationRepository>());
+        }
+        else
+        {
+            services.AddSingleton<InMemoryRegulationRepository>();
+            services.AddSingleton<IRegulationRepository>(provider =>
+                provider.GetRequiredService<InMemoryRegulationRepository>());
+            services.AddSingleton<IRegulationChunkRepository>(provider =>
+                provider.GetRequiredService<InMemoryRegulationRepository>());
+        }
+
         services.AddSingleton<LegalStructureDetector>();
         services.AddSingleton<IRegulationChunker, LegalStructureRegulationChunker>();
         services.AddSingleton<PlainTextRegulationParser>();
@@ -44,5 +82,15 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<IComplianceAnalysisService, MockComplianceAnalysisService>();
 
         return services;
+    }
+
+    private static bool ShouldUsePostgres(RegulationDbOptions dbOptions, string? storageProvider)
+    {
+        if (string.Equals(storageProvider, "InMemory", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return dbOptions.UsePostgres;
     }
 }

@@ -1,0 +1,190 @@
+using CnvRegulation.Application.Contracts;
+using CnvRegulation.Domain;
+using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Persistence;
+using FluentAssertions;
+
+namespace CnvRegulation.Application.Tests;
+
+public sealed class PostgresRegulationRepositoryIntegrationTests
+{
+    [PostgresIntegrationFact]
+    public async Task PostgresRepository_ShouldSaveAndRetrieveDocument()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+
+        await repository.SaveAsync(document, CancellationToken.None);
+
+        var saved = await repository.GetByIdAsync(document.Id, CancellationToken.None);
+        saved.Should().NotBeNull();
+        saved!.Source.Should().Be("Infoleg");
+        saved.DocumentType.Should().Be("Resolucion General");
+        saved.ResolutionNumber.Should().Be("622/2013");
+        saved.RequiresReview.Should().BeTrue();
+        saved.RetrievedAt.Should().Be(document.RetrievedAt);
+        saved.Metadata.Should().ContainKey("testRun");
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresRepository_ShouldSaveAndRetrieveChunks()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+        var chunks = CreateChunks(document.Id);
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
+
+        var saved = await repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+        saved.Should().HaveCount(2);
+        saved[0].Article.Should().Be("Articulo 98764");
+        saved[1].Metadata.Should().ContainKey("article");
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresRepository_ShouldReplaceChunksOnReingest()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+        var chunks = CreateChunks(document.Id);
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, [chunks[0]], CancellationToken.None);
+
+        var saved = await repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+        saved.Should().ContainSingle();
+        saved[0].Id.Should().Be(chunks[0].Id);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresRepository_ShouldFindArticleByArticleNumber()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+        var chunks = CreateChunks(document.Id);
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
+        var articleService = new InMemoryRegulationArticleService(repository, repository);
+
+        var response = await articleService.GetArticleAsync(
+            new GetRegulationArticleRequest { Article = "Articulo 98765" },
+            CancellationToken.None);
+
+        response.Citation.Source.Should().Be("Infoleg");
+        response.Citation.ResolutionNumber.Should().Be("622/2013");
+        response.Citation.Article.Should().Be("Articulo 98765");
+        response.Warnings.Should().Contain(["candidate source", "requires review"]);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresRepository_ShouldSearchChunksBeforeDocuments()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+        var chunks = CreateChunks(document.Id);
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
+        var searchService = new InMemoryRegulationSearchService(repository, repository);
+
+        var uniqueQuery = $"unique chunk search text {document.Id}";
+        var response = await searchService.SearchAsync(
+            new SearchRegulationRequest { Query = uniqueQuery, Limit = 5 },
+            CancellationToken.None);
+
+        response.Results.Should().NotBeEmpty();
+        response.Results[0].ChunkId.Should().Be($"{document.Id}-articulo-2");
+        response.Results[0].Article.Should().Be("Articulo 98765");
+    }
+
+    private static async Task<PostgresRegulationRepository> CreateRepositoryAsync()
+    {
+        var options = RegulationDbOptions.Create(
+            "Postgres",
+            Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
+        var connectionFactory = new RegulationDbConnectionFactory(options);
+        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory);
+
+        await migrator.MigrateAsync(CancellationToken.None);
+
+        return new PostgresRegulationRepository(connectionFactory);
+    }
+
+    private static RegulationDocument CreateDocument()
+    {
+        var id = $"test-rg-622-{Guid.NewGuid():N}";
+
+        return new RegulationDocument
+        {
+            Id = id,
+            Source = "Infoleg",
+            DocumentType = "Resolucion General",
+            ResolutionNumber = "622/2013",
+            Title = "Resolucion General 622/2013 - Integration Test",
+            PublicationDate = new DateOnly(2013, 9, 9),
+            EffectiveDate = new DateOnly(2013, 9, 9),
+            Url = "https://servicios.infoleg.gob.ar/test",
+            Status = "candidate",
+            RequiresReview = true,
+            RetrievedAt = DateTimeOffset.Parse("2026-05-08T00:00:00Z"),
+            Text = "Integration test document text.",
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["testRun"] = "true"
+            }
+        };
+    }
+
+    private static IReadOnlyList<RegulationChunk> CreateChunks(string documentId) =>
+    [
+        new()
+        {
+            Id = $"{documentId}-articulo-1",
+            DocumentId = documentId,
+            Title = "Titulo I",
+            Chapter = "Capitulo I",
+            Article = "Articulo 98764",
+            ChunkIndex = 0,
+            Text = "Articulo 1 test text.",
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["article"] = "Articulo 98764"
+            }
+        },
+        new()
+        {
+            Id = $"{documentId}-articulo-2",
+            DocumentId = documentId,
+            Title = "Titulo I",
+            Chapter = "Capitulo I",
+            Article = "Articulo 98765",
+            ChunkIndex = 1,
+            Text = $"Articulo 98765 unique chunk search text {documentId}.",
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["article"] = "Articulo 98765"
+            }
+        }
+    ];
+}
+
+internal sealed class PostgresIntegrationFactAttribute : FactAttribute
+{
+    public PostgresIntegrationFactAttribute()
+    {
+        if (!ShouldRunIntegrationTests())
+        {
+            Skip = "Set CNV_REGULATION_RUN_INTEGRATION_TESTS=true and CNV_REGULATION_DB_CONNECTION_STRING to run PostgreSQL integration tests.";
+        }
+    }
+
+    private static bool ShouldRunIntegrationTests() =>
+        string.Equals(
+            Environment.GetEnvironmentVariable("CNV_REGULATION_RUN_INTEGRATION_TESTS"),
+            "true",
+            StringComparison.OrdinalIgnoreCase)
+        && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
+}

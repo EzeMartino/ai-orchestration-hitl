@@ -53,6 +53,8 @@ public sealed class SidecarMetadataReader
             Url = metadata.Url!.Trim(),
             Status = metadata.Status!.Trim(),
             RequiresReview = metadata.RequiresReview == true,
+            RetrievedAt = metadata.RetrievedAt,
+            Metadata = CreateDocumentMetadata(metadata),
             Text = text
         };
     }
@@ -80,6 +82,24 @@ public sealed class SidecarMetadataReader
         if (string.IsNullOrWhiteSpace(value))
         {
             missingFields.Add(fieldName);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> CreateDocumentMetadata(RegulationSourceMetadata metadata)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        AddIfPresent(values, "requiresReview", metadata.RequiresReview?.ToString());
+        AddIfPresent(values, "retrievedAt", metadata.RetrievedAt?.ToString("O"));
+
+        return values;
+    }
+
+    private static void AddIfPresent(IDictionary<string, string> values, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            values[key] = value;
         }
     }
 }

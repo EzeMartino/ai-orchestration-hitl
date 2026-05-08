@@ -56,6 +56,17 @@ public sealed class RegulationDocument
     public bool RequiresReview { get; init; }
 
     /// <summary>
+    /// Gets when the source was retrieved, when known.
+    /// </summary>
+    public DateTimeOffset? RetrievedAt { get; init; }
+
+    /// <summary>
+    /// Gets additional source metadata preserved by the repository.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Gets the document text or mock placeholder text for this MVP.
     /// </summary>
     public required string Text { get; init; }

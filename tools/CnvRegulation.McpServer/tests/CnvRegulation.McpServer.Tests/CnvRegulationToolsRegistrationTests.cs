@@ -2,8 +2,10 @@ using System.Reflection;
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Persistence;
 using CnvRegulation.Infrastructure.Repositories;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 
@@ -52,6 +54,26 @@ public sealed class CnvRegulationToolsRegistrationTests
         provider.GetRequiredService<IRegulationArticleService>().Should().BeOfType<InMemoryRegulationArticleService>();
         provider.GetRequiredService<IRecentResolutionService>().Should().BeOfType<InMemoryRecentResolutionService>();
         provider.GetRequiredService<IComplianceAnalysisService>().Should().BeOfType<MockComplianceAnalysisService>();
+    }
+
+    [Fact]
+    public void AddCnvRegulationMcpServices_ShouldRegisterPostgresRepository_WhenConfigured()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RegulationDb:Provider"] = "Postgres",
+                ["RegulationDb:ConnectionString"] = "Host=localhost;Database=cnv_regulation;Username=postgres;Password=postgres"
+            })
+            .Build();
+        var services = new ServiceCollection();
+
+        services.AddCnvRegulationMcpServices(configuration, storageProvider: null);
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<PostgresRegulationRepository>();
+        provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<PostgresRegulationRepository>();
+        provider.GetRequiredService<IRegulationDatabaseMigrator>().Should().BeOfType<PostgresRegulationDatabaseMigrator>();
     }
 
     [Fact]

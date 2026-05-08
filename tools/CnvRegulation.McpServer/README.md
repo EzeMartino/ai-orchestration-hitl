@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, and source inspection diagnostics.
+MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, and optional PostgreSQL persistence.
 
 Do not use for real regulatory decisions.
 
@@ -58,6 +58,8 @@ PDF files can be downloaded as candidates, but ingestion skips them until a PDF 
 
 ## Ingest downloaded sources
 
+Default ingestion uses in-memory storage:
+
 ```powershell
 dotnet run --project src/CnvRegulation.McpServer -- ingest
 ```
@@ -68,7 +70,7 @@ You can pass a custom source directory:
 dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources
 ```
 
-During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks in memory for citation and search.
+During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search.
 
 ## Inspect downloaded sources
 
@@ -80,6 +82,44 @@ dotnet run --project src/CnvRegulation.McpServer -- inspect-sources --source-dir
 
 The report includes per-source metadata, extracted text length, chunk count, detected legal structure markers, first detected articles, and warnings such as candidate source, requires review, unsupported file type, or missing article boundaries.
 
+## PostgreSQL persistence
+
+Default storage is in-memory. No database is required for local mock/dev mode:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources
+```
+
+To use PostgreSQL, set a connection string through the environment or `appsettings.json`:
+
+```powershell
+$env:CNV_REGULATION_DB_CONNECTION_STRING = "Host=localhost;Port=5432;Database=cnv_regulation;Username=postgres;Password=postgres"
+```
+
+Create or update the schema:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- migrate-db
+```
+
+Ingest local sources into PostgreSQL:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources --storage postgres
+```
+
+PostgreSQL ingestion upserts `regulation_documents`, then replaces chunks for each document in `regulation_chunks`. Reingesting the same source should not duplicate chunks.
+
+PostgreSQL integration tests are skipped by default. To run them:
+
+```powershell
+$env:CNV_REGULATION_RUN_INTEGRATION_TESTS = "true"
+$env:CNV_REGULATION_DB_CONNECTION_STRING = "Host=localhost;Port=5432;Database=cnv_regulation;Username=postgres;Password=postgres"
+dotnet test
+```
+
+This phase does not add pgvector, embeddings, PDF parsing, crawler/link-following, Semantic Kernel, or app integration.
+
 ## Test
 
 ```powershell
@@ -90,18 +130,18 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory repository, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
-- `tests`: xUnit coverage for mock services, contracts, diagnostics, and MCP tool registration.
+- `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 
 ## Chunking MVP
 
 The current chunker is intentionally simple and local-only. It detects article boundaries like:
 
 ```text
-ARTICULO 1°.-
+ARTICULO 1.-
 Articulo 1
-Art. 2°.-
+Art. 2.-
 ARTICULO 99.-
 ```
 
@@ -144,12 +184,11 @@ Metadata shape:
 
 ## Future phases
 
-1. Local ingestion from CNV / Infoleg / Boletin Oficial files
-2. PostgreSQL storage
-3. Full-text search
-4. pgvector hybrid search
-5. Real citations
-6. Integration with LegalAgent
+1. Improve local ingestion from CNV / Infoleg / Boletin Oficial files
+2. Full-text search
+3. pgvector hybrid search
+4. Real citations
+5. Integration with LegalAgent
 
 ## Design note
 

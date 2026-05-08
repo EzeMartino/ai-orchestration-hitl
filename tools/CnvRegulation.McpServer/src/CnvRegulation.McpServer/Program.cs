@@ -1,6 +1,7 @@
 using CnvRegulation.McpServer;
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
+using CnvRegulation.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -13,7 +14,18 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-builder.Services.AddCnvRegulationMcpServices();
+builder.Services.AddCnvRegulationMcpServices(builder.Configuration, ResolveStorageProvider(args));
+
+if (args.Length > 0 && string.Equals(args[0], "migrate-db", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var migrator = host.Services.GetRequiredService<IRegulationDatabaseMigrator>();
+    await migrator.MigrateAsync(CancellationToken.None);
+
+    Console.WriteLine("Database migration completed.");
+
+    return;
+}
 
 if (args.Length > 0 && string.Equals(args[0], "discover-sources", StringComparison.OrdinalIgnoreCase))
 {
@@ -112,24 +124,35 @@ await builder.Build().RunAsync();
 
 static string ResolveSourceDirectory(string[] args)
 {
-    var explicitDirectory = args
-        .Skip(1)
-        .FirstOrDefault(argument => !argument.StartsWith("--", StringComparison.Ordinal));
-
-    if (!string.IsNullOrWhiteSpace(explicitDirectory))
+    var switchDirectory = GetOptionValue(args, "--source-directory");
+    if (!string.IsNullOrWhiteSpace(switchDirectory))
     {
-        return explicitDirectory;
+        return switchDirectory;
     }
 
-    var switchIndex = Array.FindIndex(args, argument =>
-        string.Equals(argument, "--source-directory", StringComparison.OrdinalIgnoreCase));
-
-    if (switchIndex >= 0 && args.Length > switchIndex + 1)
+    var positionalDirectory = GetPositionalArguments(args)
+        .FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(positionalDirectory))
     {
-        return args[switchIndex + 1];
+        return positionalDirectory;
     }
 
     return Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "sources");
+}
+
+static string? ResolveStorageProvider(string[] args)
+{
+    if (args.Any(argument => string.Equals(argument, "--use-postgres", StringComparison.OrdinalIgnoreCase)))
+    {
+        return "Postgres";
+    }
+
+    if (args.Length > 0 && string.Equals(args[0], "migrate-db", StringComparison.OrdinalIgnoreCase))
+    {
+        return "Postgres";
+    }
+
+    return GetOptionValue(args, "--storage");
 }
 
 static string ResolveManifestPath(string[] args)
@@ -151,9 +174,8 @@ static string ResolveDownloadManifestPath(string[] args)
         return explicitManifestPath;
     }
 
-    var positionalManifestPath = args
-        .Skip(1)
-        .FirstOrDefault(argument => !argument.StartsWith("--", StringComparison.Ordinal));
+    var positionalManifestPath = GetPositionalArguments(args)
+        .FirstOrDefault();
 
     if (!string.IsNullOrWhiteSpace(positionalManifestPath))
     {
@@ -181,6 +203,28 @@ static string? GetOptionValue(string[] args, string optionName)
 
     return optionIndex >= 0 && args.Length > optionIndex + 1 ? args[optionIndex + 1] : null;
 }
+
+static IEnumerable<string> GetPositionalArguments(string[] args)
+{
+    for (var index = 1; index < args.Length; index++)
+    {
+        var argument = args[index];
+        if (!argument.StartsWith("--", StringComparison.Ordinal))
+        {
+            yield return argument;
+            continue;
+        }
+
+        if (ArgumentHasValue(args, index))
+        {
+            index++;
+        }
+    }
+}
+
+static bool ArgumentHasValue(string[] args, int index) =>
+    args.Length > index + 1
+    && !args[index + 1].StartsWith("--", StringComparison.Ordinal);
 
 static string ResolveProjectRoot() =>
     Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
