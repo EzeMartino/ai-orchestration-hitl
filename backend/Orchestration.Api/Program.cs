@@ -21,9 +21,15 @@ builder.Services.AddScoped<AnalysisSessionWorkflowService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublisher>();
 builder.Services.AddScoped<AnalysisOrchestratorService>();
+
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
-builder.Services.AddScoped<IDataAgent, CSnakesDataAgent>();
+
+builder.Services.AddScoped<CSnakesDataAgent>();
+builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
+builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
+
 builder.Services.AddScoped<ILegalAgent, MockLegalAgent>();
+
 
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
