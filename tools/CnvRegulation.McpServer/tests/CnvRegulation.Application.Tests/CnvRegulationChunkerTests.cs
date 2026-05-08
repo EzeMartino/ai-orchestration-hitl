@@ -4,12 +4,12 @@ using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
 
-public sealed class CnvRegulationChunkerTests
+public sealed class LegalStructureRegulationChunkerTests
 {
     [Fact]
     public async Task Chunker_ShouldSplitTextByArticleBoundaries()
     {
-        var chunker = new CnvRegulationChunker(new LegalStructureDetector());
+        var chunker = new LegalStructureRegulationChunker(new LegalStructureDetector());
 
         var chunks = await chunker.ChunkAsync(CreateDocument(), CancellationToken.None);
 
@@ -24,7 +24,7 @@ public sealed class CnvRegulationChunkerTests
     [Fact]
     public async Task Chunker_ShouldPreserveCurrentTitleChapterAndSection()
     {
-        var chunker = new CnvRegulationChunker(new LegalStructureDetector());
+        var chunker = new LegalStructureRegulationChunker(new LegalStructureDetector());
 
         var chunks = await chunker.ChunkAsync(CreateDocument(), CancellationToken.None);
 

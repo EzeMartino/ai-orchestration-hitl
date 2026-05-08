@@ -15,7 +15,7 @@ public sealed class LocalRegulationIngestionServiceTests
         using var testDirectory = TempSourceDirectory.Create();
         await testDirectory.WriteSourceAsync(
             "cnv-nt-2013.sample.txt",
-            CnvRegulationChunkerTests.SampleText,
+            LegalStructureRegulationChunkerTests.SampleText,
             CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
         var repository = new InMemoryRegulationRepository();
         var service = CreateService(repository);
@@ -40,7 +40,7 @@ public sealed class LocalRegulationIngestionServiceTests
         using var testDirectory = TempSourceDirectory.Create();
         await testDirectory.WriteSourceAsync(
             "cnv-nt-2013.sample.txt",
-            CnvRegulationChunkerTests.SampleText,
+            LegalStructureRegulationChunkerTests.SampleText,
             CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
         var repository = new InMemoryRegulationRepository();
         var service = CreateService(repository);
@@ -144,7 +144,7 @@ public sealed class LocalRegulationIngestionServiceTests
         using var testDirectory = TempSourceDirectory.Create();
         await testDirectory.WriteSourceAsync(
             "cnv-nt-2013.sample.txt",
-            CnvRegulationChunkerTests.SampleText,
+            LegalStructureRegulationChunkerTests.SampleText,
             CreateMetadataJson("cnv-nt-2013-sample", "Normas CNV N.T. 2013 - Sample"));
         var repository = new InMemoryRegulationRepository();
         var ingestionService = CreateService(repository);
@@ -177,7 +177,7 @@ public sealed class LocalRegulationIngestionServiceTests
         new(
             repository,
             repository,
-            new CnvRegulationChunker(new LegalStructureDetector()),
+            new LegalStructureRegulationChunker(new LegalStructureDetector()),
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new SidecarMetadataReader());

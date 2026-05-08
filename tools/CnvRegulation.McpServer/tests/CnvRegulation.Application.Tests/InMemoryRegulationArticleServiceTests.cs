@@ -34,9 +34,9 @@ public sealed class InMemoryRegulationArticleServiceTests
     public async Task GetArticleAsync_ShouldReturnIngestedChunk_WhenArticleExists()
     {
         var repository = new InMemoryRegulationRepository();
-        var document = CnvRegulationChunkerTests.CreateDocument();
+        var document = LegalStructureRegulationChunkerTests.CreateDocument();
         await repository.SaveAsync(document, CancellationToken.None);
-        var chunks = await new CnvRegulationChunker(new LegalStructureDetector())
+        var chunks = await new LegalStructureRegulationChunker(new LegalStructureDetector())
             .ChunkAsync(document, CancellationToken.None);
         await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
         var service = new InMemoryRegulationArticleService(repository, repository);
@@ -59,9 +59,9 @@ public sealed class InMemoryRegulationArticleServiceTests
     public async Task GetArticleAsync_ShouldFallbackToMock_WhenArticleDoesNotExist()
     {
         var repository = new InMemoryRegulationRepository();
-        var document = CnvRegulationChunkerTests.CreateDocument();
+        var document = LegalStructureRegulationChunkerTests.CreateDocument();
         await repository.SaveAsync(document, CancellationToken.None);
-        var chunks = await new CnvRegulationChunker(new LegalStructureDetector())
+        var chunks = await new LegalStructureRegulationChunker(new LegalStructureDetector())
             .ChunkAsync(document, CancellationToken.None);
         await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
         var service = new InMemoryRegulationArticleService(repository, repository);

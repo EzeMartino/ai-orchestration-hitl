@@ -114,7 +114,7 @@ public sealed class SourceDiscoveryDownloadServiceTests
         var service = new LocalRegulationIngestionService(
             repository,
             repository,
-            new CnvRegulationChunker(new LegalStructureDetector()),
+            new LegalStructureRegulationChunker(new LegalStructureDetector()),
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new SidecarMetadataReader());

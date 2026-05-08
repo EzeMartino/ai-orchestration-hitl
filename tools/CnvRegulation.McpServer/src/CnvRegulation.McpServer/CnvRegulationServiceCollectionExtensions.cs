@@ -26,7 +26,7 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<IRegulationRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
         services.AddSingleton<IRegulationChunkRepository>(provider => provider.GetRequiredService<InMemoryRegulationRepository>());
         services.AddSingleton<LegalStructureDetector>();
-        services.AddSingleton<IRegulationChunker, CnvRegulationChunker>();
+        services.AddSingleton<IRegulationChunker, LegalStructureRegulationChunker>();
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
         services.AddSingleton<SidecarMetadataReader>();

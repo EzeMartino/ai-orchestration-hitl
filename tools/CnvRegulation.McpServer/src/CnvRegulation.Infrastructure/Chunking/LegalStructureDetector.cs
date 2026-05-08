@@ -5,8 +5,28 @@ namespace CnvRegulation.Infrastructure.Chunking;
 /// <summary>
 /// Detects simple legal structure markers in CNV-like text.
 /// </summary>
-public sealed partial class LegalStructureDetector
+public sealed class LegalStructureDetector
 {
+    private static readonly Regex TitleRegex = new(
+        @"^\s*T[\u00cdI]TULO\s+(?<value>[IVXLCDM]+|\d+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ChapterRegex = new(
+        @"^\s*CAP[\u00cdI]TULO\s+(?<value>[IVXLCDM]+|\d+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SectionRegex = new(
+        @"^\s*SECCI[\u00d3O]N\s+(?<value>[IVXLCDM]+|\d+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ArticleRegex = new(
+        @"^\s*ART[\u00cdI]CULO\s+(?<number>\d+[\u00b0\u00ba]?)\s*[\.\-\u2013\u2014:]?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex ArticleNumberRegex = new(
+        @"(?:ART[\u00cdI]CULO)?\s*(?<number>\d+[\u00b0\u00ba]?)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     /// <summary>
     /// Attempts to detect an article marker from one text line.
     /// </summary>
@@ -14,13 +34,13 @@ public sealed partial class LegalStructureDetector
     /// <returns>The normalized article label when found; otherwise, null.</returns>
     public string? DetectArticle(string line)
     {
-        var match = ArticleRegex().Match(line);
+        var match = ArticleRegex.Match(line);
         if (!match.Success)
         {
             return null;
         }
 
-        return $"Artículo {NormalizeNumber(match.Groups["number"].Value)}";
+        return $"Art\u00edculo {NormalizeNumber(match.Groups["number"].Value)}";
     }
 
     /// <summary>
@@ -30,13 +50,13 @@ public sealed partial class LegalStructureDetector
     /// <returns>The normalized title label when found; otherwise, null.</returns>
     public string? DetectTitle(string line)
     {
-        var match = TitleRegex().Match(line);
+        var match = TitleRegex.Match(line);
         if (!match.Success)
         {
             return null;
         }
 
-        return $"Título {match.Groups["value"].Value.Trim()}";
+        return $"T\u00edtulo {match.Groups["value"].Value.Trim()}";
     }
 
     /// <summary>
@@ -46,13 +66,13 @@ public sealed partial class LegalStructureDetector
     /// <returns>The normalized chapter label when found; otherwise, null.</returns>
     public string? DetectChapter(string line)
     {
-        var match = ChapterRegex().Match(line);
+        var match = ChapterRegex.Match(line);
         if (!match.Success)
         {
             return null;
         }
 
-        return $"Capítulo {match.Groups["value"].Value.Trim()}";
+        return $"Cap\u00edtulo {match.Groups["value"].Value.Trim()}";
     }
 
     /// <summary>
@@ -62,13 +82,13 @@ public sealed partial class LegalStructureDetector
     /// <returns>The normalized section label when found; otherwise, null.</returns>
     public string? DetectSection(string line)
     {
-        var match = SectionRegex().Match(line);
+        var match = SectionRegex.Match(line);
         if (!match.Success)
         {
             return null;
         }
 
-        return $"Sección {match.Groups["value"].Value.Trim()}";
+        return $"Secci\u00f3n {match.Groups["value"].Value.Trim()}";
     }
 
     /// <summary>
@@ -83,7 +103,7 @@ public sealed partial class LegalStructureDetector
             return string.Empty;
         }
 
-        var match = ArticleNumberRegex().Match(article);
+        var match = ArticleNumberRegex.Match(article);
         return match.Success ? NormalizeNumber(match.Groups["number"].Value) : article.Trim().ToUpperInvariant();
     }
 
@@ -101,20 +121,5 @@ public sealed partial class LegalStructureDetector
     }
 
     private static string NormalizeNumber(string value) =>
-        value.Trim().TrimEnd('°', 'º').ToUpperInvariant();
-
-    [GeneratedRegex(@"^\s*(ART[IÍ]CULO|Artículo|Articulo)\s+(?<number>\d+[°º]?)\s*[\.\-–—:]?", RegexOptions.IgnoreCase)]
-    private static partial Regex ArticleRegex();
-
-    [GeneratedRegex(@"^\s*T[ÍI]TULO\s+(?<value>[IVXLCDM]+|\d+)", RegexOptions.IgnoreCase)]
-    private static partial Regex TitleRegex();
-
-    [GeneratedRegex(@"^\s*CAP[ÍI]TULO\s+(?<value>[IVXLCDM]+|\d+)", RegexOptions.IgnoreCase)]
-    private static partial Regex ChapterRegex();
-
-    [GeneratedRegex(@"^\s*SECCI[ÓO]N\s+(?<value>[IVXLCDM]+|\d+)", RegexOptions.IgnoreCase)]
-    private static partial Regex SectionRegex();
-
-    [GeneratedRegex(@"(?:ART[IÍ]CULO|Artículo|Articulo)?\s*(?<number>\d+[°º]?)", RegexOptions.IgnoreCase)]
-    private static partial Regex ArticleNumberRegex();
+        value.Trim().TrimEnd('\u00b0', '\u00ba').ToUpperInvariant();
 }
