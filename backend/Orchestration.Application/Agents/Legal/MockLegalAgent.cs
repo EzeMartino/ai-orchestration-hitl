@@ -12,6 +12,7 @@ public sealed class MockLegalAgent : ILegalAgent
             HasComplianceRisk: true,
             RiskLevel: "Medium",
             Summary: "The anomaly may require compliance review before operational action is taken.",
+            Engine: "Mock Compliance Knowledge Base",
             Evidence:
             [
                 new LegalEvidence(

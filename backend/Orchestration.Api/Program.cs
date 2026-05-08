@@ -1,13 +1,14 @@
-using Orchestration.Infrastructure.Persistence;
-using Orchestration.Application.AnalysisSessions;
+using CSnakes.Runtime;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
-using Orchestration.Application.Persistence;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
+using Orchestration.Application.AnalysisSessions;
+using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
-using CSnakes.Runtime;
+using Orchestration.Infrastructure.Agents.Legal;
+using Orchestration.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,8 +29,8 @@ builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
 
-builder.Services.AddScoped<ILegalAgent, MockLegalAgent>();
-
+builder.Services.AddScoped<LegalCompliancePlugin>();
+builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
 
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>

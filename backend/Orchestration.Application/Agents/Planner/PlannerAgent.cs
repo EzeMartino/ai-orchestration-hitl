@@ -80,6 +80,14 @@ public sealed class PlannerAgent : IPlannerAgent
 
         await PublishAsync(
             session.Id,
+            "tool_executed",
+            "LegalAgent",
+            $"Compliance review completed using {legalResult.Engine}.",
+            cancellationToken
+        );
+
+        await PublishAsync(
+            session.Id,
             "agent_completed",
             "LegalAgent",
             legalResult.Summary,

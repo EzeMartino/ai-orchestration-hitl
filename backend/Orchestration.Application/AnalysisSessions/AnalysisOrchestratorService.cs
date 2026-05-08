@@ -292,6 +292,7 @@ namespace Orchestration.Application.AnalysisSessions
                 {
                     riskDetected = plannerResult.LegalResult.HasComplianceRisk,
                     riskLevel = plannerResult.LegalResult.RiskLevel,
+                    engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
                     evidence = plannerResult.LegalResult.Evidence.Select(e => new
                     {

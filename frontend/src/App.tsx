@@ -45,6 +45,7 @@ type ComplianceEvidenceItem = {
 type ComplianceContext = {
   riskDetected: boolean;
   riskLevel: string;
+  engine?: string;
   summary: string;
   evidence: ComplianceEvidenceItem[];
 };
@@ -145,6 +146,12 @@ function CompliancePanel({
           <p className="complianceEyebrow">Compliance review</p>
           <h2>LegalAgent assessment</h2>
           <p>{compliance.summary}</p>
+
+          {compliance.engine && (
+            <div className="engineBadge">
+              Compliance engine: <strong>{compliance.engine}</strong>
+            </div>
+          )}
         </div>
 
         <span className={`riskBadge risk-${compliance.riskLevel}`}>

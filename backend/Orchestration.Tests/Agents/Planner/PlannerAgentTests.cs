@@ -36,6 +36,7 @@ public class PlannerAgentTests
                 HasComplianceRisk: false,
                 RiskLevel: "Low",
                 Summary: "No compliance risk.",
+                Engine: "TestEngine",
                 Evidence: []
             )
         );
@@ -89,6 +90,7 @@ public class PlannerAgentTests
                 HasComplianceRisk: true,
                 RiskLevel: "Medium",
                 Summary: "Compliance review required.",
+                Engine: "TestEngine",
                 Evidence:
                 [
                     new LegalEvidence(
