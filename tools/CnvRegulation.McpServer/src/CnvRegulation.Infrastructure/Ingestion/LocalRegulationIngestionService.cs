@@ -52,6 +52,14 @@ public sealed class LocalRegulationIngestionService(
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var extension = Path.GetExtension(sourceFile);
+            if (!SupportedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+            {
+                documentsSkipped++;
+                warnings.Add($"Skipped unsupported file type: {extension} for '{Path.GetFileName(sourceFile)}'.");
+                continue;
+            }
+
             var metadataFile = GetMetadataFilePath(sourceFile);
             if (!File.Exists(metadataFile))
             {
@@ -90,7 +98,7 @@ public sealed class LocalRegulationIngestionService(
     private static IEnumerable<string> EnumerateSourceFiles(string sourceDirectory) =>
         Directory
             .EnumerateFiles(sourceDirectory)
-            .Where(file => SupportedExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+            .Where(file => !file.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase))
             .OrderBy(file => file, StringComparer.OrdinalIgnoreCase);
 
     private static string GetMetadataFilePath(string sourceFile)

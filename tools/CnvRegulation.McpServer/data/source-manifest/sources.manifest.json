@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-05-08T18:11:18.8848497+00:00",
+  "sources": [
+    {
+      "id": "cnv-toc-2013",
+      "source": "CNV",
+      "documentType": "Texto Ordenado",
+      "resolutionNumber": null,
+      "title": "Normas CNV N.T. 2013",
+      "url": "https://www.cnv.gov.ar/sitioWeb/Content/assets/files/TOC2013.pdf",
+      "fileName": "cnv-toc-2013.pdf",
+      "metadataFileName": "cnv-toc-2013.metadata.json",
+      "status": "candidate",
+      "priority": "high",
+      "requiresReview": true,
+      "publicationDate": "2013-09-09",
+      "effectiveDate": null
+    },
+    {
+      "id": "infoleg-rg-622-2013-norma",
+      "source": "Infoleg",
+      "documentType": "Resoluci\u00F3n General",
+      "resolutionNumber": "622/2013",
+      "title": "Resoluci\u00F3n General 622/2013 - Texto completo",
+      "url": "https://servicios.infoleg.gob.ar/infolegInternet/anexos/215000-219999/219405/norma.htm",
+      "fileName": "infoleg-rg-622-2013-norma.html",
+      "metadataFileName": "infoleg-rg-622-2013-norma.metadata.json",
+      "status": "candidate",
+      "priority": "high",
+      "requiresReview": true,
+      "publicationDate": "2013-09-09",
+      "effectiveDate": null
+    },
+    {
+      "id": "infoleg-rg-622-2013-texact",
+      "source": "Infoleg",
+      "documentType": "Resoluci\u00F3n General",
+      "resolutionNumber": "622/2013",
+      "title": "Resoluci\u00F3n General 622/2013 - Texto actualizado",
+      "url": "https://servicios.infoleg.gob.ar/infolegInternet/anexos/215000-219999/219405/texact.htm",
+      "fileName": "infoleg-rg-622-2013-texact.html",
+      "metadataFileName": "infoleg-rg-622-2013-texact.metadata.json",
+      "status": "candidate",
+      "priority": "high",
+      "requiresReview": true,
+      "publicationDate": "2013-09-09",
+      "effectiveDate": null
+    },
+    {
+      "id": "cnv-marco-regulatorio",
+      "source": "CNV",
+      "documentType": "Marco Regulatorio",
+      "resolutionNumber": null,
+      "title": "CNV Marco Regulatorio",
+      "url": "https://www.cnv.gov.ar/sitioWeb/MarcoRegulatorio?panel=3",
+      "fileName": "cnv-marco-regulatorio.html",
+      "metadataFileName": "cnv-marco-regulatorio.metadata.json",
+      "status": "candidate",
+      "priority": "medium",
+      "requiresReview": true,
+      "publicationDate": null,
+      "effectiveDate": null
+    }
+  ]
+}

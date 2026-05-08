@@ -26,6 +26,38 @@ dotnet run --project src/CnvRegulation.McpServer
 
 Local ingestion reads `.txt`, `.html`, and `.htm` files from `data/sources`. Each source file must have a sidecar metadata file with the same base name and `.metadata.json` suffix.
 
+## Discover and download sources
+
+Create the curated candidate manifest:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- discover-sources
+```
+
+This writes:
+
+```text
+data/source-manifest/sources.manifest.json
+```
+
+Download candidate files from the manifest:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- download-sources --manifest data/source-manifest/sources.manifest.json
+```
+
+Downloaded files and generated metadata sidecars are written to:
+
+```text
+data/sources/
+```
+
+All discovered/downloaded sources are marked as `status=candidate` and `requiresReview=true`, because regulatory sources may be outdated, partial, modified, consultation-only, or not currently in force.
+
+PDF files can be downloaded as candidates, but ingestion skips them until a PDF parser is added.
+
+## Ingest downloaded sources
+
 ```powershell
 dotnet run --project src/CnvRegulation.McpServer -- ingest
 ```
@@ -93,7 +125,9 @@ Metadata shape:
   "publicationDate": "2013-09-09",
   "effectiveDate": "2013-09-09",
   "url": "https://www.cnv.gov.ar/",
-  "status": "mock"
+  "status": "candidate",
+  "requiresReview": true,
+  "retrievedAt": "2026-05-08T00:00:00Z"
 }
 ```
 
