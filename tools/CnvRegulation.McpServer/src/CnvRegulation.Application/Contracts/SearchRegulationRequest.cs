@@ -19,4 +19,29 @@ public sealed class SearchRegulationRequest
     /// Gets the maximum number of results to return.
     /// </summary>
     public int Limit { get; init; } = 5;
+
+    /// <summary>
+    /// Gets the optional source filter.
+    /// </summary>
+    public string? Source { get; init; }
+
+    /// <summary>
+    /// Gets the optional document type filter.
+    /// </summary>
+    public string? DocumentType { get; init; }
+
+    /// <summary>
+    /// Gets the optional resolution number filter.
+    /// </summary>
+    public string? ResolutionNumber { get; init; }
+
+    /// <summary>
+    /// Gets the optional document status filter.
+    /// </summary>
+    public string? Status { get; init; }
+
+    /// <summary>
+    /// Gets the optional manual review requirement filter.
+    /// </summary>
+    public bool? RequiresReview { get; init; }
 }

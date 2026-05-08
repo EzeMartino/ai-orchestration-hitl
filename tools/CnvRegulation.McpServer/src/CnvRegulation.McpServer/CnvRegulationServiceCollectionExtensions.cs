@@ -54,6 +54,7 @@ public static class CnvRegulationServiceCollectionExtensions
                 provider.GetRequiredService<PostgresRegulationRepository>());
             services.AddSingleton<IRegulationChunkRepository>(provider =>
                 provider.GetRequiredService<PostgresRegulationRepository>());
+            services.AddSingleton<IRegulationSearchService, PostgresRegulationSearchService>();
         }
         else
         {
@@ -62,6 +63,7 @@ public static class CnvRegulationServiceCollectionExtensions
                 provider.GetRequiredService<InMemoryRegulationRepository>());
             services.AddSingleton<IRegulationChunkRepository>(provider =>
                 provider.GetRequiredService<InMemoryRegulationRepository>());
+            services.AddSingleton<IRegulationSearchService, InMemoryRegulationSearchService>();
         }
 
         services.AddSingleton<LegalStructureDetector>();
@@ -75,7 +77,6 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<ISourceDownloadService, ManifestSourceDownloadService>();
         services.AddSingleton<ISourceInspectionService, SourceInspectionService>();
         services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();
-        services.AddSingleton<IRegulationSearchService, InMemoryRegulationSearchService>();
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();
         services.AddSingleton<IRegulationArticleService, InMemoryRegulationArticleService>();
         services.AddSingleton<IRecentResolutionService, InMemoryRecentResolutionService>();

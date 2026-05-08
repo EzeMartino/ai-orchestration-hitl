@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, and optional PostgreSQL persistence.
+MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
 
 Do not use for real regulatory decisions.
 
@@ -110,6 +110,16 @@ dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory da
 
 PostgreSQL ingestion upserts `regulation_documents`, then replaces chunks for each document in `regulation_chunks`. Reingesting the same source should not duplicate chunks.
 
+PostgreSQL search uses full-text indexes over `regulation_chunks.text` and `regulation_documents.text`. Chunk matches are returned first with ranking and citations. If no chunks match, the search falls back to document-level matches.
+
+`search_cnv_regulation` supports these optional filters:
+
+- `source`
+- `documentType`
+- `resolutionNumber`
+- `status`
+- `requiresReview`
+
 PostgreSQL integration tests are skipped by default. To run them:
 
 ```powershell
@@ -130,7 +140,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 
@@ -185,10 +195,9 @@ Metadata shape:
 ## Future phases
 
 1. Improve local ingestion from CNV / Infoleg / Boletin Oficial files
-2. Full-text search
-3. pgvector hybrid search
-4. Real citations
-5. Integration with LegalAgent
+2. pgvector hybrid search
+3. Real citations
+4. Integration with LegalAgent
 
 ## Design note
 

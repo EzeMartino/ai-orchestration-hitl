@@ -28,6 +28,11 @@ public static class CnvRegulationTools
         [Description("Natural language query or keywords to search for.")] string query,
         [Description("Optional regulatory area filter, such as Agentes.")] string? area = null,
         [Description("Maximum number of results to return.")] int limit = 5,
+        [Description("Optional source filter, such as CNV or Infoleg.")] string? source = null,
+        [Description("Optional document type filter.")] string? documentType = null,
+        [Description("Optional resolution number filter, such as 622/2013.")] string? resolutionNumber = null,
+        [Description("Optional status filter, such as candidate or mock.")] string? status = null,
+        [Description("Optional requires-review filter.")] bool? requiresReview = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(searchService);
@@ -37,7 +42,12 @@ public static class CnvRegulationTools
             {
                 Query = query,
                 Area = area,
-                Limit = limit
+                Limit = limit,
+                Source = source,
+                DocumentType = documentType,
+                ResolutionNumber = resolutionNumber,
+                Status = status,
+                RequiresReview = requiresReview
             },
             cancellationToken);
     }

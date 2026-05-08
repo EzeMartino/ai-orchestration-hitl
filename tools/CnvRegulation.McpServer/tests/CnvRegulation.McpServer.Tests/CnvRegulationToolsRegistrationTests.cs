@@ -73,6 +73,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<PostgresRegulationRepository>();
         provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<PostgresRegulationRepository>();
+        provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<PostgresRegulationSearchService>();
         provider.GetRequiredService<IRegulationDatabaseMigrator>().Should().BeOfType<PostgresRegulationDatabaseMigrator>();
     }
 
@@ -87,7 +88,7 @@ public sealed class CnvRegulationToolsRegistrationTests
             "obligaciones de agentes ALyC",
             "Agentes",
             5,
-            CancellationToken.None);
+            cancellationToken: CancellationToken.None);
 
         response.Should().BeOfType<SearchRegulationResponse>();
         response.Results.Should().NotBeEmpty();

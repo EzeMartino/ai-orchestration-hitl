@@ -32,15 +32,16 @@ public sealed class InMemoryRegulationSearchService(
         var chunkResults = chunks
             .Where(chunk => documentLookup.ContainsKey(chunk.DocumentId))
             .Select(chunk => new { Chunk = chunk, Document = documentLookup[chunk.DocumentId] })
-            .Where(item => MatchesChunk(item.Chunk, item.Document, query, request.Area))
+            .Where(item => MatchesChunk(item.Chunk, item.Document, query, request))
             .Select(item => CreateSearchResult(item.Chunk, item.Document));
 
         var documentResults = documents
             .Where(document => !chunkDocumentIds.Contains(document.Id))
-            .Where(document => MatchesDocument(document, query, request.Area))
+            .Where(document => MatchesDocument(document, query, request))
             .Select(CreateSearchResult);
 
         var mockResults = MockRegulationData.SearchResults
+            .Where(result => MatchesResultFilters(result, request))
             .Where(result => MatchesArea(result, request.Area));
 
         var results = chunkResults
@@ -57,14 +58,18 @@ public sealed class InMemoryRegulationSearchService(
         };
     }
 
-    private static bool MatchesDocument(RegulationDocument document, string query, string? area)
+    private static bool MatchesDocument(RegulationDocument document, string query, SearchRegulationRequest request)
     {
-        return MatchesDocumentArea(document, area) && MatchesDocumentQuery(document, query);
+        return MatchesDocumentArea(document, request.Area)
+            && MatchesDocumentQuery(document, query)
+            && MatchesDocumentFilters(document, request);
     }
 
-    private static bool MatchesChunk(RegulationChunk chunk, RegulationDocument document, string query, string? area)
+    private static bool MatchesChunk(RegulationChunk chunk, RegulationDocument document, string query, SearchRegulationRequest request)
     {
-        return MatchesChunkArea(chunk, document, area) && MatchesChunkQuery(chunk, document, query);
+        return MatchesChunkArea(chunk, document, request.Area)
+            && MatchesChunkQuery(chunk, document, query)
+            && MatchesDocumentFilters(document, request);
     }
 
     private static bool MatchesDocumentArea(RegulationDocument document, string? area)
@@ -133,6 +138,30 @@ public sealed class InMemoryRegulationSearchService(
         return result.Snippet.Contains(area, StringComparison.OrdinalIgnoreCase)
             || result.Title.Contains(area, StringComparison.OrdinalIgnoreCase)
             || string.Equals(area, "Agentes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesDocumentFilters(RegulationDocument document, SearchRegulationRequest request)
+    {
+        return MatchesOptional(document.Source, request.Source)
+            && MatchesOptional(document.DocumentType, request.DocumentType)
+            && MatchesOptional(document.ResolutionNumber, request.ResolutionNumber)
+            && MatchesOptional(document.Status, request.Status)
+            && (request.RequiresReview is null || document.RequiresReview == request.RequiresReview);
+    }
+
+    private static bool MatchesResultFilters(RegulationSearchResult result, SearchRegulationRequest request)
+    {
+        return MatchesOptional(result.Source, request.Source)
+            && MatchesOptional(result.Citations.FirstOrDefault()?.DocumentType, request.DocumentType)
+            && MatchesOptional(result.Citations.FirstOrDefault()?.ResolutionNumber, request.ResolutionNumber)
+            && request.Status is null
+            && request.RequiresReview is null;
+    }
+
+    private static bool MatchesOptional(string? actual, string? expected)
+    {
+        return string.IsNullOrWhiteSpace(expected)
+            || string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static RegulationSearchResult CreateSearchResult(RegulationDocument document)

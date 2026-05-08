@@ -40,3 +40,20 @@ ON regulation_chunks(document_id);
 
 CREATE INDEX IF NOT EXISTS idx_regulation_chunks_article
 ON regulation_chunks(article);
+
+CREATE INDEX IF NOT EXISTS idx_regulation_chunks_text_fts
+ON regulation_chunks
+USING GIN (to_tsvector('spanish', coalesce(text, '')));
+
+CREATE INDEX IF NOT EXISTS idx_regulation_documents_text_fts
+ON regulation_documents
+USING GIN (to_tsvector('spanish', coalesce(text, '')));
+
+CREATE INDEX IF NOT EXISTS idx_regulation_documents_status
+ON regulation_documents(status);
+
+CREATE INDEX IF NOT EXISTS idx_regulation_documents_requires_review
+ON regulation_documents(requires_review);
+
+CREATE INDEX IF NOT EXISTS idx_regulation_documents_document_type
+ON regulation_documents(document_type);
