@@ -51,6 +51,11 @@ public sealed class RegulationDocument
     public required string Status { get; init; }
 
     /// <summary>
+    /// Gets whether the source must be manually reviewed before regulatory use.
+    /// </summary>
+    public bool RequiresReview { get; init; }
+
+    /// <summary>
     /// Gets the document text or mock placeholder text for this MVP.
     /// </summary>
     public required string Text { get; init; }

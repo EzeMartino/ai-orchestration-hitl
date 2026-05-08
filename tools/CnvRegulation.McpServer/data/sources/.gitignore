@@ -1,0 +1,5 @@
+*.html
+*.htm
+*.pdf
+*.metadata.json
+!*.sample.metadata.json

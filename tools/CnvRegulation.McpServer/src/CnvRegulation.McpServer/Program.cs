@@ -63,6 +63,23 @@ if (args.Length > 0 && string.Equals(args[0], "download-sources", StringComparis
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "inspect-sources", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var sourceDirectory = ResolveSourceDirectory(args);
+    var inspectionService = host.Services.GetRequiredService<ISourceInspectionService>();
+    var response = await inspectionService.InspectAsync(
+        new InspectSourcesRequest
+        {
+            SourceDirectory = sourceDirectory
+        },
+        CancellationToken.None);
+
+    Console.WriteLine(SourceInspectionReportFormatter.Format(response));
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "ingest", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();

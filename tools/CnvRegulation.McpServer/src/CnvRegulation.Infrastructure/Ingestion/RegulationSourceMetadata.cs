@@ -49,4 +49,14 @@ public sealed class RegulationSourceMetadata
     /// Gets the document status.
     /// </summary>
     public string? Status { get; init; }
+
+    /// <summary>
+    /// Gets whether the source requires regulatory review before use.
+    /// </summary>
+    public bool? RequiresReview { get; init; }
+
+    /// <summary>
+    /// Gets when the source was retrieved.
+    /// </summary>
+    public DateTimeOffset? RetrievedAt { get; init; }
 }

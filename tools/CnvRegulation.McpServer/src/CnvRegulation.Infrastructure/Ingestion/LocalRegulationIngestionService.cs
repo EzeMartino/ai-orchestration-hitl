@@ -99,6 +99,7 @@ public sealed class LocalRegulationIngestionService(
         Directory
             .EnumerateFiles(sourceDirectory)
             .Where(file => !file.EndsWith(".metadata.json", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !Path.GetFileName(file).StartsWith(".", StringComparison.Ordinal))
             .OrderBy(file => file, StringComparer.OrdinalIgnoreCase);
 
     private static string GetMetadataFilePath(string sourceFile)

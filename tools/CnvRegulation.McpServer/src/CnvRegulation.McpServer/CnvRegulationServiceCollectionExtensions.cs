@@ -1,5 +1,6 @@
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Repositories;
@@ -34,6 +35,7 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton(new HttpClient());
         services.AddSingleton<ISourceDiscoveryService, CuratedSourceDiscoveryService>();
         services.AddSingleton<ISourceDownloadService, ManifestSourceDownloadService>();
+        services.AddSingleton<ISourceInspectionService, SourceInspectionService>();
         services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();
         services.AddSingleton<IRegulationSearchService, InMemoryRegulationSearchService>();
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();

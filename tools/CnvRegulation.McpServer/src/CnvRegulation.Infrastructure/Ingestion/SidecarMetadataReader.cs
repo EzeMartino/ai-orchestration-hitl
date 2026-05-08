@@ -52,6 +52,7 @@ public sealed class SidecarMetadataReader
             EffectiveDate = metadata.EffectiveDate,
             Url = metadata.Url!.Trim(),
             Status = metadata.Status!.Trim(),
+            RequiresReview = metadata.RequiresReview == true,
             Text = text
         };
     }

@@ -37,6 +37,32 @@ public sealed class LegalStructureRegulationChunkerTests
         chunks[2].Metadata["article"].Should().Be("Artículo 3");
     }
 
+    [Fact]
+    public async Task Chunker_ShouldDetectInfolegArticleAbbreviations()
+    {
+        var chunker = new LegalStructureRegulationChunker(new LegalStructureDetector());
+        var document = new RegulationDocument
+        {
+            Id = "infoleg-sample",
+            Source = "Infoleg",
+            DocumentType = "Resolución General",
+            ResolutionNumber = "622/2013",
+            Title = "Infoleg Sample",
+            Url = "https://example.test/infoleg",
+            Status = "candidate",
+            Text = """
+                Artículo 1° — Aprobar en virtud de la presente norma.
+                Art. 2° — Derogar las normas anteriores.
+                Art. 3° — Publíquese.
+                """
+        };
+
+        var chunks = await chunker.ChunkAsync(document, CancellationToken.None);
+
+        chunks.Should().HaveCount(3);
+        chunks.Select(chunk => chunk.Article).Should().ContainInOrder("Artículo 1", "Artículo 2", "Artículo 3");
+    }
+
     public static RegulationDocument CreateDocument() =>
         new()
         {

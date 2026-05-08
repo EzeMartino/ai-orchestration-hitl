@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock data only.
+MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, and source inspection diagnostics.
 
 Do not use for real regulatory decisions.
 
@@ -70,6 +70,16 @@ dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory da
 
 During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks in memory for citation and search.
 
+## Inspect downloaded sources
+
+Run local parsing and chunking diagnostics without starting the MCP server:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-sources --source-directory data/sources
+```
+
+The report includes per-source metadata, extracted text length, chunk count, detected legal structure markers, first detected articles, and warnings such as candidate source, requires review, unsupported file type, or missing article boundaries.
+
 ## Test
 
 ```powershell
@@ -80,26 +90,27 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory repository, local ingestion, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
-- `src/CnvRegulation.McpServer`: stdio MCP host and tool definitions.
-- `tests`: xUnit coverage for mock services, contracts, and MCP tool registration.
+- `src/CnvRegulation.Infrastructure`: in-memory repository, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
+- `tests`: xUnit coverage for mock services, contracts, diagnostics, and MCP tool registration.
 
 ## Chunking MVP
 
 The current chunker is intentionally simple and local-only. It detects article boundaries like:
 
 ```text
-ARTÍCULO 1°.-
-Artículo 1
+ARTICULO 1°.-
+Articulo 1
+Art. 2°.-
 ARTICULO 99.-
 ```
 
 It also tracks current markers for:
 
 ```text
-TÍTULO I
-CAPÍTULO I
-SECCIÓN I
+TITULO I
+CAPITULO I
+SECCION I
 ```
 
 When chunks exist, `search_cnv_regulation` returns chunk-level results first, including article-level citations. `get_cnv_article` also checks ingested chunks before using mock fallback data.

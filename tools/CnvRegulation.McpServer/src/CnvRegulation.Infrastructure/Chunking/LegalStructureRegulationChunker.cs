@@ -130,6 +130,7 @@ public class LegalStructureRegulationChunker(LegalStructureDetector structureDet
             ["documentType"] = document.DocumentType,
             ["url"] = document.Url,
             ["status"] = document.Status,
+            ["requiresReview"] = document.RequiresReview.ToString(),
             ["chunkIndex"] = chunkIndex.ToString()
         };
 

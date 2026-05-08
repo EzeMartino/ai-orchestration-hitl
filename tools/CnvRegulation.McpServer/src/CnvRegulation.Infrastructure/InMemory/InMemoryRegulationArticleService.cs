@@ -51,7 +51,7 @@ public sealed class InMemoryRegulationArticleService(
                     QuotedText = chunk.Text
                 },
                 Confidence = 0.92,
-                Warnings = [MockRegulationData.MockWarning]
+                Warnings = CreateSourceWarnings(document)
             };
         }
 
@@ -99,5 +99,22 @@ public sealed class InMemoryRegulationArticleService(
     {
         return string.IsNullOrWhiteSpace(expected)
             || string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> CreateSourceWarnings(CnvRegulation.Domain.RegulationDocument document)
+    {
+        var warnings = new List<string>();
+
+        if (string.Equals(document.Status, "candidate", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add("candidate source");
+        }
+
+        if (document.RequiresReview)
+        {
+            warnings.Add("requires review");
+        }
+
+        return warnings.Count == 0 ? [] : warnings;
     }
 }

@@ -20,11 +20,11 @@ public sealed class LegalStructureDetector
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ArticleRegex = new(
-        @"^\s*ART[\u00cdI]CULO\s+(?<number>\d+[\u00b0\u00ba]?)\s*[\.\-\u2013\u2014:]?",
+        @"^\s*(ART[\u00cdI]CULO|Art[\u00ed\u00cd]culo|Articulo|Art\.)\s+(?<number>\d+[\u00b0\u00ba]?)\s*[\.\-\u2013\u2014:]?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ArticleNumberRegex = new(
-        @"(?:ART[\u00cdI]CULO)?\s*(?<number>\d+[\u00b0\u00ba]?)",
+        @"(?:ART[\u00cdI]CULO|Art[\u00ed\u00cd]culo|Articulo|Art\.)?\s*(?<number>\d+[\u00b0\u00ba]?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
