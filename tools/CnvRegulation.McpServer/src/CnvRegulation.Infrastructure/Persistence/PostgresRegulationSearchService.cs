@@ -1,5 +1,6 @@
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
+using CnvRegulation.Application.Search;
 using CnvRegulation.Domain;
 using CnvRegulation.Infrastructure.InMemory;
 using Dapper;
@@ -10,7 +11,8 @@ namespace CnvRegulation.Infrastructure.Persistence;
 /// PostgreSQL full-text implementation for regulation search.
 /// </summary>
 public sealed class PostgresRegulationSearchService(
-    RegulationDbConnectionFactory connectionFactory) : IRegulationSearchService
+    RegulationDbConnectionFactory connectionFactory,
+    IRegulationQueryExpander queryExpander) : IRegulationSearchService
 {
     /// <inheritdoc />
     public async Task<SearchRegulationResponse> SearchAsync(
@@ -21,8 +23,9 @@ public sealed class PostgresRegulationSearchService(
 
         var query = string.IsNullOrWhiteSpace(request.Query) ? string.Empty : request.Query.Trim();
         var limit = request.Limit <= 0 ? 5 : Math.Min(request.Limit, 25);
+        var expansion = queryExpander.Expand(query);
 
-        if (string.IsNullOrWhiteSpace(query))
+        if (expansion.SearchQueries.Count == 0)
         {
             return new SearchRegulationResponse
             {
@@ -36,26 +39,35 @@ public sealed class PostgresRegulationSearchService(
             .OpenConnectionAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var parameters = CreateSearchParameters(request, query, limit);
-        var chunkRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
-            ChunkSearchSql,
-            parameters,
-            cancellationToken: cancellationToken)).ConfigureAwait(false);
-
-        var results = chunkRows
-            .Select(MapSearchResult)
-            .ToArray();
-
-        if (results.Length == 0)
+        var chunkMatches = new List<QuerySearchResult>();
+        foreach (var searchQuery in expansion.SearchQueries)
         {
-            var documentRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
-                DocumentSearchSql,
+            var parameters = CreateSearchParameters(request, searchQuery, limit);
+            var chunkRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
+                ChunkSearchSql,
                 parameters,
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-            results = documentRows
-                .Select(MapSearchResult)
-                .ToArray();
+            chunkMatches.AddRange(chunkRows.Select(row => new QuerySearchResult(MapSearchResult(row), searchQuery)));
+        }
+
+        var results = MergeSearchResults(chunkMatches, limit);
+
+        if (results.Length == 0)
+        {
+            var documentMatches = new List<QuerySearchResult>();
+            foreach (var searchQuery in expansion.SearchQueries)
+            {
+                var parameters = CreateSearchParameters(request, searchQuery, limit);
+                var documentRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
+                    DocumentSearchSql,
+                    parameters,
+                    cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+                documentMatches.AddRange(documentRows.Select(row => new QuerySearchResult(MapSearchResult(row), searchQuery)));
+            }
+
+            results = MergeSearchResults(documentMatches, limit);
         }
 
         var filteredMocks = results.Length == 0
@@ -69,7 +81,7 @@ public sealed class PostgresRegulationSearchService(
         {
             Query = query,
             Results = results.Concat(filteredMocks).Take(limit).ToArray(),
-            Warnings = results.Length == 0 ? [MockRegulationData.MockWarning] : []
+            Warnings = CreateWarnings(expansion, includeMockWarning: results.Length == 0)
         };
     }
 
@@ -104,11 +116,11 @@ public sealed class PostgresRegulationSearchService(
             d.url AS Url,
             ts_rank(
                 to_tsvector('spanish', coalesce(c.text, '')),
-                plainto_tsquery('spanish', @Query)
+                websearch_to_tsquery('spanish', @Query)
             ) AS Score
         FROM regulation_chunks c
         JOIN regulation_documents d ON d.id = c.document_id
-        WHERE to_tsvector('spanish', coalesce(c.text, '')) @@ plainto_tsquery('spanish', @Query)
+        WHERE to_tsvector('spanish', coalesce(c.text, '')) @@ websearch_to_tsquery('spanish', @Query)
         {FilterSql}
         ORDER BY Score DESC, c.chunk_index ASC
         LIMIT @Limit;
@@ -131,10 +143,10 @@ public sealed class PostgresRegulationSearchService(
             d.url AS Url,
             ts_rank(
                 to_tsvector('spanish', coalesce(d.text, '')),
-                plainto_tsquery('spanish', @Query)
+                websearch_to_tsquery('spanish', @Query)
             ) AS Score
         FROM regulation_documents d
-        WHERE to_tsvector('spanish', coalesce(d.text, '')) @@ plainto_tsquery('spanish', @Query)
+        WHERE to_tsvector('spanish', coalesce(d.text, '')) @@ websearch_to_tsquery('spanish', @Query)
         {FilterSql}
         ORDER BY Score DESC, d.id ASC
         LIMIT @Limit;
@@ -193,6 +205,42 @@ public sealed class PostgresRegulationSearchService(
         };
     }
 
+    private static RegulationSearchResult[] MergeSearchResults(
+        IReadOnlyList<QuerySearchResult> matches,
+        int limit) =>
+        matches
+            .GroupBy(match => match.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var best = group
+                    .OrderByDescending(match => match.Result.Score)
+                    .First()
+                    .Result;
+                var score = group.Max(match => match.Result.Score) + ((group.Count() - 1) * 0.05);
+
+                return CopyWithScore(best, score);
+            })
+            .OrderByDescending(result => result.Score)
+            .ThenBy(result => result.ChunkId, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToArray();
+
+    private static RegulationSearchResult CopyWithScore(RegulationSearchResult result, double score) =>
+        new()
+        {
+            DocumentId = result.DocumentId,
+            ChunkId = result.ChunkId,
+            Title = result.Title,
+            Chapter = result.Chapter,
+            Section = result.Section,
+            Article = result.Article,
+            Source = result.Source,
+            Url = result.Url,
+            Snippet = result.Snippet,
+            Score = score,
+            Citations = result.Citations
+        };
+
     private static bool MatchesMockFilters(RegulationSearchResult result, SearchRegulationRequest request)
     {
         var citation = result.Citations.FirstOrDefault();
@@ -225,6 +273,25 @@ public sealed class PostgresRegulationSearchService(
         return text.Length <= maxLength ? text : $"{text[..maxLength]}...";
     }
 
+    private static IReadOnlyList<string> CreateWarnings(
+        RegulationQueryExpansion expansion,
+        bool includeMockWarning)
+    {
+        var warnings = new List<string>();
+        if (includeMockWarning)
+        {
+            warnings.Add(MockRegulationData.MockWarning);
+        }
+
+        if (expansion.ExpandedTerms.Count > 0)
+        {
+            warnings.Add($"Query expansion applied. Expanded terms: {string.Join("; ", expansion.ExpandedTerms)}");
+            warnings.Add($"Expanded search queries: {string.Join(" | ", expansion.SearchQueries)}");
+        }
+
+        return warnings;
+    }
+
     private sealed class SearchRow
     {
         public required string ChunkId { get; init; }
@@ -253,4 +320,6 @@ public sealed class PostgresRegulationSearchService(
 
         public double Score { get; init; }
     }
+
+    private sealed record QuerySearchResult(RegulationSearchResult Result, string SearchQuery);
 }

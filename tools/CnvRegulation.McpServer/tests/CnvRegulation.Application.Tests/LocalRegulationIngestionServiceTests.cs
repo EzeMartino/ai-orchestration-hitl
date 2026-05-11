@@ -4,6 +4,7 @@ using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
+using CnvRegulation.Infrastructure.Search;
 using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
@@ -203,7 +204,7 @@ public sealed class LocalRegulationIngestionServiceTests
         await ingestionService.IngestAsync(
             new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
             CancellationToken.None);
-        var searchService = new InMemoryRegulationSearchService(repository, repository);
+        var searchService = new InMemoryRegulationSearchService(repository, repository, CreateQueryExpander());
 
         var response = await searchService.SearchAsync(
             new SearchRegulationRequest
@@ -235,6 +236,9 @@ public sealed class LocalRegulationIngestionServiceTests
             new PdfPigTextExtractor(),
             new PdfExtractedTextNormalizer(),
             new SidecarMetadataReader());
+
+    private static StaticRegulationQueryExpander CreateQueryExpander() =>
+        new(new RegulationAliasesOptions());
 
     private static string CreateMetadataJson(string id, string title) =>
         $$"""

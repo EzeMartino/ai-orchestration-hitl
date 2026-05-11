@@ -5,6 +5,7 @@ using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Persistence;
+using CnvRegulation.Infrastructure.Search;
 using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
@@ -91,7 +92,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
 
         await repository.SaveAsync(document, CancellationToken.None);
         await repository.ReplaceForDocumentAsync(document.Id, chunks, CancellationToken.None);
-        var searchService = new InMemoryRegulationSearchService(repository, repository);
+        var searchService = new InMemoryRegulationSearchService(repository, repository, CreateQueryExpander());
 
         var uniqueQuery = $"unique chunk search text {document.Id}";
         var response = await searchService.SearchAsync(
@@ -232,6 +233,66 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
     }
 
     [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldFindAlycResults_WhenQueryUsesAlias()
+    {
+        var services = await CreateSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var chunk = CreateAliasChunk(document.Id, "alias-1", "Obligaciones del agente de liquidación y compensación.");
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [chunk], CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = "ALyC obligaciones", Limit = 5 },
+            CancellationToken.None);
+
+        response.Query.Should().Be("ALyC obligaciones");
+        response.Results.Should().ContainSingle(result => result.ChunkId == chunk.Id);
+        response.Warnings.Should().Contain(warning => warning.Contains("Query expansion applied", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldMergeDuplicateChunksFromExpandedQueries()
+    {
+        var services = await CreateSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var chunk = CreateAliasChunk(
+            document.Id,
+            "alias-duplicate",
+            "ALyC obligaciones del agente de liquidación y compensación.");
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [chunk], CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = "ALyC obligaciones", Limit = 5 },
+            CancellationToken.None);
+
+        response.Results.Count(result => result.ChunkId == chunk.Id).Should().Be(1);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldPreserveCitationsAfterExpansion()
+    {
+        var services = await CreateSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var chunk = CreateAliasChunk(document.Id, "alias-citation", "Obligaciones del agente de liquidación y compensación.");
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [chunk], CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = "ALyC obligaciones", Limit = 5 },
+            CancellationToken.None);
+
+        var result = response.Results.Should().ContainSingle(result => result.ChunkId == chunk.Id).Which;
+        result.Citations.Should().ContainSingle();
+        result.Citations[0].Source.Should().Be("CNV");
+        result.Citations[0].ResolutionNumber.Should().Be("622/2013");
+        result.Citations[0].Article.Should().Be("Articulo 200");
+    }
+
+    [PostgresIntegrationFact]
     public async Task PostgresIngest_ShouldPersistPdfDocumentAndChunks()
     {
         using var testDirectory = TempDirectory.Create();
@@ -259,7 +320,8 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         var savedDocument = await repository.GetByIdAsync(documentId, CancellationToken.None);
         var savedChunks = await repository.ListByDocumentIdAsync(documentId, CancellationToken.None);
         var searchService = new PostgresRegulationSearchService(new RegulationDbConnectionFactory(
-            RegulationDbOptions.Create("Postgres", Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"))));
+            RegulationDbOptions.Create("Postgres", Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"))),
+            CreateQueryExpander());
         var search = await searchService.SearchAsync(
             new SearchRegulationRequest { Query = "prueba PDF", Limit = 5 },
             CancellationToken.None);
@@ -296,7 +358,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
 
         return (
             new PostgresRegulationRepository(connectionFactory),
-            new PostgresRegulationSearchService(connectionFactory));
+            new PostgresRegulationSearchService(connectionFactory, CreateQueryExpander()));
     }
 
     private static RegulationDocument CreateDocument()
@@ -417,8 +479,27 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         }
     ];
 
+    private static RegulationChunk CreateAliasChunk(string documentId, string id, string text) =>
+        new()
+        {
+            Id = $"{documentId}-{id}",
+            DocumentId = documentId,
+            Title = "Titulo Alias",
+            Chapter = "Capitulo Alias",
+            Article = "Articulo 200",
+            ChunkIndex = 0,
+            Text = text,
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["article"] = "Articulo 200"
+            }
+        };
+
     private static string CreateSearchToken() =>
         $"zafiro{Guid.NewGuid():N}";
+
+    private static StaticRegulationQueryExpander CreateQueryExpander() =>
+        new(new RegulationAliasesOptions());
 
     private static string CreateMetadataJson(string id) =>
         $$"""

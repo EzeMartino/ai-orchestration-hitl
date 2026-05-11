@@ -1,6 +1,8 @@
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
+using CnvRegulation.Application.Search;
 using CnvRegulation.Domain;
+using CnvRegulation.Infrastructure.Search;
 
 namespace CnvRegulation.Infrastructure.InMemory;
 
@@ -9,7 +11,8 @@ namespace CnvRegulation.Infrastructure.InMemory;
 /// </summary>
 public sealed class InMemoryRegulationSearchService(
     IRegulationRepository repository,
-    IRegulationChunkRepository chunkRepository) : IRegulationSearchService
+    IRegulationChunkRepository chunkRepository,
+    IRegulationQueryExpander queryExpander) : IRegulationSearchService
 {
     /// <inheritdoc />
     public async Task<SearchRegulationResponse> SearchAsync(
@@ -21,6 +24,7 @@ public sealed class InMemoryRegulationSearchService(
 
         var limit = request.Limit <= 0 ? 5 : Math.Min(request.Limit, 25);
         var query = string.IsNullOrWhiteSpace(request.Query) ? string.Empty : request.Query.Trim();
+        var expansion = queryExpander.Expand(query);
 
         var documents = await repository.ListAsync(cancellationToken).ConfigureAwait(false);
         var chunks = await chunkRepository.ListChunksAsync(cancellationToken).ConfigureAwait(false);
@@ -32,12 +36,12 @@ public sealed class InMemoryRegulationSearchService(
         var chunkResults = chunks
             .Where(chunk => documentLookup.ContainsKey(chunk.DocumentId))
             .Select(chunk => new { Chunk = chunk, Document = documentLookup[chunk.DocumentId] })
-            .Where(item => MatchesChunk(item.Chunk, item.Document, query, request))
+            .Where(item => MatchesChunk(item.Chunk, item.Document, expansion, request))
             .Select(item => CreateSearchResult(item.Chunk, item.Document));
 
         var documentResults = documents
             .Where(document => !chunkDocumentIds.Contains(document.Id))
-            .Where(document => MatchesDocument(document, query, request))
+            .Where(document => MatchesDocument(document, expansion, request))
             .Select(CreateSearchResult);
 
         var mockResults = MockRegulationData.SearchResults
@@ -54,21 +58,28 @@ public sealed class InMemoryRegulationSearchService(
         {
             Query = query,
             Results = results,
-            Warnings = [MockRegulationData.MockWarning]
+            Warnings = CreateWarnings(expansion, includeMockWarning: true)
         };
     }
 
-    private static bool MatchesDocument(RegulationDocument document, string query, SearchRegulationRequest request)
+    private static bool MatchesDocument(
+        RegulationDocument document,
+        RegulationQueryExpansion expansion,
+        SearchRegulationRequest request)
     {
         return MatchesDocumentArea(document, request.Area)
-            && MatchesDocumentQuery(document, query)
+            && MatchesDocumentQuery(document, expansion)
             && MatchesDocumentFilters(document, request);
     }
 
-    private static bool MatchesChunk(RegulationChunk chunk, RegulationDocument document, string query, SearchRegulationRequest request)
+    private static bool MatchesChunk(
+        RegulationChunk chunk,
+        RegulationDocument document,
+        RegulationQueryExpansion expansion,
+        SearchRegulationRequest request)
     {
         return MatchesChunkArea(chunk, document, request.Area)
-            && MatchesChunkQuery(chunk, document, query)
+            && MatchesChunkQuery(chunk, document, expansion)
             && MatchesDocumentFilters(document, request);
     }
 
@@ -84,17 +95,21 @@ public sealed class InMemoryRegulationSearchService(
             || document.DocumentType.Contains(area, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool MatchesDocumentQuery(RegulationDocument document, string query)
+    private static bool MatchesDocumentQuery(RegulationDocument document, RegulationQueryExpansion expansion)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        if (expansion.SearchQueries.Count == 0)
         {
             return true;
         }
 
-        return document.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || document.Text.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || document.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || (document.ResolutionNumber?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+        var searchableText = string.Join(
+            ' ',
+            document.Title,
+            document.Text,
+            document.Id,
+            document.ResolutionNumber);
+
+        return expansion.SearchQueries.Any(searchQuery => MatchesTextQuery(searchableText, searchQuery));
     }
 
     private static bool MatchesChunkArea(RegulationChunk chunk, RegulationDocument document, string? area)
@@ -113,19 +128,26 @@ public sealed class InMemoryRegulationSearchService(
             || (chunk.Article?.Contains(area, StringComparison.OrdinalIgnoreCase) ?? false);
     }
 
-    private static bool MatchesChunkQuery(RegulationChunk chunk, RegulationDocument document, string query)
+    private static bool MatchesChunkQuery(
+        RegulationChunk chunk,
+        RegulationDocument document,
+        RegulationQueryExpansion expansion)
     {
-        if (string.IsNullOrWhiteSpace(query))
+        if (expansion.SearchQueries.Count == 0)
         {
             return true;
         }
 
-        return chunk.Text.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || chunk.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || document.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || document.Id.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || (chunk.Article?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
-            || (document.ResolutionNumber?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
+        var searchableText = string.Join(
+            ' ',
+            chunk.Text,
+            chunk.Id,
+            document.Title,
+            document.Id,
+            chunk.Article,
+            document.ResolutionNumber);
+
+        return expansion.SearchQueries.Any(searchQuery => MatchesTextQuery(searchableText, searchQuery));
     }
 
     private static bool MatchesArea(RegulationSearchResult result, string? area)
@@ -239,4 +261,51 @@ public sealed class InMemoryRegulationSearchService(
 
         return text.Length <= maxLength ? text : $"{text[..maxLength]}...";
     }
+
+    private static IReadOnlyList<string> CreateWarnings(
+        RegulationQueryExpansion expansion,
+        bool includeMockWarning)
+    {
+        var warnings = new List<string>();
+        if (includeMockWarning)
+        {
+            warnings.Add(MockRegulationData.MockWarning);
+        }
+
+        if (expansion.ExpandedTerms.Count > 0)
+        {
+            warnings.Add($"Query expansion applied. Expanded terms: {string.Join("; ", expansion.ExpandedTerms)}");
+            warnings.Add($"Expanded search queries: {string.Join(" | ", expansion.SearchQueries)}");
+        }
+
+        return warnings;
+    }
+
+    private static bool MatchesTextQuery(string text, string query)
+    {
+        var normalizedText = StaticRegulationQueryExpander.Normalize(text);
+        var normalizedQuery = StaticRegulationQueryExpander.Normalize(query);
+        if (normalizedQuery.Length == 0)
+        {
+            return true;
+        }
+
+        if (normalizedText.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var queryTerms = normalizedQuery
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length > 2)
+            .Where(term => !IsStopTerm(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return queryTerms.Length > 0
+            && queryTerms.All(term => normalizedText.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsStopTerm(string term) =>
+        term is "del" or "las" or "los" or "una" or "uno" or "para" or "con";
 }

@@ -7,6 +7,7 @@ using CnvRegulation.Infrastructure.Persistence;
 using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
 using CnvRegulation.Infrastructure.Sources;
+using CnvRegulation.Infrastructure.Search;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -69,6 +70,8 @@ public static class CnvRegulationServiceCollectionExtensions
 
         services.AddSingleton<LegalStructureDetector>();
         services.AddSingleton<IRegulationChunker, LegalStructureRegulationChunker>();
+        services.AddSingleton<RegulationAliasesOptions>();
+        services.AddSingleton<IRegulationQueryExpander, StaticRegulationQueryExpander>();
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
         services.AddSingleton<IPdfTextExtractor, PdfPigTextExtractor>();

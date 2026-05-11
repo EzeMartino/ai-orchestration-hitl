@@ -139,6 +139,20 @@ PostgreSQL ingestion upserts `regulation_documents`, then replaces chunks for ea
 
 PostgreSQL search uses full-text indexes over `regulation_chunks.text` and `regulation_documents.text`. Chunk matches are returned first with ranking and citations. If no chunks match, the search falls back to document-level matches.
 
+Search queries are normalized and expanded through a bounded alias dictionary before full-text search. The response preserves the original query in `query`; when expansion is applied, warnings include the expanded terms and search queries used. PostgreSQL executes each expanded query with `websearch_to_tsquery`, merges duplicate `chunkId` results, keeps the best score with a small multi-query bonus, and preserves citations.
+
+Initial aliases include:
+
+- `alyc`: agente/agentes de liquidacion y compensacion
+- `alac`: agente de liquidacion y compensacion
+- `fci`: fondo/fondos comunes de inversion
+- `cnv`: comision nacional de valores
+- `oferta publica`: oferta publica, regimen de oferta publica
+- `hecho relevante`: informacion relevante, hechos relevantes
+- `lavado`: prevencion de lavado, financiamiento del terrorismo, pld, uif
+- `idoneidad`: examen de idoneidad, idoneos, personal idoneo
+- `regimen informativo`: informacion periodica, deber de informar, informes
+
 `search_cnv_regulation` supports these optional filters:
 
 - `source`
@@ -166,8 +180,8 @@ dotnet test
 ## Project layout
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
-- `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, query expansion, and service interfaces.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, query alias expansion, local ingestion, diagnostics, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 

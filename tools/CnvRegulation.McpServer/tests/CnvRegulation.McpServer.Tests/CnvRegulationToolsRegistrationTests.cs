@@ -4,6 +4,7 @@ using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Persistence;
 using CnvRegulation.Infrastructure.Repositories;
+using CnvRegulation.Infrastructure.Search;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,6 +50,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         provider.GetRequiredService<ISourceDiscoveryService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceDownloadService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceInspectionService>().Should().NotBeNull();
+        provider.GetRequiredService<IRegulationQueryExpander>().Should().BeOfType<StaticRegulationQueryExpander>();
         provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<InMemoryRegulationSearchService>();
         provider.GetRequiredService<IRegulationDocumentService>().Should().BeOfType<InMemoryRegulationDocumentService>();
         provider.GetRequiredService<IRegulationArticleService>().Should().BeOfType<InMemoryRegulationArticleService>();
@@ -81,7 +83,7 @@ public sealed class CnvRegulationToolsRegistrationTests
     public async Task SearchCnvRegulationAsync_ShouldUseApplicationService()
     {
         var repository = new InMemoryRegulationRepository();
-        var service = new InMemoryRegulationSearchService(repository, repository);
+        var service = new InMemoryRegulationSearchService(repository, repository, CreateQueryExpander());
 
         var response = await CnvRegulationTools.SearchCnvRegulationAsync(
             service,
@@ -94,4 +96,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         response.Results.Should().NotBeEmpty();
         response.Warnings.Should().Contain(warning => warning.Contains("Mock data", StringComparison.OrdinalIgnoreCase));
     }
+
+    private static StaticRegulationQueryExpander CreateQueryExpander() =>
+        new(new RegulationAliasesOptions());
 }
