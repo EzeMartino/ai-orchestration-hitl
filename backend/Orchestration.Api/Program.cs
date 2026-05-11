@@ -10,6 +10,7 @@ using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
+using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Persistence;
 
 
@@ -26,20 +27,15 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublisher>();
 builder.Services.AddScoped<AnalysisOrchestratorService>();
 
+// Planner agent configuration
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
+// Data agent and plugins configuration
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
 
-builder.Services.AddScoped<LegalCompliancePlugin>();
-builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
-builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
-
-builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
-builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
-    provider.GetRequiredService<OrchestrationDbContext>());
-
+// Python environment configuration for CSnakes
 var defaultPythonHome = Path.GetFullPath(
     Path.Combine(builder.Environment.ContentRootPath, "..", "..", "python-agents", "data_agent"));
 var pythonHome = ResolvePythonHome(
@@ -55,6 +51,21 @@ builder.Services
     .WithPython()
     .WithHome(pythonHome)
     .FromRedistributable();
+
+// Legal agent and regulatory knowledge source configuration
+builder.Services.Configure<CnvRegulationMcpOptions>(
+    builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName)
+);
+builder.Services.AddScoped<LegalCompliancePlugin>();
+builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
+builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
+builder.Services.AddScoped<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+
+// Persistence configuration
+builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
+builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
+    provider.GetRequiredService<OrchestrationDbContext>());
+
 
 builder.Services.AddCors(options =>
 {
