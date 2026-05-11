@@ -72,12 +72,14 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
         services.AddSingleton<IPdfTextExtractor, PdfPigTextExtractor>();
+        services.AddSingleton<ITextNormalizer, PdfExtractedTextNormalizer>();
         services.AddSingleton<SidecarMetadataReader>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient());
         services.AddSingleton<ISourceDiscoveryService, CuratedSourceDiscoveryService>();
         services.AddSingleton<ISourceDownloadService, ManifestSourceDownloadService>();
         services.AddSingleton<ISourceInspectionService, SourceInspectionService>();
+        services.AddSingleton<IChunkQualityInspectionService, ChunkQualityInspectionService>();
         services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();
         services.AddSingleton<IRegulationArticleService, InMemoryRegulationArticleService>();

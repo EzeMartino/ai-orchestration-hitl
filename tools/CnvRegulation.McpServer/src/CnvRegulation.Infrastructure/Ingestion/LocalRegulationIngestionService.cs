@@ -15,6 +15,7 @@ public sealed class LocalRegulationIngestionService(
     PlainTextRegulationParser plainTextParser,
     HtmlRegulationParser htmlParser,
     IPdfTextExtractor pdfTextExtractor,
+    ITextNormalizer pdfTextNormalizer,
     SidecarMetadataReader metadataReader) : IRegulationIngestionService
 {
     private static readonly string[] SupportedExtensions = [".txt", ".html", ".htm", ".pdf"];
@@ -138,7 +139,7 @@ public sealed class LocalRegulationIngestionService(
 
             return new ParsedRegulationSource
             {
-                Text = extraction.Text,
+                Text = pdfTextNormalizer.Normalize(extraction.Text),
                 Metadata = metadata,
                 Warnings = extraction.Warnings,
                 FileType = "PDF",

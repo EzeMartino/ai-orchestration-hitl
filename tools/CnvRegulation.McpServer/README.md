@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
+MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, PDF text normalization, source/chunk quality diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
 
 Do not use for real regulatory decisions.
 
@@ -70,7 +70,7 @@ You can pass a custom source directory:
 dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources
 ```
 
-During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search. PDF documents preserve extraction metadata such as `sourceFile`, `fileType`, `extractionMethod`, and `pageCount`.
+During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search. PDF text is normalized before chunking to reduce common extraction artifacts such as excessive whitespace, numeric page-only lines, simple hyphenated line breaks, repeated header/footer lines, and unaccented legal markers. PDF documents preserve extraction metadata such as `sourceFile`, `fileType`, `extractionMethod`, and `pageCount`.
 
 ## Inspect downloaded sources
 
@@ -81,6 +81,33 @@ dotnet run --project src/CnvRegulation.McpServer -- inspect-sources --source-dir
 ```
 
 The report includes per-source metadata, file type, PDF page count when available, extracted text length, chunk count, detected legal structure markers, first detected articles, and warnings such as candidate source, requires review, unsupported file type, or missing article boundaries.
+
+## Inspect chunk quality
+
+Run chunk quality diagnostics over locally ingested sources:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-chunks --source-directory data/sources
+```
+
+For PostgreSQL, inspect chunks already persisted in the database:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-chunks --storage postgres
+```
+
+If `--source-directory` is also passed with PostgreSQL storage, sources are ingested first and then inspected.
+
+The report includes:
+
+- empty chunks
+- very short chunks
+- very long chunks
+- chunks without article identifiers
+- possible duplicate chunks
+- suspicious repeated header/footer pollution
+- average and median chunk length
+- top quality warnings
 
 ## PostgreSQL persistence
 
@@ -140,7 +167,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, text/HTML/PDF parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 

@@ -105,7 +105,7 @@ public sealed class LocalRegulationIngestionServiceTests
 
         var document = await repository.GetByIdAsync("cnv-toc-2013-sample", CancellationToken.None);
         document.Should().NotBeNull();
-        document!.Text.Should().Contain("ARTICULO 1");
+        document!.Text.Should().Contain("ARTÍCULO 1");
         document.Metadata.Should().Contain("fileType", "PDF");
         document.Metadata.Should().Contain("extractionMethod", "PdfPig");
         document.Metadata.Should().Contain("pageCount", "1");
@@ -233,6 +233,7 @@ public sealed class LocalRegulationIngestionServiceTests
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
+            new PdfExtractedTextNormalizer(),
             new SidecarMetadataReader());
 
     private static string CreateMetadataJson(string id, string title) =>

@@ -119,6 +119,7 @@ public sealed class SourceDiscoveryDownloadServiceTests
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
+            new PdfExtractedTextNormalizer(),
             new SidecarMetadataReader());
 
         var response = await service.IngestAsync(

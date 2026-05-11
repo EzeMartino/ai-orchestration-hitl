@@ -92,6 +92,30 @@ if (args.Length > 0 && string.Equals(args[0], "inspect-sources", StringCompariso
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "inspect-chunks", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+
+    if (ShouldIngestBeforeChunkInspection(args))
+    {
+        var sourceDirectory = ResolveSourceDirectory(args);
+        var ingestionService = host.Services.GetRequiredService<IRegulationIngestionService>();
+        await ingestionService.IngestAsync(
+            new IngestRegulationSourceRequest
+            {
+                SourceDirectory = sourceDirectory
+            },
+            CancellationToken.None);
+    }
+
+    var inspectionService = host.Services.GetRequiredService<IChunkQualityInspectionService>();
+    var response = await inspectionService.InspectAsync(new InspectChunksRequest(), CancellationToken.None);
+
+    Console.WriteLine(ChunkQualityReportFormatter.Format(response));
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "ingest", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -155,6 +179,13 @@ static string? ResolveStorageProvider(string[] args)
     return GetOptionValue(args, "--storage");
 }
 
+static bool ShouldIngestBeforeChunkInspection(string[] args)
+{
+    var storageProvider = ResolveStorageProvider(args);
+    return !string.Equals(storageProvider, "Postgres", StringComparison.OrdinalIgnoreCase)
+        || HasOption(args, "--source-directory");
+}
+
 static string ResolveManifestPath(string[] args)
 {
     var explicitManifestPath = GetOptionValue(args, "--manifest");
@@ -203,6 +234,9 @@ static string? GetOptionValue(string[] args, string optionName)
 
     return optionIndex >= 0 && args.Length > optionIndex + 1 ? args[optionIndex + 1] : null;
 }
+
+static bool HasOption(string[] args, string optionName) =>
+    args.Any(argument => string.Equals(argument, optionName, StringComparison.OrdinalIgnoreCase));
 
 static IEnumerable<string> GetPositionalArguments(string[] args)
 {

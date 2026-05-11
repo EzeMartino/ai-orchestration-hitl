@@ -248,6 +248,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
+            new PdfExtractedTextNormalizer(),
             new SidecarMetadataReader());
 
         var response = await ingestionService.IngestAsync(

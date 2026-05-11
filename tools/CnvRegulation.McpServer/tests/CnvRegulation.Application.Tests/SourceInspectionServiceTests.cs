@@ -123,6 +123,7 @@ public sealed class SourceInspectionServiceTests
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
+            new PdfExtractedTextNormalizer(),
             new SidecarMetadataReader(),
             new LegalStructureRegulationChunker(new LegalStructureDetector()));
 

@@ -13,6 +13,7 @@ public sealed class SourceInspectionService(
     PlainTextRegulationParser plainTextParser,
     HtmlRegulationParser htmlParser,
     IPdfTextExtractor pdfTextExtractor,
+    ITextNormalizer pdfTextNormalizer,
     SidecarMetadataReader metadataReader,
     IRegulationChunker chunker) : ISourceInspectionService
 {
@@ -293,7 +294,7 @@ public sealed class SourceInspectionService(
 
             return new ParsedRegulationSource
             {
-                Text = extraction.Text,
+                Text = pdfTextNormalizer.Normalize(extraction.Text),
                 Metadata = CreateSourceMetadata("PDF", fileName),
                 Warnings = extraction.Warnings,
                 FileType = "PDF",
