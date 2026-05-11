@@ -2,6 +2,7 @@ using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
 using FluentAssertions;
 
@@ -81,6 +82,57 @@ public sealed class LocalRegulationIngestionServiceTests
         document.Should().NotBeNull();
         document!.Text.Should().Contain("Mock HTML regulatory text");
         document.Text.Should().NotContain("<p>");
+    }
+
+    [Fact]
+    public async Task IngestAsync_ShouldProcessPdfWithMetadata()
+    {
+        using var testDirectory = TempSourceDirectory.Create();
+        var pdfPath = System.IO.Path.Combine(testDirectory.Path, "cnv-toc-2013.sample.pdf");
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(pdfPath);
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(testDirectory.Path, "cnv-toc-2013.sample.metadata.json"),
+            CreateMetadataJson("cnv-toc-2013-sample", "Normas CNV N.T. 2013 - PDF Sample"));
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+
+        var response = await service.IngestAsync(
+            new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
+            CancellationToken.None);
+
+        response.DocumentsIngested.Should().Be(1);
+        response.DocumentsSkipped.Should().Be(0);
+
+        var document = await repository.GetByIdAsync("cnv-toc-2013-sample", CancellationToken.None);
+        document.Should().NotBeNull();
+        document!.Text.Should().Contain("ARTICULO 1");
+        document.Metadata.Should().Contain("fileType", "PDF");
+        document.Metadata.Should().Contain("extractionMethod", "PdfPig");
+        document.Metadata.Should().Contain("pageCount", "1");
+    }
+
+    [Fact]
+    public async Task IngestAsync_ShouldCreateChunksFromPdfText()
+    {
+        using var testDirectory = TempSourceDirectory.Create();
+        var pdfPath = System.IO.Path.Combine(testDirectory.Path, "cnv-toc-2013.sample.pdf");
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(pdfPath);
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(testDirectory.Path, "cnv-toc-2013.sample.metadata.json"),
+            CreateMetadataJson("cnv-toc-2013-sample", "Normas CNV N.T. 2013 - PDF Sample"));
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+
+        await service.IngestAsync(
+            new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
+            CancellationToken.None);
+
+        var chunks = await repository.ListByDocumentIdAsync("cnv-toc-2013-sample", CancellationToken.None);
+
+        chunks.Should().HaveCount(2);
+        chunks[0].Article.Should().Be("Artículo 1");
+        chunks[0].Metadata.Should().Contain("extractionMethod", "PdfPig");
+        chunks[1].Article.Should().Be("Artículo 2");
     }
 
     [Fact]
@@ -180,6 +232,7 @@ public sealed class LocalRegulationIngestionServiceTests
             new LegalStructureRegulationChunker(new LegalStructureDetector()),
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
+            new PdfPigTextExtractor(),
             new SidecarMetadataReader());
 
     private static string CreateMetadataJson(string id, string title) =>

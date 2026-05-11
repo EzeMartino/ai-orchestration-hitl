@@ -32,6 +32,12 @@ public static class SourceInspectionReportFormatter
             AppendOptionalLine(builder, "Source", document.Source);
             AppendOptionalLine(builder, "Title", document.Title);
             AppendOptionalLine(builder, "Document type", document.DocumentType);
+            AppendOptionalLine(builder, "File type", document.FileType);
+            if (document.PageCount is not null)
+            {
+                builder.AppendLine($"Pages: {document.PageCount}");
+            }
+
             builder.AppendLine($"Extracted text length: {document.ExtractedTextLength}");
             builder.AppendLine($"Chunks: {document.ChunkCount}");
             builder.AppendLine($"Titles detected: {document.DetectedTitles.Count}");

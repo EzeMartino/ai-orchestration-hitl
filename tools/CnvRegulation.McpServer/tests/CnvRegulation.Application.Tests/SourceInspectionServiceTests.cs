@@ -2,6 +2,7 @@ using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
+using CnvRegulation.Infrastructure.Parsing;
 using FluentAssertions;
 
 namespace CnvRegulation.Application.Tests;
@@ -42,7 +43,7 @@ public sealed class SourceInspectionServiceTests
                 "CNV Marco Regulatorio",
                 "candidate",
                 requiresReview: true));
-        await File.WriteAllBytesAsync(Path.Combine(testDirectory.Path, "cnv-toc-2013.pdf"), [0x25, 0x50, 0x44, 0x46]);
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(Path.Combine(testDirectory.Path, "cnv-toc-2013.pdf"));
         await File.WriteAllTextAsync(
             Path.Combine(testDirectory.Path, "cnv-toc-2013.metadata.json"),
             CreateMetadataJson(
@@ -59,9 +60,9 @@ public sealed class SourceInspectionServiceTests
             CancellationToken.None);
 
         response.DocumentsInspected.Should().Be(3);
-        response.DocumentsWithChunks.Should().Be(1);
+        response.DocumentsWithChunks.Should().Be(2);
         response.DocumentsWithoutChunks.Should().Be(1);
-        response.UnsupportedFiles.Should().Be(1);
+        response.UnsupportedFiles.Should().Be(0);
 
         var infoleg = response.Documents.Single(document => document.FileName == "infoleg-rg-622-2013-texact.html");
         infoleg.Source.Should().Be("Infoleg");
@@ -80,14 +81,48 @@ public sealed class SourceInspectionServiceTests
         marco.Warnings.Should().Contain("no article boundaries detected");
 
         var pdf = response.Documents.Single(document => document.FileName == "cnv-toc-2013.pdf");
-        pdf.IsUnsupported.Should().BeTrue();
-        pdf.Warnings.Should().Contain(warning => warning.Contains("unsupported file type: .pdf", StringComparison.OrdinalIgnoreCase));
+        pdf.IsUnsupported.Should().BeFalse();
+        pdf.FileType.Should().Be("PDF");
+        pdf.PageCount.Should().Be(1);
+        pdf.ExtractedTextLength.Should().BeGreaterThan(0);
+        pdf.ChunkCount.Should().Be(2);
+        pdf.DetectedArticles.Should().ContainInOrder("Artículo 1", "Artículo 2");
+        pdf.Warnings.Should().Contain(["candidate source", "requires review"]);
+    }
+
+    [Fact]
+    public async Task InspectSources_ShouldReportPdfPagesAndExtractedTextLength()
+    {
+        using var testDirectory = TempDirectory.Create();
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(Path.Combine(testDirectory.Path, "sample.pdf"));
+        await File.WriteAllTextAsync(
+            Path.Combine(testDirectory.Path, "sample.metadata.json"),
+            CreateMetadataJson(
+                "sample-pdf",
+                "CNV",
+                "Texto Ordenado",
+                "Sample PDF",
+                "candidate",
+                requiresReview: true));
+        var service = CreateService();
+
+        var response = await service.InspectAsync(
+            new InspectSourcesRequest { SourceDirectory = testDirectory.Path },
+            CancellationToken.None);
+
+        var pdf = response.Documents.Should().ContainSingle().Which;
+        pdf.FileType.Should().Be("PDF");
+        pdf.PageCount.Should().Be(1);
+        pdf.ExtractedTextLength.Should().BeGreaterThan(0);
+        pdf.ChunkCount.Should().Be(2);
+        pdf.FirstArticles.Should().ContainInOrder("Artículo 1", "Artículo 2");
     }
 
     private static SourceInspectionService CreateService() =>
         new(
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
+            new PdfPigTextExtractor(),
             new SidecarMetadataReader(),
             new LegalStructureRegulationChunker(new LegalStructureDetector()));
 

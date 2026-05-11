@@ -134,6 +134,14 @@ public class LegalStructureRegulationChunker(LegalStructureDetector structureDet
             ["chunkIndex"] = chunkIndex.ToString()
         };
 
+        foreach (var item in document.Metadata)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Value))
+            {
+                metadata[item.Key] = item.Value;
+            }
+        }
+
         AddIfPresent(metadata, "resolutionNumber", document.ResolutionNumber);
         AddIfPresent(metadata, "publicationDate", document.PublicationDate?.ToString("yyyy-MM-dd"));
         AddIfPresent(metadata, "effectiveDate", document.EffectiveDate?.ToString("yyyy-MM-dd"));

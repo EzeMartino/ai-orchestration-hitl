@@ -4,6 +4,7 @@ using System.Text.Json;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Ingestion;
+using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
 using CnvRegulation.Infrastructure.Sources;
 using FluentAssertions;
@@ -93,10 +94,10 @@ public sealed class SourceDiscoveryDownloadServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_ShouldSkipUnsupportedPdfFile()
+    public async Task IngestAsync_ShouldProcessDownloadedPdfFile()
     {
         using var testDirectory = TempDirectory.Create();
-        await File.WriteAllBytesAsync(Path.Combine(testDirectory.Path, "cnv-toc-2013.pdf"), [0x25, 0x50, 0x44, 0x46]);
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(Path.Combine(testDirectory.Path, "cnv-toc-2013.pdf"));
         await File.WriteAllTextAsync(
             Path.Combine(testDirectory.Path, "cnv-toc-2013.metadata.json"),
             """
@@ -117,15 +118,20 @@ public sealed class SourceDiscoveryDownloadServiceTests
             new LegalStructureRegulationChunker(new LegalStructureDetector()),
             new PlainTextRegulationParser(),
             new HtmlRegulationParser(),
+            new PdfPigTextExtractor(),
             new SidecarMetadataReader());
 
         var response = await service.IngestAsync(
             new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
             CancellationToken.None);
 
-        response.DocumentsIngested.Should().Be(0);
-        response.DocumentsSkipped.Should().Be(1);
-        response.Warnings.Should().Contain(warning => warning.Contains("Skipped unsupported file type: .pdf", StringComparison.OrdinalIgnoreCase));
+        response.DocumentsIngested.Should().Be(1);
+        response.DocumentsSkipped.Should().Be(0);
+        response.Warnings.Should().BeEmpty();
+
+        var chunks = await repository.ListByDocumentIdAsync("cnv-toc-2013", CancellationToken.None);
+        chunks.Should().HaveCount(2);
+        chunks.Should().OnlyContain(chunk => chunk.Metadata.ContainsKey("extractionMethod"));
     }
 
     [Fact]

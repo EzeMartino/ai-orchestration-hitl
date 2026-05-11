@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
+MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, source inspection diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
 
 Do not use for real regulatory decisions.
 
@@ -24,7 +24,7 @@ dotnet run --project src/CnvRegulation.McpServer
 
 ## Ingest local sources
 
-Local ingestion reads `.txt`, `.html`, and `.htm` files from `data/sources`. Each source file must have a sidecar metadata file with the same base name and `.metadata.json` suffix.
+Local ingestion reads `.txt`, `.html`, `.htm`, and `.pdf` files from `data/sources`. Each source file must have a sidecar metadata file with the same base name and `.metadata.json` suffix.
 
 ## Discover and download sources
 
@@ -54,7 +54,7 @@ data/sources/
 
 All discovered/downloaded sources are marked as `status=candidate` and `requiresReview=true`, because regulatory sources may be outdated, partial, modified, consultation-only, or not currently in force.
 
-PDF files can be downloaded as candidates, but ingestion skips them until a PDF parser is added.
+PDF files can be downloaded and ingested as candidate sources. PDF parsing extracts text only through PdfPig; it does not render pages or perform OCR.
 
 ## Ingest downloaded sources
 
@@ -70,7 +70,7 @@ You can pass a custom source directory:
 dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources
 ```
 
-During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search.
+During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search. PDF documents preserve extraction metadata such as `sourceFile`, `fileType`, `extractionMethod`, and `pageCount`.
 
 ## Inspect downloaded sources
 
@@ -80,7 +80,7 @@ Run local parsing and chunking diagnostics without starting the MCP server:
 dotnet run --project src/CnvRegulation.McpServer -- inspect-sources --source-directory data/sources
 ```
 
-The report includes per-source metadata, extracted text length, chunk count, detected legal structure markers, first detected articles, and warnings such as candidate source, requires review, unsupported file type, or missing article boundaries.
+The report includes per-source metadata, file type, PDF page count when available, extracted text length, chunk count, detected legal structure markers, first detected articles, and warnings such as candidate source, requires review, unsupported file type, or missing article boundaries.
 
 ## PostgreSQL persistence
 
@@ -128,7 +128,7 @@ $env:CNV_REGULATION_DB_CONNECTION_STRING = "Host=localhost;Port=5432;Database=cn
 dotnet test
 ```
 
-This phase does not add pgvector, embeddings, PDF parsing, crawler/link-following, Semantic Kernel, or app integration.
+This phase does not add pgvector, embeddings, crawler/link-following, Semantic Kernel, or new app integration.
 
 ## Test
 
@@ -140,7 +140,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, local ingestion, diagnostics, text/HTML/PDF parsers, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 

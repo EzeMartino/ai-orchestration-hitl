@@ -1,6 +1,9 @@
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Domain;
+using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Persistence;
 using FluentAssertions;
 
@@ -228,6 +231,45 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         response.Results[0].Citations.Should().NotBeEmpty();
     }
 
+    [PostgresIntegrationFact]
+    public async Task PostgresIngest_ShouldPersistPdfDocumentAndChunks()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var documentId = $"test-pdf-{Guid.NewGuid():N}";
+        await PdfTestDocumentFactory.WriteSampleRegulationPdfAsync(Path.Combine(testDirectory.Path, "sample.pdf"));
+        await File.WriteAllTextAsync(
+            Path.Combine(testDirectory.Path, "sample.metadata.json"),
+            CreateMetadataJson(documentId));
+        var repository = await CreateRepositoryAsync();
+        var ingestionService = new LocalRegulationIngestionService(
+            repository,
+            repository,
+            new LegalStructureRegulationChunker(new LegalStructureDetector()),
+            new PlainTextRegulationParser(),
+            new HtmlRegulationParser(),
+            new PdfPigTextExtractor(),
+            new SidecarMetadataReader());
+
+        var response = await ingestionService.IngestAsync(
+            new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
+            CancellationToken.None);
+
+        response.DocumentsIngested.Should().Be(1);
+        var savedDocument = await repository.GetByIdAsync(documentId, CancellationToken.None);
+        var savedChunks = await repository.ListByDocumentIdAsync(documentId, CancellationToken.None);
+        var searchService = new PostgresRegulationSearchService(new RegulationDbConnectionFactory(
+            RegulationDbOptions.Create("Postgres", Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"))));
+        var search = await searchService.SearchAsync(
+            new SearchRegulationRequest { Query = "prueba PDF", Limit = 5 },
+            CancellationToken.None);
+
+        savedDocument.Should().NotBeNull();
+        savedDocument!.Metadata.Should().Contain("extractionMethod", "PdfPig");
+        savedChunks.Should().HaveCount(2);
+        savedChunks.Should().OnlyContain(chunk => chunk.Metadata.ContainsKey("extractionMethod"));
+        search.Results.Should().Contain(result => result.DocumentId == documentId);
+    }
+
     private static async Task<PostgresRegulationRepository> CreateRepositoryAsync()
     {
         var options = RegulationDbOptions.Create(
@@ -376,6 +418,48 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
 
     private static string CreateSearchToken() =>
         $"zafiro{Guid.NewGuid():N}";
+
+    private static string CreateMetadataJson(string id) =>
+        $$"""
+        {
+          "id": "{{id}}",
+          "source": "CNV",
+          "documentType": "Texto Ordenado",
+          "resolutionNumber": "622/2013",
+          "title": "Normas CNV N.T. 2013 - PDF Integration Test",
+          "publicationDate": "2013-09-09",
+          "effectiveDate": "2013-09-09",
+          "url": "https://www.cnv.gov.ar/",
+          "status": "candidate",
+          "requiresReview": true
+        }
+        """;
+
+    private sealed class TempDirectory : IDisposable
+    {
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static TempDirectory Create()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+
+            return new TempDirectory(path);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
 }
 
 internal sealed class PostgresIntegrationFactAttribute : FactAttribute

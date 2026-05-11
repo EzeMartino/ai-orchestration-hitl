@@ -12,10 +12,11 @@ namespace CnvRegulation.Infrastructure.Diagnostics;
 public sealed class SourceInspectionService(
     PlainTextRegulationParser plainTextParser,
     HtmlRegulationParser htmlParser,
+    IPdfTextExtractor pdfTextExtractor,
     SidecarMetadataReader metadataReader,
     IRegulationChunker chunker) : ISourceInspectionService
 {
-    private static readonly string[] SupportedExtensions = [".txt", ".html", ".htm"];
+    private static readonly string[] SupportedExtensions = [".txt", ".html", ".htm", ".pdf"];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -81,6 +82,7 @@ public sealed class SourceInspectionService(
                 Source = metadata?.Source,
                 Title = metadata?.Title,
                 DocumentType = metadata?.DocumentType,
+                FileType = ToFileType(extension),
                 ExtractedTextLength = 0,
                 ChunkCount = 0,
                 DetectedTitles = [],
@@ -103,6 +105,7 @@ public sealed class SourceInspectionService(
                 Source = null,
                 Title = null,
                 DocumentType = null,
+                FileType = ToFileType(extension),
                 ExtractedTextLength = 0,
                 ChunkCount = 0,
                 DetectedTitles = [],
@@ -117,9 +120,10 @@ public sealed class SourceInspectionService(
 
         try
         {
-            var text = await ParseSourceFileAsync(sourceFile, cancellationToken).ConfigureAwait(false);
-            var document = await metadataReader.ReadDocumentAsync(metadataPath, text, cancellationToken).ConfigureAwait(false);
+            var parsed = await ParseSourceFileAsync(sourceFile, cancellationToken).ConfigureAwait(false);
+            var document = await metadataReader.ReadDocumentAsync(metadataPath, parsed.Text, cancellationToken).ConfigureAwait(false);
             var chunks = await chunker.ChunkAsync(document, cancellationToken).ConfigureAwait(false);
+            warnings.AddRange(parsed.Warnings);
             AddReviewWarnings(metadata, warnings);
 
             if (chunks.Count == 0)
@@ -127,7 +131,7 @@ public sealed class SourceInspectionService(
                 warnings.Add("no article boundaries detected");
             }
 
-            return CreateDocumentResult(sourceFile, document, chunks, warnings);
+            return CreateDocumentResult(sourceFile, document, chunks, parsed, warnings);
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or JsonException)
         {
@@ -139,6 +143,7 @@ public sealed class SourceInspectionService(
                 Source = metadata?.Source,
                 Title = metadata?.Title,
                 DocumentType = metadata?.DocumentType,
+                FileType = ToFileType(extension),
                 ExtractedTextLength = 0,
                 ChunkCount = 0,
                 DetectedTitles = [],
@@ -180,6 +185,7 @@ public sealed class SourceInspectionService(
         string sourceFile,
         RegulationDocument document,
         IReadOnlyList<RegulationChunk> chunks,
+        ParsedRegulationSource parsed,
         IReadOnlyList<string> warnings)
     {
         var detectedTitles = chunks
@@ -213,6 +219,8 @@ public sealed class SourceInspectionService(
             Source = document.Source,
             Title = document.Title,
             DocumentType = document.DocumentType,
+            FileType = parsed.FileType,
+            PageCount = parsed.PageCount,
             ExtractedTextLength = document.Text.Length,
             ChunkCount = chunks.Count,
             DetectedTitles = detectedTitles,
@@ -264,12 +272,57 @@ public sealed class SourceInspectionService(
         return Path.Combine(directory, $"{fileNameWithoutExtension}.metadata.json");
     }
 
-    private Task<string> ParseSourceFileAsync(string sourceFile, CancellationToken cancellationToken)
+    private async Task<ParsedRegulationSource> ParseSourceFileAsync(
+        string sourceFile,
+        CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(sourceFile);
+        var fileName = Path.GetFileName(sourceFile);
 
-        return extension.Equals(".txt", StringComparison.OrdinalIgnoreCase)
-            ? plainTextParser.ParseAsync(sourceFile, cancellationToken)
-            : htmlParser.ParseAsync(sourceFile, cancellationToken);
+        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            return CreateParsedSource(
+                await plainTextParser.ParseAsync(sourceFile, cancellationToken).ConfigureAwait(false),
+                "TXT",
+                fileName);
+        }
+
+        if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var extraction = await pdfTextExtractor.ExtractAsync(sourceFile, cancellationToken).ConfigureAwait(false);
+
+            return new ParsedRegulationSource
+            {
+                Text = extraction.Text,
+                Metadata = CreateSourceMetadata("PDF", fileName),
+                Warnings = extraction.Warnings,
+                FileType = "PDF",
+                PageCount = extraction.Pages.Count
+            };
+        }
+
+        return CreateParsedSource(
+            await htmlParser.ParseAsync(sourceFile, cancellationToken).ConfigureAwait(false),
+            "HTML",
+            fileName);
     }
+
+    private static ParsedRegulationSource CreateParsedSource(string text, string fileType, string fileName) =>
+        new()
+        {
+            Text = text,
+            Metadata = CreateSourceMetadata(fileType, fileName),
+            Warnings = [],
+            FileType = fileType
+        };
+
+    private static Dictionary<string, string> CreateSourceMetadata(string fileType, string fileName) =>
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sourceFile"] = fileName,
+            ["fileType"] = fileType
+        };
+
+    private static string ToFileType(string extension) =>
+        extension.TrimStart('.').ToUpperInvariant();
 }

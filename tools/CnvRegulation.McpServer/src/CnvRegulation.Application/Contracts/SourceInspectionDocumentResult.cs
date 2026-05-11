@@ -26,6 +26,16 @@ public sealed class SourceInspectionDocumentResult
     public string? DocumentType { get; init; }
 
     /// <summary>
+    /// Gets the parsed file type.
+    /// </summary>
+    public string? FileType { get; init; }
+
+    /// <summary>
+    /// Gets the number of PDF pages when applicable.
+    /// </summary>
+    public int? PageCount { get; init; }
+
+    /// <summary>
     /// Gets the extracted text length.
     /// </summary>
     public int ExtractedTextLength { get; init; }

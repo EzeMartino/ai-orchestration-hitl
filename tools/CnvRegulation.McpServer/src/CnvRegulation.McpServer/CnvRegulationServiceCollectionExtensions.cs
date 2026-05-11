@@ -4,6 +4,7 @@ using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Persistence;
+using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
 using CnvRegulation.Infrastructure.Sources;
 using Microsoft.Extensions.Configuration;
@@ -70,6 +71,7 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<IRegulationChunker, LegalStructureRegulationChunker>();
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
+        services.AddSingleton<IPdfTextExtractor, PdfPigTextExtractor>();
         services.AddSingleton<SidecarMetadataReader>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(new HttpClient());
