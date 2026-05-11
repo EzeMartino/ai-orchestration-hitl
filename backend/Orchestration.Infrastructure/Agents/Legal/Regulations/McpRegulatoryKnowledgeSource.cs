@@ -22,22 +22,10 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
-        var request = new CnvRegulationSearchRequest(
-            Query: BuildQuery(report),
-            Area: "Agentes",
-            Limit: _options.DefaultLimit,
-            RequiresReview: true
-        );
-
-        var response = await _client.SearchAsync(
-            request,
+        var findings = await SearchFindingsAsync(
+            report,
             cancellationToken
         );
-
-        var findings = response.Results
-            .Where(result => result.Citations.Count > 0)
-            .SelectMany(MapFindings)
-            .ToList();
 
         var hasRisk = findings.Count > 0;
 
@@ -54,9 +42,18 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
         );
     }
 
-    private static string BuildQuery(FinancialReportContext report)
+    private static IReadOnlyList<string> BuildCandidateQueries(
+    FinancialReportContext report)
     {
-        return $"anomalía financiera monitoreo de transacciones revisión humana agentes ALyC monto {report.TotalAmount} operaciones {report.TransactionCount}";
+        return
+        [
+        "agentes",
+        "fondos comunes",
+        "custodia",
+        "autorización",
+        "registro",
+        "régimen informativo"
+        ];
     }
 
     private static IEnumerable<RegulatoryFinding> MapFindings(
@@ -99,4 +96,39 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
 
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
+
+    private async Task<List<RegulatoryFinding>> SearchFindingsAsync(
+    FinancialReportContext report,
+    CancellationToken cancellationToken)
+    {
+        var queries = BuildCandidateQueries(report);
+
+        foreach (var query in queries)
+        {
+            var request = new CnvRegulationSearchRequest(
+                Query: query,
+                Area: "Agentes",
+                Limit: _options.DefaultLimit,
+                RequiresReview: true
+            );
+
+            var response = await _client.SearchAsync(
+                request,
+                cancellationToken
+            );
+
+            var findings = response.Results
+                .Where(result => result.Citations.Count > 0)
+                .SelectMany(MapFindings)
+                .ToList();
+
+            if (findings.Count > 0)
+            {
+                return findings;
+            }
+        }
+
+        return [];
+    }
 }
+

@@ -58,7 +58,7 @@ builder.Services.Configure<CnvRegulationMcpOptions>(
 );
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
-builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
+builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();
 builder.Services.AddScoped<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
 
 // Persistence configuration
