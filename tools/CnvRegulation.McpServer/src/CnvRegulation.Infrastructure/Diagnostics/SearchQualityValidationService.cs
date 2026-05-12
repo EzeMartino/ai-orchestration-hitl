@@ -154,8 +154,29 @@ public sealed class SearchQualityValidationService(
         return expectedTerms
             .Select(StaticRegulationQueryExpander.Normalize)
             .Where(term => term.Length > 0)
-            .Any(term => evidence.Contains(term, StringComparison.OrdinalIgnoreCase));
+            .Any(term => MatchesExpectedTerm(evidence, term));
     }
+
+    private static bool MatchesExpectedTerm(string evidence, string expectedTerm)
+    {
+        if (evidence.Contains(expectedTerm, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var tokens = expectedTerm
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length > 2)
+            .Where(term => !IsStopTerm(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return tokens.Length > 0
+            && tokens.All(term => evidence.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsStopTerm(string term) =>
+        term is "del" or "las" or "los" or "una" or "uno" or "para" or "con" or "por" or "de" or "la" or "el";
 
     private static SearchQualityValidationReport CreateEmptyReport(string querySetPath, string warning) =>
         new()

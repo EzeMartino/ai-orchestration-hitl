@@ -83,7 +83,8 @@ public sealed partial class StaticRegulationQueryExpander(RegulationAliasesOptio
             return string.Empty;
         }
 
-        var normalized = value.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var withWordSeparators = WordSeparatorRegex().Replace(value.Trim(), " ");
+        var normalized = withWordSeparators.ToLowerInvariant().Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(normalized.Length);
 
         foreach (var character in normalized)
@@ -118,4 +119,7 @@ public sealed partial class StaticRegulationQueryExpander(RegulationAliasesOptio
 
     [GeneratedRegex(@"\s+", RegexOptions.Compiled)]
     private static partial Regex ExcessiveWhitespaceRegex();
+
+    [GeneratedRegex(@"(?<=[\p{L}\p{N}])[-_](?=[\p{L}\p{N}])|_", RegexOptions.Compiled)]
+    private static partial Regex WordSeparatorRegex();
 }

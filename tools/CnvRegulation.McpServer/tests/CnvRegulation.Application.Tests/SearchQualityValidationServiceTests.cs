@@ -107,6 +107,73 @@ public sealed class SearchQualityValidationServiceTests
         report.Warnings.Should().Contain(warning => warning.Contains("does not exist", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task ValidateSearchQuality_ShouldPassKnownRegressionQueries()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var querySetPath = Path.Combine(testDirectory.Path, "queries.json");
+        await File.WriteAllTextAsync(
+            querySetPath,
+            """
+            {
+              "queries": [
+                {
+                  "id": "hecho-relevante",
+                  "query": "hecho-relevante",
+                  "expectedAnyTerms": [ "informacion relevante", "informaciones relevantes" ],
+                  "minResults": 1
+                },
+                {
+                  "id": "informacion-relevante",
+                  "query": "informacion_relevante",
+                  "expectedAnyTerms": [ "informacion relevante", "informaciones relevantes" ],
+                  "minResults": 1
+                },
+                {
+                  "id": "fiduciario-financiero",
+                  "query": "fiduciario-financiero",
+                  "expectedAnyTerms": [ "fideicomiso financiero", "fideicomisos financieros" ],
+                  "minResults": 1
+                },
+                {
+                  "id": "emisora",
+                  "query": "emisora",
+                  "expectedAnyTerms": [ "emisor", "emisores", "entidades emisoras" ],
+                  "minResults": 1
+                }
+              ]
+            }
+            """);
+        var repository = new InMemoryRegulationRepository();
+        await repository.SaveAsync(
+            new RegulationDocument
+            {
+                Id = "cnv-regression",
+                Source = "CNV",
+                DocumentType = "Texto Ordenado",
+                Title = "Normas CNV regresiones",
+                Url = "https://www.cnv.gov.ar/",
+                Status = "candidate",
+                Text = string.Join(
+                    ' ',
+                    "El regimen exige publicar informaciones relevantes.",
+                    "Los fideicomisos financieros tienen reglas especificas.",
+                    "Los emisores deben cumplir obligaciones informativas.")
+            },
+            CancellationToken.None);
+        var queryExpander = CreateQueryExpander();
+        var searchService = new InMemoryRegulationSearchService(repository, repository, queryExpander);
+        var validator = new SearchQualityValidationService(searchService, queryExpander);
+
+        var report = await validator.ValidateAsync(
+            new ValidateSearchQualityRequest { QuerySetPath = querySetPath },
+            CancellationToken.None);
+
+        report.Queries.Should().Be(4);
+        report.Failed.Should().Be(0);
+        report.Passed.Should().Be(4);
+    }
+
     private static StaticRegulationQueryExpander CreateQueryExpander() =>
         new(new RegulationAliasesOptions());
 

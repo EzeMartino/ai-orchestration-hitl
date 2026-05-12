@@ -25,37 +25,61 @@ public sealed class RegulationAliasesOptions
         {
             ["alyc"] =
             [
-                "agente de liquidación y compensación",
-                "agentes de liquidación y compensación",
-                "liquidación y compensación"
+                "agente de liquidaci\u00f3n y compensaci\u00f3n",
+                "agentes de liquidaci\u00f3n y compensaci\u00f3n",
+                "liquidaci\u00f3n y compensaci\u00f3n"
             ],
             ["alac"] =
             [
-                "agente de liquidación y compensación"
+                "agente de liquidaci\u00f3n y compensaci\u00f3n"
             ],
             ["fci"] =
             [
-                "fondo común de inversión",
-                "fondos comunes de inversión"
+                "fondo com\u00fan de inversi\u00f3n",
+                "fondos comunes de inversi\u00f3n"
             ],
             ["cnv"] =
             [
-                "comisión nacional de valores"
+                "comisi\u00f3n nacional de valores"
             ],
             ["oferta publica"] =
             [
-                "oferta pública",
-                "régimen de oferta pública"
+                "oferta p\u00fablica",
+                "r\u00e9gimen de oferta p\u00fablica"
             ],
             ["hecho relevante"] =
             [
-                "información relevante",
-                "hechos relevantes"
+                "hechos relevantes",
+                "informaci\u00f3n relevante",
+                "informacion relevante",
+                "informaciones relevantes"
+            ],
+            ["informacion relevante"] =
+            [
+                "hecho relevante",
+                "hechos relevantes",
+                "informaci\u00f3n relevante",
+                "informaciones relevantes"
+            ],
+            ["fiduciario financiero"] =
+            [
+                "fiduciarios financieros",
+                "fideicomiso financiero",
+                "fideicomisos financieros"
+            ],
+            ["emisora"] =
+            [
+                "emisor",
+                "emisoras",
+                "entidad emisora",
+                "sociedad emisora",
+                "entidades emisoras",
+                "emisores"
             ],
             ["lavado"] =
             [
-                "prevención de lavado",
-                "prevención de lavado de activos",
+                "prevenci\u00f3n de lavado",
+                "prevenci\u00f3n de lavado de activos",
                 "financiamiento del terrorismo",
                 "pld",
                 "uif"
@@ -63,12 +87,12 @@ public sealed class RegulationAliasesOptions
             ["idoneidad"] =
             [
                 "examen de idoneidad",
-                "idóneos",
-                "personal idóneo"
+                "id\u00f3neos",
+                "personal id\u00f3neo"
             ],
-            ["régimen informativo"] =
+            ["r\u00e9gimen informativo"] =
             [
-                "información periódica",
+                "informaci\u00f3n peri\u00f3dica",
                 "deber de informar",
                 "informes"
             ]

@@ -190,6 +190,25 @@ if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringC
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "explain-search-query", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var request = ResolveExplainSearchQueryRequest(args);
+    if (string.IsNullOrWhiteSpace(request.Query))
+    {
+        Console.Error.WriteLine("Query is required. Use --query \"hecho relevante\" or pass it as positional text.");
+
+        return;
+    }
+
+    var explanationService = host.Services.GetRequiredService<IExplainSearchQueryService>();
+    var response = await explanationService.ExplainAsync(request, CancellationToken.None);
+
+    Console.WriteLine(ExplainSearchQueryReportFormatter.Format(response));
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "ingest", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -327,6 +346,38 @@ static int ResolveSearchQualityLimit(string[] args)
 {
     var value = GetOptionValue(args, "--limit");
     return int.TryParse(value, out var parsedValue) ? parsedValue : 5;
+}
+
+static ExplainSearchQueryRequest ResolveExplainSearchQueryRequest(string[] args) =>
+    new()
+    {
+        Query = ResolveSearchQuery(args),
+        Area = GetOptionValue(args, "--area"),
+        Limit = ResolveSearchQualityLimit(args),
+        Source = GetOptionValue(args, "--source"),
+        DocumentType = GetOptionValue(args, "--document-type"),
+        ResolutionNumber = GetOptionValue(args, "--resolution-number"),
+        Status = GetOptionValue(args, "--status"),
+        RequiresReview = ResolveNullableBoolOption(args, "--requires-review"),
+        IncludeDuplicates = HasOption(args, "--include-duplicates"),
+        IncludeNonSearchable = HasOption(args, "--include-non-searchable")
+    };
+
+static string ResolveSearchQuery(string[] args)
+{
+    var explicitQuery = GetOptionValue(args, "--query");
+    if (!string.IsNullOrWhiteSpace(explicitQuery))
+    {
+        return explicitQuery.Trim();
+    }
+
+    return string.Join(' ', GetPositionalArguments(args)).Trim();
+}
+
+static bool? ResolveNullableBoolOption(string[] args, string optionName)
+{
+    var value = GetOptionValue(args, optionName);
+    return bool.TryParse(value, out var parsedValue) ? parsedValue : null;
 }
 
 static string ResolveOutputDirectory(string[] args)

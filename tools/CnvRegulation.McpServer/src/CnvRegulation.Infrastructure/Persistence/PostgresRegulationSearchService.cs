@@ -3,6 +3,7 @@ using CnvRegulation.Application.Contracts;
 using CnvRegulation.Application.Search;
 using CnvRegulation.Domain;
 using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Search;
 using Dapper;
 
 namespace CnvRegulation.Infrastructure.Persistence;
@@ -48,7 +49,7 @@ public sealed class PostgresRegulationSearchService(
                 parameters,
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-            chunkMatches.AddRange(chunkRows.Select(row => CreateQuerySearchResult(row, searchQuery)));
+            chunkMatches.AddRange(chunkRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
         }
 
         var results = MergeSearchResults(chunkMatches, request.IncludeDuplicates, limit);
@@ -64,7 +65,7 @@ public sealed class PostgresRegulationSearchService(
                     parameters,
                     cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-                documentMatches.AddRange(documentRows.Select(row => CreateQuerySearchResult(row, searchQuery)));
+                documentMatches.AddRange(documentRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
             }
 
             results = MergeSearchResults(documentMatches, request.IncludeDuplicates, limit);
@@ -182,9 +183,9 @@ public sealed class PostgresRegulationSearchService(
         return parameters;
     }
 
-    private static RegulationSearchResult MapSearchResult(SearchRow row)
+    private static RegulationSearchResult MapSearchResult(SearchRow row, string searchQuery)
     {
-        var snippet = CreateSnippet(row.Text);
+        var snippet = CreateSnippet(row.Text, searchQuery);
         var score = row.Score + CalculateSourcePriority(row) - (row.DuplicateOfChunkId is null ? 0 : 0.20);
 
         return new RegulationSearchResult
@@ -293,8 +294,16 @@ public sealed class PostgresRegulationSearchService(
             || string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static QuerySearchResult CreateQuerySearchResult(SearchRow row, string searchQuery) =>
-        new(MapSearchResult(row), searchQuery, row.ContentHash, row.DuplicateOfChunkId is not null);
+    private static QuerySearchResult CreateQuerySearchResult(
+        SearchRow row,
+        string searchQuery,
+        string originalNormalizedQuery)
+    {
+        var result = MapSearchResult(row, searchQuery);
+        var score = result.Score + CalculateOriginalQueryBonus(row.Text, searchQuery, originalNormalizedQuery);
+
+        return new(CopyWithScore(result, score), searchQuery, row.ContentHash, row.DuplicateOfChunkId is not null);
+    }
 
     private static double CalculateSourcePriority(SearchRow row)
     {
@@ -342,17 +351,93 @@ public sealed class PostgresRegulationSearchService(
     private static string? NormalizeFilter(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static string CreateSnippet(string text)
+    private static string CreateSnippet(string text, string query)
     {
         const int maxLength = 220;
+        const int contextBeforeMatch = 80;
 
         if (string.IsNullOrWhiteSpace(text))
         {
             return string.Empty;
         }
 
-        return text.Length <= maxLength ? text : $"{text[..maxLength]}...";
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        var matchIndex = FindQueryMatchIndex(text, query);
+        if (matchIndex < 0)
+        {
+            return $"{text[..maxLength]}...";
+        }
+
+        var start = Math.Max(0, matchIndex - contextBeforeMatch);
+        var length = Math.Min(maxLength, text.Length - start);
+        var prefix = start > 0 ? "..." : string.Empty;
+        var suffix = start + length < text.Length ? "..." : string.Empty;
+
+        return $"{prefix}{text.Substring(start, length).Trim()}{suffix}";
     }
+
+    private static int FindQueryMatchIndex(string text, string query)
+    {
+        var normalizedText = StaticRegulationQueryExpander.Normalize(text);
+        var queryTerms = CreateSnippetTerms(query);
+
+        return queryTerms
+            .Select(term => normalizedText.IndexOf(term, StringComparison.OrdinalIgnoreCase))
+            .Where(index => index >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
+    }
+
+    private static double CalculateOriginalQueryBonus(string text, string searchQuery, string originalNormalizedQuery)
+    {
+        if (string.IsNullOrWhiteSpace(originalNormalizedQuery))
+        {
+            return 0;
+        }
+
+        var normalizedText = StaticRegulationQueryExpander.Normalize(text);
+        var normalizedSearchQuery = StaticRegulationQueryExpander.Normalize(searchQuery);
+        var bonus = normalizedSearchQuery.Equals(originalNormalizedQuery, StringComparison.OrdinalIgnoreCase)
+            ? 0.15
+            : 0;
+
+        if (normalizedText.Contains(originalNormalizedQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            return bonus + 0.20;
+        }
+
+        var originalTokens = CreateSignificantTerms(originalNormalizedQuery);
+        return originalTokens.Length > 0
+            && originalTokens.All(token => normalizedText.Contains(token, StringComparison.OrdinalIgnoreCase))
+                ? bonus + 0.10
+                : bonus;
+    }
+
+    private static string[] CreateSignificantTerms(string query) =>
+        StaticRegulationQueryExpander.Normalize(query)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(term => term.Length > 2)
+            .Where(term => !IsStopTerm(term))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private static string[] CreateSnippetTerms(string query)
+    {
+        var terms = CreateSignificantTerms(query);
+
+        return terms
+            .Concat(terms.Where(term => term.StartsWith("inform", StringComparison.OrdinalIgnoreCase))
+                .Select(_ => "inform"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsStopTerm(string term) =>
+        term is "del" or "las" or "los" or "una" or "uno" or "para" or "con" or "por" or "de" or "la" or "el";
 
     private static IReadOnlyList<string> CreateWarnings(
         RegulationQueryExpansion expansion,

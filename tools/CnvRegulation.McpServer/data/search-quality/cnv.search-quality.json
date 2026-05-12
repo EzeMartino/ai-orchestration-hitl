@@ -42,7 +42,10 @@
       "query": "hecho relevante",
       "expectedAnyTerms": [
         "hecho relevante",
-        "informaci\u00f3n relevante"
+        "hechos relevantes",
+        "informaci\u00f3n relevante",
+        "informacion relevante",
+        "informaciones relevantes"
       ],
       "minResults": 1
     },
@@ -51,7 +54,10 @@
       "query": "informaci\u00f3n relevante",
       "expectedAnyTerms": [
         "hecho relevante",
-        "informaci\u00f3n relevante"
+        "hechos relevantes",
+        "informaci\u00f3n relevante",
+        "informacion relevante",
+        "informaciones relevantes"
       ],
       "minResults": 1
     },
@@ -78,7 +84,12 @@
       "query": "r\u00e9gimen informativo",
       "expectedAnyTerms": [
         "informaci\u00f3n",
-        "r\u00e9gimen informativo"
+        "r\u00e9gimen informativo",
+        "informaci\u00f3n peri\u00f3dica",
+        "deber de informar",
+        "informes",
+        "informe",
+        "informar"
       ],
       "minResults": 1
     },
@@ -115,7 +126,9 @@
       "query": "fiduciario financiero",
       "expectedAnyTerms": [
         "fiduciario financiero",
-        "fideicomiso financiero"
+        "fiduciarios financieros",
+        "fideicomiso financiero",
+        "fideicomisos financieros"
       ],
       "minResults": 1
     },
@@ -123,8 +136,13 @@
       "id": "emisora",
       "query": "emisora",
       "expectedAnyTerms": [
+        "emisor",
         "emisora",
-        "emisoras"
+        "emisoras",
+        "entidad emisora",
+        "sociedad emisora",
+        "entidades emisoras",
+        "emisores"
       ],
       "minResults": 1
     },

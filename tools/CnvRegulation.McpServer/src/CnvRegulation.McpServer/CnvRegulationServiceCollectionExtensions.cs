@@ -91,6 +91,7 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<IChunkQualityInspectionService, ChunkQualityInspectionService>();
         services.AddSingleton<IRegulationCoverageInspectionService, RegulationCoverageInspectionService>();
         services.AddSingleton<ISearchQualityValidationService, SearchQualityValidationService>();
+        services.AddSingleton<IExplainSearchQueryService, ExplainSearchQueryService>();
         services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();
         services.AddSingleton<IRegulationArticleService, InMemoryRegulationArticleService>();

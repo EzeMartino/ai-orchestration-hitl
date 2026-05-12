@@ -175,6 +175,26 @@ dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --st
 
 The report shows pass/fail per query, expanded search queries, result counts, top result source/title/article, score, citation presence, warnings, and expectation failure reasons. The curated JSON is intentionally simple and should be updated as the corpus improves.
 
+## Explain search queries
+
+Run targeted diagnostics for one failing query:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- explain-search-query --storage postgres --query "hecho relevante"
+```
+
+The report shows the normalized query, expanded terms, generated search queries with raw result counts, term presence in indexed documents/chunks, duplicate and wrapper filtering effects, top partial matches, applied filters, warnings, and a short recommendation.
+
+Useful filter flags:
+
+- `--source`
+- `--document-type`
+- `--resolution-number`
+- `--status`
+- `--requires-review true|false`
+- `--include-duplicates`
+- `--include-non-searchable`
+
 ## PostgreSQL persistence
 
 Default storage is in-memory. No database is required for local mock/dev mode:
@@ -214,7 +234,10 @@ Initial aliases include:
 - `fci`: fondo/fondos comunes de inversion
 - `cnv`: comision nacional de valores
 - `oferta publica`: oferta publica, regimen de oferta publica
-- `hecho relevante`: informacion relevante, hechos relevantes
+- `hecho relevante`: hechos relevantes, informacion relevante, informaciones relevantes
+- `informacion relevante`: hecho relevante, hechos relevantes, informaciones relevantes
+- `fiduciario financiero`: fiduciarios financieros, fideicomiso financiero, fideicomisos financieros
+- `emisora`: emisor, emisoras, entidad emisora, sociedad emisora, entidades emisoras, emisores
 - `lavado`: prevencion de lavado, financiamiento del terrorismo, pld, uif
 - `idoneidad`: examen de idoneidad, idoneos, personal idoneo
 - `regimen informativo`: informacion periodica, deber de informar, informes
