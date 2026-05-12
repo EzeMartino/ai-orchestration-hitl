@@ -81,6 +81,8 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton(new HttpClient());
         services.AddSingleton<ISourceDiscoveryService, CuratedSourceDiscoveryService>();
         services.AddSingleton<ISourceDownloadService, ManifestSourceDownloadService>();
+        services.AddSingleton<InfolegLinkExtractor>();
+        services.AddSingleton<IInfolegLinkDiscoveryService, InfolegLinkDiscoveryService>();
         services.AddSingleton<ISourceInspectionService, SourceInspectionService>();
         services.AddSingleton<IChunkQualityInspectionService, ChunkQualityInspectionService>();
         services.AddSingleton<IRegulationIngestionService, LocalRegulationIngestionService>();

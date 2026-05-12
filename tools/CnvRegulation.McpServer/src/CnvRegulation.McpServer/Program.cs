@@ -75,6 +75,36 @@ if (args.Length > 0 && string.Equals(args[0], "download-sources", StringComparis
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "discover-infoleg-links", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var sourceDirectory = ResolveSourceDirectory(args);
+    var outputManifestPath = ResolveInfolegDiscoveredManifestPath(args);
+    var maxLinksPerSource = ResolveMaxLinksPerSource(args);
+    var discoveryService = host.Services.GetRequiredService<IInfolegLinkDiscoveryService>();
+    var response = await discoveryService.DiscoverAsync(
+        new InfolegLinkDiscoveryRequest
+        {
+            SourceDirectory = sourceDirectory,
+            OutputManifestPath = outputManifestPath,
+            MaxLinksPerSource = maxLinksPerSource
+        },
+        CancellationToken.None);
+
+    Console.WriteLine($"Infoleg files inspected: {response.InfolegFilesInspected}");
+    Console.WriteLine($"Links discovered: {response.LinksDiscovered}");
+    Console.WriteLine($"Links accepted: {response.LinksAccepted}");
+    Console.WriteLine($"Links skipped: {response.LinksSkipped}");
+    Console.WriteLine($"Manifest written: {response.ManifestPath}");
+
+    foreach (var warning in response.Warnings)
+    {
+        Console.WriteLine($"Warning: {warning}");
+    }
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "inspect-sources", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -214,6 +244,23 @@ static string ResolveDownloadManifestPath(string[] args)
     }
 
     return Path.Combine(ResolveProjectRoot(), "data", "source-manifest", "sources.manifest.json");
+}
+
+static string ResolveInfolegDiscoveredManifestPath(string[] args)
+{
+    var explicitManifestPath = GetOptionValue(args, "--output-manifest");
+    if (!string.IsNullOrWhiteSpace(explicitManifestPath))
+    {
+        return explicitManifestPath;
+    }
+
+    return Path.Combine(ResolveProjectRoot(), "data", "source-manifest", "infoleg.discovered.manifest.json");
+}
+
+static int ResolveMaxLinksPerSource(string[] args)
+{
+    var value = GetOptionValue(args, "--max-links-per-source");
+    return int.TryParse(value, out var parsedValue) ? parsedValue : 20;
 }
 
 static string ResolveOutputDirectory(string[] args)

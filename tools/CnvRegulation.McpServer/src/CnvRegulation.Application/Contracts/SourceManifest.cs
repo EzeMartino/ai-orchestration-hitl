@@ -11,6 +11,11 @@ public sealed class SourceManifest
     public required DateTimeOffset GeneratedAt { get; init; }
 
     /// <summary>
+    /// Gets the manifest producer when known.
+    /// </summary>
+    public string? Source { get; init; }
+
+    /// <summary>
     /// Gets the source entries.
     /// </summary>
     public required IReadOnlyList<SourceManifestItem> Sources { get; init; }

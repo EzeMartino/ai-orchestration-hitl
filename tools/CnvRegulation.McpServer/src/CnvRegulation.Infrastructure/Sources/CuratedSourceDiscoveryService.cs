@@ -50,6 +50,7 @@ public sealed class CuratedSourceDiscoveryService(TimeProvider timeProvider) : I
         new()
         {
             GeneratedAt = generatedAt,
+            Source = "CuratedSourceDiscovery",
             Sources =
             [
                 new SourceManifestItem

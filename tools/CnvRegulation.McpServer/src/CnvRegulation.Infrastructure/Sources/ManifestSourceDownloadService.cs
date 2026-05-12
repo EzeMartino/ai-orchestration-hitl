@@ -91,7 +91,7 @@ public sealed class ManifestSourceDownloadService(HttpClient httpClient, TimePro
 
                 if (Path.GetExtension(safeFileName).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    warnings.Add($"Downloaded '{safeFileName}' as candidate; ingestion will skip unsupported PDF until a parser is added.");
+                    warnings.Add($"Downloaded '{safeFileName}' as candidate; PDF text extraction still requires regulatory review.");
                 }
             }
             catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException)

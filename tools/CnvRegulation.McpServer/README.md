@@ -56,6 +56,34 @@ All discovered/downloaded sources are marked as `status=candidate` and `requires
 
 PDF files can be downloaded and ingested as candidate sources. PDF parsing extracts text only through PdfPig; it does not render pages or perform OCR.
 
+## Discover Infoleg links
+
+Run controlled link discovery over already-downloaded Infoleg HTML files:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- discover-infoleg-links --source-directory data/sources
+```
+
+This writes:
+
+```text
+data/source-manifest/infoleg.discovered.manifest.json
+```
+
+You can override the output manifest and per-source cap:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- discover-infoleg-links --source-directory data/sources --output-manifest data/source-manifest/infoleg.discovered.manifest.json --max-links-per-source 20
+```
+
+The discovery is intentionally bounded. It only accepts `http`/`https` links on `servicios.infoleg.gob.ar` under `/infolegInternet/`, normalizes them to `https`, removes fragments, rejects `javascript:`/`mailto:`/external/path-traversal links, deduplicates canonical URLs, classifies links as `norma`, `texact`, `anexos`, `verNorma`, or `unknown`, and emits all entries as `status=candidate` with `requiresReview=true`.
+
+The generated manifest can be downloaded with the existing command:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- download-sources --manifest data/source-manifest/infoleg.discovered.manifest.json
+```
+
 ## Ingest downloaded sources
 
 Default ingestion uses in-memory storage:
@@ -181,7 +209,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, query expansion, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, query alias expansion, local ingestion, diagnostics, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, query alias expansion, local ingestion, diagnostics, controlled Infoleg link discovery, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 
