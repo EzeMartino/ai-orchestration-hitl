@@ -1,5 +1,7 @@
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Deduplication;
+using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Parsing;
@@ -235,7 +237,9 @@ public sealed class LocalRegulationIngestionServiceTests
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
             new PdfExtractedTextNormalizer(),
-            new SidecarMetadataReader());
+            new SidecarMetadataReader(),
+            new RegulationChunkDeduplicator(new RegulationChunkHasher()),
+            new WrapperDocumentDetector());
 
     private static StaticRegulationQueryExpander CreateQueryExpander() =>
         new(new RegulationAliasesOptions());

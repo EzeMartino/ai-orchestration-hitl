@@ -10,6 +10,8 @@ namespace CnvRegulation.Infrastructure.Sources;
 /// </summary>
 public sealed class ManifestSourceDownloadService(HttpClient httpClient, TimeProvider timeProvider) : ISourceDownloadService
 {
+    private static readonly string[] AllowedExtensions = [".html", ".htm", ".pdf", ".txt"];
+
     /// <inheritdoc />
     public async Task<DownloadSourcesResponse> DownloadAsync(
         DownloadSourcesRequest request,
@@ -66,6 +68,13 @@ public sealed class ManifestSourceDownloadService(HttpClient httpClient, TimePro
                 var safeMetadataFileName = SourceFileNameSanitizer.Sanitize(
                     source.MetadataFileName,
                     $"{Path.GetFileNameWithoutExtension(safeFileName)}.metadata.json");
+                if (!IsAllowedSourceExtension(safeFileName, uri))
+                {
+                    skipped++;
+                    warnings.Add($"Skipping '{source.Id}' because file type is not supported for download.");
+                    continue;
+                }
+
                 var outputPath = Path.Combine(request.OutputDirectory, safeFileName);
                 var metadataPath = Path.Combine(request.OutputDirectory, safeMetadataFileName);
 
@@ -141,5 +150,16 @@ public sealed class ManifestSourceDownloadService(HttpClient httpClient, TimePro
         extension = string.IsNullOrWhiteSpace(extension) ? ".html" : extension;
 
         return $"{source.Id}{extension}";
+    }
+
+    private static bool IsAllowedSourceExtension(string fileName, Uri uri)
+    {
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = Path.GetExtension(uri.AbsolutePath);
+        }
+
+        return AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 }

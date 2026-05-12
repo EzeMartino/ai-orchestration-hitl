@@ -11,6 +11,16 @@ public sealed class RegulationCoverageReport
     public int DocumentsTotal { get; init; }
 
     /// <summary>
+    /// Gets searchable document count.
+    /// </summary>
+    public int SearchableDocuments { get; init; }
+
+    /// <summary>
+    /// Gets non-searchable document count.
+    /// </summary>
+    public int NonSearchableDocuments { get; init; }
+
+    /// <summary>
     /// Gets document distribution by source.
     /// </summary>
     public required IReadOnlyList<CoverageDistributionItem> SourceDistribution { get; init; }
@@ -49,6 +59,16 @@ public sealed class RegulationCoverageReport
     /// Gets possible duplicate chunk count.
     /// </summary>
     public int DuplicateChunkCount { get; init; }
+
+    /// <summary>
+    /// Gets duplicate chunks hidden by default search behavior.
+    /// </summary>
+    public int DuplicateChunksHiddenByDefault { get; init; }
+
+    /// <summary>
+    /// Gets unique searchable chunk count after default duplicate and non-searchable filtering.
+    /// </summary>
+    public int UniqueSearchableChunks { get; init; }
 
     /// <summary>
     /// Gets very short chunk count.

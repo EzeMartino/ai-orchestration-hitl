@@ -1,6 +1,8 @@
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Domain;
 using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Deduplication;
+using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Parsing;
@@ -44,6 +46,27 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         saved.Should().HaveCount(2);
         saved[0].Article.Should().Be("Articulo 98764");
         saved[1].Metadata.Should().ContainKey("article");
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresIngest_ShouldPersistContentHash()
+    {
+        var repository = await CreateRepositoryAsync();
+        var document = CreateDocument();
+        var chunk = CreateSearchChunk(
+            document.Id,
+            $"{document.Id}-hash",
+            "hash persistence token",
+            contentHash: "hash-persistence",
+            duplicateOfChunkId: null);
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(document.Id, [chunk], CancellationToken.None);
+
+        var saved = await repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+        saved.Should().ContainSingle();
+        saved[0].ContentHash.Should().Be("hash-persistence");
+        saved[0].Metadata.Should().Contain("contentHash", "hash-persistence");
     }
 
     [PostgresIntegrationFact]
@@ -293,6 +316,87 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
     }
 
     [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldPreferHigherPrioritySourceForDuplicateChunks()
+    {
+        var services = await CreateSearchServicesAsync();
+        var token = CreateSearchToken();
+        var cnvDocument = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var infolegDocument = CreateSearchDocument("Infoleg", "622/2013", requiresReview: true);
+
+        await services.Repository.SaveAsync(cnvDocument, CancellationToken.None);
+        await services.Repository.SaveAsync(infolegDocument, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            cnvDocument.Id,
+            [CreateSearchChunk(cnvDocument.Id, $"{cnvDocument.Id}-dup", token, "same-content", duplicateOfChunkId: null)],
+            CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            infolegDocument.Id,
+            [CreateSearchChunk(infolegDocument.Id, $"{infolegDocument.Id}-dup", token, "same-content", duplicateOfChunkId: $"{cnvDocument.Id}-dup")],
+            CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = token, Limit = 10 },
+            CancellationToken.None);
+
+        response.Results.Should().ContainSingle(result => result.ChunkId.EndsWith("-dup", StringComparison.Ordinal));
+        response.Results[0].DocumentId.Should().Be(cnvDocument.Id);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldHideDuplicateChunksByDefault()
+    {
+        var services = await CreateSearchServicesAsync();
+        var token = CreateSearchToken();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var duplicateDocument = CreateSearchDocument("Infoleg", "622/2013", requiresReview: true);
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.SaveAsync(duplicateDocument, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            document.Id,
+            [CreateSearchChunk(document.Id, $"{document.Id}-original", token, "duplicate-hash", duplicateOfChunkId: null)],
+            CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            duplicateDocument.Id,
+            [CreateSearchChunk(duplicateDocument.Id, $"{duplicateDocument.Id}-duplicate", token, "duplicate-hash", duplicateOfChunkId: $"{document.Id}-original")],
+            CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = token, Limit = 10 },
+            CancellationToken.None);
+
+        response.Results.Count(result => result.ChunkId.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || result.ChunkId.Contains("original", StringComparison.OrdinalIgnoreCase)).Should().Be(1);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresSearch_ShouldAllowIncludingDuplicates_WhenRequested()
+    {
+        var services = await CreateSearchServicesAsync();
+        var token = CreateSearchToken();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var duplicateDocument = CreateSearchDocument("Infoleg", "622/2013", requiresReview: true);
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.SaveAsync(duplicateDocument, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            document.Id,
+            [CreateSearchChunk(document.Id, $"{document.Id}-original", token, "include-duplicate-hash", duplicateOfChunkId: null)],
+            CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(
+            duplicateDocument.Id,
+            [CreateSearchChunk(duplicateDocument.Id, $"{duplicateDocument.Id}-duplicate", token, "include-duplicate-hash", duplicateOfChunkId: $"{document.Id}-original")],
+            CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest { Query = token, Limit = 10, IncludeDuplicates = true },
+            CancellationToken.None);
+
+        response.Results.Count(result => result.ChunkId.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || result.ChunkId.Contains("original", StringComparison.OrdinalIgnoreCase)).Should().Be(2);
+    }
+
+    [PostgresIntegrationFact]
     public async Task PostgresIngest_ShouldPersistPdfDocumentAndChunks()
     {
         using var testDirectory = TempDirectory.Create();
@@ -310,7 +414,9 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
             new PdfExtractedTextNormalizer(),
-            new SidecarMetadataReader());
+            new SidecarMetadataReader(),
+            new RegulationChunkDeduplicator(new RegulationChunkHasher()),
+            new WrapperDocumentDetector());
 
         var response = await ingestionService.IngestAsync(
             new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
@@ -492,6 +598,31 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["article"] = "Articulo 200"
+            }
+        };
+
+    private static RegulationChunk CreateSearchChunk(
+        string documentId,
+        string id,
+        string token,
+        string contentHash,
+        string? duplicateOfChunkId) =>
+        new()
+        {
+            Id = id,
+            DocumentId = documentId,
+            Title = "Titulo Duplicate",
+            Chapter = "Capitulo Duplicate",
+            Article = "Articulo 300",
+            ChunkIndex = 0,
+            Text = $"{token} texto duplicado para ranking de fuente.",
+            ContentHash = contentHash,
+            DuplicateOfChunkId = duplicateOfChunkId,
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["article"] = "Articulo 300",
+                ["contentHash"] = contentHash,
+                ["duplicate"] = (duplicateOfChunkId is not null).ToString()
             }
         };
 

@@ -84,6 +84,8 @@ The generated manifest can be downloaded with the existing command:
 dotnet run --project src/CnvRegulation.McpServer -- download-sources --manifest data/source-manifest/infoleg.discovered.manifest.json
 ```
 
+Download filters unsupported discovered file types before any HTTP request. Only `.html`, `.htm`, `.pdf`, and `.txt` are allowed; `.css`, `.js`, image, font, icon, and similar assets are skipped.
+
 ## Ingest downloaded sources
 
 Default ingestion uses in-memory storage:
@@ -99,6 +101,10 @@ dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory da
 ```
 
 During ingestion, the server also performs a simple CNV-like legal structure pass. It detects title, chapter, section, and article markers, then stores article-level chunks for citation and search. PDF text is normalized before chunking to reduce common extraction artifacts such as excessive whitespace, numeric page-only lines, simple hyphenated line breaks, repeated header/footer lines, and unaccented legal markers. PDF documents preserve extraction metadata such as `sourceFile`, `fileType`, `extractionMethod`, and `pageCount`.
+
+Ingestion also computes `contentHash` for chunks, marks duplicate chunks with `duplicate=true` and `duplicateOfChunkId`, and marks wrapper-like Infoleg HTML documents with `isWrapperCandidate=true` and `searchable=false`.
+
+Search hides duplicate chunks and non-searchable wrapper documents by default. Use `includeDuplicates=true` or `includeNonSearchable=true` only when auditing the corpus itself. Search ranking adds source-priority bonuses: CNV official material first, then Infoleg `texact`, Infoleg `norma`, Infoleg `anexos`/`verNorma`, and finally unknown candidate sources.
 
 ## Inspect downloaded sources
 
@@ -151,7 +157,7 @@ For PostgreSQL, inspect the persisted repository:
 dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
 ```
 
-If `--source-directory` is passed, sources are ingested before the coverage report. The report includes document, chunk, article, source, resolution-number, duplicate URL, duplicate chunk, zero-chunk document, possible wrapper, and top warning counts.
+If `--source-directory` is passed, sources are ingested before the coverage report. The report includes document, searchable/non-searchable document, chunk, unique searchable chunk, article, source, resolution-number, duplicate URL, duplicate chunk, filtered source, unsupported file, zero-chunk document, possible wrapper, and top warning counts.
 
 ## PostgreSQL persistence
 

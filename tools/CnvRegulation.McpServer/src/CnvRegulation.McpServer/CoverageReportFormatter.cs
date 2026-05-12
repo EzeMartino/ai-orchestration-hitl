@@ -13,7 +13,7 @@ public static class CoverageReportFormatter
     /// </summary>
     /// <param name="report">The coverage report.</param>
     /// <returns>The formatted report.</returns>
-    public static string Format(RegulationCoverageReport report)
+    public static string Format(RegulationCoverageReport report, IngestRegulationSourceResponse? ingestion = null)
     {
         ArgumentNullException.ThrowIfNull(report);
 
@@ -22,6 +22,8 @@ public static class CoverageReportFormatter
         builder.AppendLine();
         builder.AppendLine("Documents:");
         builder.AppendLine($"- Total: {report.DocumentsTotal}");
+        builder.AppendLine($"- Searchable: {report.SearchableDocuments}");
+        builder.AppendLine($"- Non-searchable: {report.NonSearchableDocuments}");
         AppendDistribution(builder, report.SourceDistribution);
         builder.AppendLine();
         builder.AppendLine("Chunks:");
@@ -31,6 +33,8 @@ public static class CoverageReportFormatter
         builder.AppendLine($"- Distinct articles: {report.DistinctArticleCount}");
         builder.AppendLine($"- Duplicate URLs: {report.DuplicateUrlCount}");
         builder.AppendLine($"- Duplicates: {report.DuplicateChunkCount}");
+        builder.AppendLine($"- Duplicate chunks hidden by default: {report.DuplicateChunksHiddenByDefault}");
+        builder.AppendLine($"- Unique searchable chunks: {report.UniqueSearchableChunks}");
         builder.AppendLine($"- Very short: {report.VeryShortChunks}");
         builder.AppendLine($"- Very long: {report.VeryLongChunks}");
         builder.AppendLine($"- Documents with zero chunks: {report.DocumentsWithZeroChunks}");
@@ -38,6 +42,14 @@ public static class CoverageReportFormatter
         builder.AppendLine();
         builder.AppendLine("Resolution numbers:");
         AppendDistribution(builder, report.ResolutionNumberDistribution);
+
+        if (ingestion is not null)
+        {
+            builder.AppendLine();
+            builder.AppendLine("Filtering:");
+            builder.AppendLine($"- Filtered sources: {ingestion.DocumentsSkipped}");
+            builder.AppendLine($"- Unsupported discovered files: {CountUnsupportedWarnings(ingestion.Warnings)}");
+        }
 
         if (report.Warnings.Count > 0)
         {
@@ -67,4 +79,7 @@ public static class CoverageReportFormatter
             builder.AppendLine($"- {item.Label}: {item.Count}");
         }
     }
+
+    private static int CountUnsupportedWarnings(IReadOnlyList<string> warnings) =>
+        warnings.Count(warning => warning.Contains("unsupported file type", StringComparison.OrdinalIgnoreCase));
 }

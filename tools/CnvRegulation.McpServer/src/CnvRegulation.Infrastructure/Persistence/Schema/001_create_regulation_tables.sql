@@ -25,9 +25,17 @@ CREATE TABLE IF NOT EXISTS regulation_chunks (
     article TEXT NULL,
     chunk_index INTEGER NOT NULL,
     text TEXT NOT NULL,
+    content_hash TEXT NULL,
+    duplicate_of_chunk_id TEXT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE regulation_chunks
+ADD COLUMN IF NOT EXISTS content_hash TEXT NULL;
+
+ALTER TABLE regulation_chunks
+ADD COLUMN IF NOT EXISTS duplicate_of_chunk_id TEXT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_regulation_documents_source
 ON regulation_documents(source);
@@ -40,6 +48,9 @@ ON regulation_chunks(document_id);
 
 CREATE INDEX IF NOT EXISTS idx_regulation_chunks_article
 ON regulation_chunks(article);
+
+CREATE INDEX IF NOT EXISTS idx_regulation_chunks_content_hash
+ON regulation_chunks(content_hash);
 
 CREATE INDEX IF NOT EXISTS idx_regulation_chunks_text_fts
 ON regulation_chunks

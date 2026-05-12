@@ -1,5 +1,6 @@
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Deduplication;
 using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
@@ -70,6 +71,9 @@ public static class CnvRegulationServiceCollectionExtensions
 
         services.AddSingleton<LegalStructureDetector>();
         services.AddSingleton<IRegulationChunker, LegalStructureRegulationChunker>();
+        services.AddSingleton<IRegulationChunkHasher, RegulationChunkHasher>();
+        services.AddSingleton<RegulationChunkDeduplicator>();
+        services.AddSingleton<WrapperDocumentDetector>();
         services.AddSingleton<RegulationAliasesOptions>();
         services.AddSingleton<IRegulationQueryExpander, StaticRegulationQueryExpander>();
         services.AddSingleton<PlainTextRegulationParser>();

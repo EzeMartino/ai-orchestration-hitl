@@ -180,6 +180,8 @@ public sealed class PostgresRegulationRepository(
                     article,
                     chunk_index,
                     text,
+                    content_hash,
+                    duplicate_of_chunk_id,
                     metadata
                 )
                 VALUES (
@@ -191,6 +193,8 @@ public sealed class PostgresRegulationRepository(
                     @Article,
                     @ChunkIndex,
                     @Text,
+                    @ContentHash,
+                    @DuplicateOfChunkId,
                     CAST(@Metadata AS jsonb)
                 );
                 """,
@@ -229,6 +233,8 @@ public sealed class PostgresRegulationRepository(
                 article,
                 chunk_index AS ChunkIndex,
                 text,
+                content_hash AS ContentHash,
+                duplicate_of_chunk_id AS DuplicateOfChunkId,
                 metadata::text AS Metadata
             FROM regulation_chunks
             WHERE document_id = @DocumentId
@@ -258,6 +264,8 @@ public sealed class PostgresRegulationRepository(
                 article,
                 chunk_index AS ChunkIndex,
                 text,
+                content_hash AS ContentHash,
+                duplicate_of_chunk_id AS DuplicateOfChunkId,
                 metadata::text AS Metadata
             FROM regulation_chunks
             ORDER BY document_id, chunk_index;
@@ -296,6 +304,8 @@ public sealed class PostgresRegulationRepository(
             chunk.Article,
             chunk.ChunkIndex,
             chunk.Text,
+            chunk.ContentHash,
+            chunk.DuplicateOfChunkId,
             Metadata = SerializeMetadata(chunk.Metadata)
         };
 
@@ -328,6 +338,8 @@ public sealed class PostgresRegulationRepository(
             Article = row.Article,
             ChunkIndex = row.ChunkIndex,
             Text = row.Text,
+            ContentHash = row.ContentHash,
+            DuplicateOfChunkId = row.DuplicateOfChunkId,
             Metadata = DeserializeMetadata(row.Metadata)
         };
 
@@ -394,6 +406,10 @@ public sealed class PostgresRegulationRepository(
         public int ChunkIndex { get; init; }
 
         public required string Text { get; init; }
+
+        public string? ContentHash { get; init; }
+
+        public string? DuplicateOfChunkId { get; init; }
 
         public string? Metadata { get; init; }
     }

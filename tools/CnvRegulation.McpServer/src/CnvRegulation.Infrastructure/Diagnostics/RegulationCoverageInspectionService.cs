@@ -31,6 +31,18 @@ public sealed class RegulationCoverageInspectionService(
             .Count(document => !chunksByDocumentId.ContainsKey(document.Id));
         var potentialWrapperDocuments = documents
             .Count(document => IsPotentialWrapperDocument(document, chunksByDocumentId));
+        var searchableDocuments = documents.Count(IsSearchable);
+        var nonSearchableDocuments = documents.Count - searchableDocuments;
+        var searchableDocumentIds = documents
+            .Where(IsSearchable)
+            .Select(document => document.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var uniqueSearchableChunks = chunks
+            .Where(chunk => searchableDocumentIds.Contains(chunk.DocumentId))
+            .Where(chunk => string.IsNullOrWhiteSpace(chunk.DuplicateOfChunkId))
+            .Select(chunk => string.IsNullOrWhiteSpace(chunk.ContentHash) ? chunk.Id : chunk.ContentHash)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
         var warnings = CreateWarnings(
             documentsWithZeroChunks,
             potentialWrapperDocuments,
@@ -41,6 +53,8 @@ public sealed class RegulationCoverageInspectionService(
         return new RegulationCoverageReport
         {
             DocumentsTotal = documents.Count,
+            SearchableDocuments = searchableDocuments,
+            NonSearchableDocuments = nonSearchableDocuments,
             SourceDistribution = CreateDistribution(documents.Select(document => document.Source)),
             ResolutionNumberDistribution = CreateDistribution(documents.Select(document => document.ResolutionNumber)),
             ChunksTotal = chunks.Count,
@@ -53,6 +67,8 @@ public sealed class RegulationCoverageInspectionService(
                 .Count(),
             DuplicateUrlCount = CountDuplicateUrls(documents),
             DuplicateChunkCount = qualityReport.PossibleDuplicateChunks,
+            DuplicateChunksHiddenByDefault = qualityReport.PossibleDuplicateChunks,
+            UniqueSearchableChunks = uniqueSearchableChunks,
             VeryShortChunks = qualityReport.VeryShortChunks,
             VeryLongChunks = qualityReport.VeryLongChunks,
             DocumentsWithZeroChunks = documentsWithZeroChunks,
@@ -94,6 +110,10 @@ public sealed class RegulationCoverageInspectionService(
             && chunkCount <= 1
             && document.Text.Length >= 500;
     }
+
+    private static bool IsSearchable(RegulationDocument document) =>
+        !document.Metadata.TryGetValue("searchable", out var searchable)
+        || !searchable.Equals("false", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> CreateWarnings(
         int documentsWithZeroChunks,

@@ -33,6 +33,8 @@ public static class CnvRegulationTools
         [Description("Optional resolution number filter, such as 622/2013.")] string? resolutionNumber = null,
         [Description("Optional status filter, such as candidate or mock.")] string? status = null,
         [Description("Optional requires-review filter.")] bool? requiresReview = null,
+        [Description("Whether to include duplicate chunks.")] bool includeDuplicates = false,
+        [Description("Whether to include non-searchable wrapper-like documents.")] bool includeNonSearchable = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(searchService);
@@ -47,7 +49,9 @@ public static class CnvRegulationTools
                 DocumentType = documentType,
                 ResolutionNumber = resolutionNumber,
                 Status = status,
-                RequiresReview = requiresReview
+                RequiresReview = requiresReview,
+                IncludeDuplicates = includeDuplicates,
+                IncludeNonSearchable = includeNonSearchable
             },
             cancellationToken);
     }

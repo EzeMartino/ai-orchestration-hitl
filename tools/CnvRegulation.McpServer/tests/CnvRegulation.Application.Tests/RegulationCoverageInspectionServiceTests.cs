@@ -32,6 +32,10 @@ public sealed class RegulationCoverageInspectionServiceTests
         report.DistinctArticleCount.Should().Be(2);
         report.DuplicateUrlCount.Should().Be(1);
         report.DuplicateChunkCount.Should().Be(2);
+        report.DuplicateChunksHiddenByDefault.Should().Be(2);
+        report.SearchableDocuments.Should().Be(3);
+        report.NonSearchableDocuments.Should().Be(0);
+        report.UniqueSearchableChunks.Should().Be(2);
         report.DocumentsWithZeroChunks.Should().Be(2);
         report.PotentialWrapperDocuments.Should().Be(2);
         report.SourceDistribution.Should().Contain(item => item.Label == "Infoleg" && item.Count == 2);

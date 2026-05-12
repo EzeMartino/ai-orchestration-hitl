@@ -37,20 +37,35 @@ public sealed class InMemoryRegulationSearchService(
             .Where(chunk => documentLookup.ContainsKey(chunk.DocumentId))
             .Select(chunk => new { Chunk = chunk, Document = documentLookup[chunk.DocumentId] })
             .Where(item => MatchesChunk(item.Chunk, item.Document, expansion, request))
-            .Select(item => CreateSearchResult(item.Chunk, item.Document));
+            .Select(item => CreateCandidate(
+                CreateSearchResult(
+                    item.Chunk,
+                    item.Document,
+                    0.81 + SourcePriorityScorer.Score(item.Document, item.Chunk) - (item.Chunk.DuplicateOfChunkId is null ? 0 : 0.20)),
+                item.Chunk.ContentHash,
+                item.Chunk.DuplicateOfChunkId is not null));
 
         var documentResults = documents
             .Where(document => !chunkDocumentIds.Contains(document.Id))
             .Where(document => MatchesDocument(document, expansion, request))
-            .Select(CreateSearchResult);
+            .Select(document => CreateCandidate(
+                CreateSearchResult(document, 0.95 + SourcePriorityScorer.Score(document)),
+                contentHash: null,
+                isDuplicate: false));
 
-        var mockResults = MockRegulationData.SearchResults
-            .Where(result => MatchesResultFilters(result, request))
-            .Where(result => MatchesArea(result, request.Area));
-
-        var results = chunkResults
+        var localCandidates = chunkResults
             .Concat(documentResults)
+            .ToArray();
+        var mockResults = localCandidates.Length == 0
+            ? MockRegulationData.SearchResults
+                .Where(result => MatchesResultFilters(result, request))
+                .Where(result => MatchesArea(result, request.Area))
+                .Select(result => CreateCandidate(result, contentHash: null, isDuplicate: false))
+            : [];
+        var candidates = localCandidates
             .Concat(mockResults)
+            .ToArray();
+        var results = SelectSearchResults(candidates, request.IncludeDuplicates, limit)
             .Take(limit)
             .ToArray();
 
@@ -69,7 +84,8 @@ public sealed class InMemoryRegulationSearchService(
     {
         return MatchesDocumentArea(document, request.Area)
             && MatchesDocumentQuery(document, expansion)
-            && MatchesDocumentFilters(document, request);
+            && MatchesDocumentFilters(document, request)
+            && (request.IncludeNonSearchable || !SourcePriorityScorer.IsNonSearchable(document));
     }
 
     private static bool MatchesChunk(
@@ -80,7 +96,8 @@ public sealed class InMemoryRegulationSearchService(
     {
         return MatchesChunkArea(chunk, document, request.Area)
             && MatchesChunkQuery(chunk, document, expansion)
-            && MatchesDocumentFilters(document, request);
+            && MatchesDocumentFilters(document, request)
+            && (request.IncludeNonSearchable || !SourcePriorityScorer.IsNonSearchable(document));
     }
 
     private static bool MatchesDocumentArea(RegulationDocument document, string? area)
@@ -186,7 +203,7 @@ public sealed class InMemoryRegulationSearchService(
             || string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static RegulationSearchResult CreateSearchResult(RegulationDocument document)
+    private static RegulationSearchResult CreateSearchResult(RegulationDocument document, double score)
     {
         var snippet = CreateSnippet(document.Text);
 
@@ -198,7 +215,7 @@ public sealed class InMemoryRegulationSearchService(
             Source = document.Source,
             Url = document.Url,
             Snippet = snippet,
-            Score = 0.95,
+            Score = score,
             Citations =
             [
                 new RegulationCitation
@@ -215,7 +232,7 @@ public sealed class InMemoryRegulationSearchService(
         };
     }
 
-    private static RegulationSearchResult CreateSearchResult(RegulationChunk chunk, RegulationDocument document)
+    private static RegulationSearchResult CreateSearchResult(RegulationChunk chunk, RegulationDocument document, double score)
     {
         var snippet = CreateSnippet(chunk.Text);
 
@@ -230,7 +247,7 @@ public sealed class InMemoryRegulationSearchService(
             Source = document.Source,
             Url = document.Url,
             Snippet = snippet,
-            Score = 0.81,
+            Score = score,
             Citations =
             [
                 new RegulationCitation
@@ -308,4 +325,38 @@ public sealed class InMemoryRegulationSearchService(
 
     private static bool IsStopTerm(string term) =>
         term is "del" or "las" or "los" or "una" or "uno" or "para" or "con";
+
+    private static SearchCandidate CreateCandidate(
+        RegulationSearchResult result,
+        string? contentHash,
+        bool isDuplicate) =>
+        new(result, contentHash, isDuplicate);
+
+    private static IReadOnlyList<RegulationSearchResult> SelectSearchResults(
+        IReadOnlyList<SearchCandidate> candidates,
+        bool includeDuplicates,
+        int limit)
+    {
+        var selectedCandidates = includeDuplicates
+            ? candidates
+            : candidates
+                .GroupBy(candidate => string.IsNullOrWhiteSpace(candidate.ContentHash)
+                    ? candidate.Result.ChunkId
+                    : candidate.ContentHash, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(candidate => candidate.Result.Score)
+                    .ThenBy(candidate => candidate.IsDuplicate)
+                    .ThenBy(candidate => candidate.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
+                    .First())
+                .ToArray();
+
+        return selectedCandidates
+            .OrderByDescending(candidate => candidate.Result.Score)
+            .ThenBy(candidate => candidate.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .Select(candidate => candidate.Result)
+            .ToArray();
+    }
+
+    private sealed record SearchCandidate(RegulationSearchResult Result, string? ContentHash, bool IsDuplicate);
 }

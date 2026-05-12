@@ -46,6 +46,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<InMemoryRegulationRepository>();
         provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<InMemoryRegulationRepository>();
         provider.GetRequiredService<IRegulationChunker>().Should().NotBeNull();
+        provider.GetRequiredService<IRegulationChunkHasher>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationIngestionService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceDiscoveryService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceDownloadService>().Should().NotBeNull();

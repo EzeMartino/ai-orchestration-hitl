@@ -44,4 +44,14 @@ public sealed class SearchRegulationRequest
     /// Gets the optional manual review requirement filter.
     /// </summary>
     public bool? RequiresReview { get; init; }
+
+    /// <summary>
+    /// Gets whether duplicate chunks should be returned.
+    /// </summary>
+    public bool IncludeDuplicates { get; init; }
+
+    /// <summary>
+    /// Gets whether non-searchable wrapper-like documents should be returned.
+    /// </summary>
+    public bool IncludeNonSearchable { get; init; }
 }

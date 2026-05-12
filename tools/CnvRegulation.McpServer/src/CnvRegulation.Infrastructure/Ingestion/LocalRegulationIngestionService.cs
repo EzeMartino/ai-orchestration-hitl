@@ -1,6 +1,8 @@
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Domain;
+using CnvRegulation.Infrastructure.Deduplication;
+using CnvRegulation.Infrastructure.Diagnostics;
 using System.Text.Json;
 
 namespace CnvRegulation.Infrastructure.Ingestion;
@@ -16,7 +18,9 @@ public sealed class LocalRegulationIngestionService(
     HtmlRegulationParser htmlParser,
     IPdfTextExtractor pdfTextExtractor,
     ITextNormalizer pdfTextNormalizer,
-    SidecarMetadataReader metadataReader) : IRegulationIngestionService
+    SidecarMetadataReader metadataReader,
+    RegulationChunkDeduplicator chunkDeduplicator,
+    WrapperDocumentDetector wrapperDocumentDetector) : IRegulationIngestionService
 {
     private static readonly string[] SupportedExtensions = [".txt", ".html", ".htm", ".pdf"];
 
@@ -79,9 +83,17 @@ public sealed class LocalRegulationIngestionService(
                     .ConfigureAwait(false);
                 document = AddParsedMetadata(document, parsed.Metadata);
 
-                await repository.SaveAsync(document, cancellationToken).ConfigureAwait(false);
                 var chunks = await chunker.ChunkAsync(document, cancellationToken).ConfigureAwait(false);
-                await chunkRepository.ReplaceForDocumentAsync(document.Id, chunks, cancellationToken).ConfigureAwait(false);
+                document = AddWrapperMetadata(document, wrapperDocumentDetector.Detect(document, chunks.Count));
+                var existingChunks = await chunkRepository.ListChunksAsync(cancellationToken).ConfigureAwait(false);
+                var deduplicatedChunks = chunkDeduplicator.Annotate(
+                    chunks,
+                    existingChunks
+                        .Where(chunk => !string.Equals(chunk.DocumentId, document.Id, StringComparison.OrdinalIgnoreCase))
+                        .ToArray());
+
+                await repository.SaveAsync(document, cancellationToken).ConfigureAwait(false);
+                await chunkRepository.ReplaceForDocumentAsync(document.Id, deduplicatedChunks, cancellationToken).ConfigureAwait(false);
                 warnings.AddRange(parsed.Warnings.Select(warning => $"'{Path.GetFileName(sourceFile)}': {warning}"));
                 documentsIngested++;
             }
@@ -177,6 +189,39 @@ public sealed class LocalRegulationIngestionService(
         foreach (var item in parsedMetadata)
         {
             metadata[item.Key] = item.Value;
+        }
+
+        return new RegulationDocument
+        {
+            Id = document.Id,
+            Source = document.Source,
+            DocumentType = document.DocumentType,
+            ResolutionNumber = document.ResolutionNumber,
+            Title = document.Title,
+            PublicationDate = document.PublicationDate,
+            EffectiveDate = document.EffectiveDate,
+            Url = document.Url,
+            Status = document.Status,
+            RequiresReview = document.RequiresReview,
+            RetrievedAt = document.RetrievedAt,
+            Metadata = metadata,
+            Text = document.Text
+        };
+    }
+
+    private static RegulationDocument AddWrapperMetadata(
+        RegulationDocument document,
+        WrapperDetectionResult detection)
+    {
+        var metadata = new Dictionary<string, string>(document.Metadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["isWrapperCandidate"] = detection.IsWrapperCandidate.ToString().ToLowerInvariant(),
+            ["searchable"] = detection.Searchable.ToString().ToLowerInvariant()
+        };
+
+        if (!string.IsNullOrWhiteSpace(detection.Reason))
+        {
+            metadata["wrapperReason"] = detection.Reason;
         }
 
         return new RegulationDocument

@@ -48,10 +48,10 @@ public sealed class PostgresRegulationSearchService(
                 parameters,
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-            chunkMatches.AddRange(chunkRows.Select(row => new QuerySearchResult(MapSearchResult(row), searchQuery)));
+            chunkMatches.AddRange(chunkRows.Select(row => CreateQuerySearchResult(row, searchQuery)));
         }
 
-        var results = MergeSearchResults(chunkMatches, limit);
+        var results = MergeSearchResults(chunkMatches, request.IncludeDuplicates, limit);
 
         if (results.Length == 0)
         {
@@ -64,10 +64,10 @@ public sealed class PostgresRegulationSearchService(
                     parameters,
                     cancellationToken: cancellationToken)).ConfigureAwait(false);
 
-                documentMatches.AddRange(documentRows.Select(row => new QuerySearchResult(MapSearchResult(row), searchQuery)));
+                documentMatches.AddRange(documentRows.Select(row => CreateQuerySearchResult(row, searchQuery)));
             }
 
-            results = MergeSearchResults(documentMatches, limit);
+            results = MergeSearchResults(documentMatches, request.IncludeDuplicates, limit);
         }
 
         var filteredMocks = results.Length == 0
@@ -91,6 +91,7 @@ public sealed class PostgresRegulationSearchService(
         AND (CAST(@ResolutionNumber AS text) IS NULL OR d.resolution_number = CAST(@ResolutionNumber AS text))
         AND (CAST(@Status AS text) IS NULL OR d.status = CAST(@Status AS text))
         AND (CAST(@RequiresReview AS boolean) IS NULL OR d.requires_review = CAST(@RequiresReview AS boolean))
+        AND (CAST(@IncludeNonSearchable AS boolean) OR COALESCE(d.metadata->>'searchable', 'true') <> 'false')
         AND (
             CAST(@AreaLike AS text) IS NULL
             OR d.title ILIKE CAST(@AreaLike AS text)
@@ -109,11 +110,16 @@ public sealed class PostgresRegulationSearchService(
             c.section AS Section,
             c.article AS Article,
             c.text AS Text,
+            c.content_hash AS ContentHash,
+            c.duplicate_of_chunk_id AS DuplicateOfChunkId,
             d.source AS Source,
             d.document_type AS DocumentType,
             d.resolution_number AS ResolutionNumber,
             d.publication_date AS PublicationDate,
             d.url AS Url,
+            d.status AS Status,
+            d.metadata->>'sourceFile' AS SourceFile,
+            d.metadata->>'searchable' AS Searchable,
             ts_rank(
                 to_tsvector('spanish', coalesce(c.text, '')),
                 websearch_to_tsquery('spanish', @Query)
@@ -136,11 +142,16 @@ public sealed class PostgresRegulationSearchService(
             NULL AS Section,
             NULL AS Article,
             d.text AS Text,
+            NULL AS ContentHash,
+            NULL AS DuplicateOfChunkId,
             d.source AS Source,
             d.document_type AS DocumentType,
             d.resolution_number AS ResolutionNumber,
             d.publication_date AS PublicationDate,
             d.url AS Url,
+            d.status AS Status,
+            d.metadata->>'sourceFile' AS SourceFile,
+            d.metadata->>'searchable' AS Searchable,
             ts_rank(
                 to_tsvector('spanish', coalesce(d.text, '')),
                 websearch_to_tsquery('spanish', @Query)
@@ -159,12 +170,13 @@ public sealed class PostgresRegulationSearchService(
     {
         var parameters = new DynamicParameters();
         parameters.Add("Query", query);
-        parameters.Add("Limit", limit);
+        parameters.Add("Limit", Math.Max(limit * 10, 50));
         parameters.Add("Source", NormalizeFilter(request.Source));
         parameters.Add("DocumentType", NormalizeFilter(request.DocumentType));
         parameters.Add("ResolutionNumber", NormalizeFilter(request.ResolutionNumber));
         parameters.Add("Status", NormalizeFilter(request.Status));
         parameters.Add("RequiresReview", request.RequiresReview);
+        parameters.Add("IncludeNonSearchable", request.IncludeNonSearchable);
         parameters.Add("AreaLike", string.IsNullOrWhiteSpace(request.Area) ? null : $"%{request.Area.Trim()}%");
 
         return parameters;
@@ -173,6 +185,7 @@ public sealed class PostgresRegulationSearchService(
     private static RegulationSearchResult MapSearchResult(SearchRow row)
     {
         var snippet = CreateSnippet(row.Text);
+        var score = row.Score + CalculateSourcePriority(row) - (row.DuplicateOfChunkId is null ? 0 : 0.20);
 
         return new RegulationSearchResult
         {
@@ -185,7 +198,7 @@ public sealed class PostgresRegulationSearchService(
             Source = row.Source,
             Url = row.Url,
             Snippet = snippet,
-            Score = row.Score,
+            Score = score,
             Citations =
             [
                 new RegulationCitation
@@ -207,8 +220,9 @@ public sealed class PostgresRegulationSearchService(
 
     private static RegulationSearchResult[] MergeSearchResults(
         IReadOnlyList<QuerySearchResult> matches,
+        bool includeDuplicates,
         int limit) =>
-        matches
+        SelectDuplicateCandidates(matches, includeDuplicates)
             .GroupBy(match => match.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
             {
@@ -224,6 +238,27 @@ public sealed class PostgresRegulationSearchService(
             .ThenBy(result => result.ChunkId, StringComparer.OrdinalIgnoreCase)
             .Take(limit)
             .ToArray();
+
+    private static IReadOnlyList<QuerySearchResult> SelectDuplicateCandidates(
+        IReadOnlyList<QuerySearchResult> matches,
+        bool includeDuplicates)
+    {
+        if (includeDuplicates)
+        {
+            return matches;
+        }
+
+        return matches
+            .GroupBy(match => string.IsNullOrWhiteSpace(match.ContentHash)
+                ? match.Result.ChunkId
+                : match.ContentHash, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(match => match.Result.Score)
+                .ThenBy(match => match.IsDuplicate)
+                .ThenBy(match => match.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .ToArray();
+    }
 
     private static RegulationSearchResult CopyWithScore(RegulationSearchResult result, double score) =>
         new()
@@ -256,6 +291,52 @@ public sealed class PostgresRegulationSearchService(
     {
         return string.IsNullOrWhiteSpace(expected)
             || string.Equals(actual, expected.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static QuerySearchResult CreateQuerySearchResult(SearchRow row, string searchQuery) =>
+        new(MapSearchResult(row), searchQuery, row.ContentHash, row.DuplicateOfChunkId is not null);
+
+    private static double CalculateSourcePriority(SearchRow row)
+    {
+        if (row.Searchable?.Equals("false", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return -0.50;
+        }
+
+        var text = string.Join(' ', row.DocumentId, row.DocumentTitle, row.SourceFile, row.Url, row.ChunkId);
+        if (row.Source.Equals("CNV", StringComparison.OrdinalIgnoreCase)
+            && (text.Contains("toc2013", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("N.T. 2013", StringComparison.OrdinalIgnoreCase)))
+        {
+            return 0.25;
+        }
+
+        if (row.Source.Equals("CNV", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.20;
+        }
+
+        if (row.Url.Contains("texact", StringComparison.OrdinalIgnoreCase)
+            || (row.SourceFile?.Contains("texact", StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            return 0.15;
+        }
+
+        if (row.Url.Contains("norma.htm", StringComparison.OrdinalIgnoreCase)
+            || (row.SourceFile?.Contains("norma", StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            return 0.10;
+        }
+
+        if (row.Url.Contains("/anexos/", StringComparison.OrdinalIgnoreCase)
+            || row.Url.Contains("verNorma.do", StringComparison.OrdinalIgnoreCase)
+            || (row.SourceFile?.Contains("anexos", StringComparison.OrdinalIgnoreCase) ?? false)
+            || (row.SourceFile?.Contains("vernorma", StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            return 0.05;
+        }
+
+        return row.Status.Equals("candidate", StringComparison.OrdinalIgnoreCase) ? -0.10 : 0;
     }
 
     private static string? NormalizeFilter(string? value) =>
@@ -308,6 +389,10 @@ public sealed class PostgresRegulationSearchService(
 
         public required string Text { get; init; }
 
+        public string? ContentHash { get; init; }
+
+        public string? DuplicateOfChunkId { get; init; }
+
         public required string Source { get; init; }
 
         public required string DocumentType { get; init; }
@@ -318,8 +403,18 @@ public sealed class PostgresRegulationSearchService(
 
         public required string Url { get; init; }
 
+        public required string Status { get; init; }
+
+        public string? SourceFile { get; init; }
+
+        public string? Searchable { get; init; }
+
         public double Score { get; init; }
     }
 
-    private sealed record QuerySearchResult(RegulationSearchResult Result, string SearchQuery);
+    private sealed record QuerySearchResult(
+        RegulationSearchResult Result,
+        string SearchQuery,
+        string? ContentHash,
+        bool IsDuplicate);
 }

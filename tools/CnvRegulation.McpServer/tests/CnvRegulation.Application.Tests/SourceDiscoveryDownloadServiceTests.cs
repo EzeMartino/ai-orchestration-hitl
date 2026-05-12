@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.Chunking;
+using CnvRegulation.Infrastructure.Deduplication;
+using CnvRegulation.Infrastructure.Diagnostics;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.Parsing;
 using CnvRegulation.Infrastructure.Repositories;
@@ -120,7 +122,9 @@ public sealed class SourceDiscoveryDownloadServiceTests
             new HtmlRegulationParser(),
             new PdfPigTextExtractor(),
             new PdfExtractedTextNormalizer(),
-            new SidecarMetadataReader());
+            new SidecarMetadataReader(),
+            new RegulationChunkDeduplicator(new RegulationChunkHasher()),
+            new WrapperDocumentDetector());
 
         var response = await service.IngestAsync(
             new IngestRegulationSourceRequest { SourceDirectory = testDirectory.Path },
@@ -169,6 +173,42 @@ public sealed class SourceDiscoveryDownloadServiceTests
         File.Exists(Path.Combine(outputDirectory, "bad-name.html")).Should().BeTrue();
         File.Exists(Path.Combine(outputDirectory, "bad-name.metadata.json")).Should().BeTrue();
         File.Exists(Path.Combine(testDirectory.Path, "bad:name.html")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DownloadSources_ShouldSkipUnsupportedCss()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var manifestPath = await WriteManifestAsync(
+            testDirectory.Path,
+            new SourceManifestItem
+            {
+                Id = "infoleg-discovered-css",
+                Source = "Infoleg",
+                DocumentType = "Resolucion General",
+                Title = "Discovered CSS",
+                Url = "https://servicios.infoleg.gob.ar/infolegInternet/styles/site.css",
+                FileName = "infoleg-discovered-css.css",
+                MetadataFileName = "infoleg-discovered-css.metadata.json",
+                Status = "candidate",
+                Priority = "low",
+                RequiresReview = true
+            });
+        var outputDirectory = Path.Combine(testDirectory.Path, "sources");
+        var service = CreateDownloadService("body { color: red; }");
+
+        var response = await service.DownloadAsync(
+            new DownloadSourcesRequest
+            {
+                ManifestPath = manifestPath,
+                OutputDirectory = outputDirectory
+            },
+            CancellationToken.None);
+
+        response.SourcesDownloaded.Should().Be(0);
+        response.SourcesSkipped.Should().Be(1);
+        response.Warnings.Should().Contain(warning => warning.Contains("file type is not supported", StringComparison.OrdinalIgnoreCase));
+        File.Exists(Path.Combine(outputDirectory, "infoleg-discovered-css.css")).Should().BeFalse();
     }
 
     private static ManifestSourceDownloadService CreateDownloadService(string responseBody)

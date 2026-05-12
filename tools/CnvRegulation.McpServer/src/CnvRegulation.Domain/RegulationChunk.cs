@@ -46,6 +46,16 @@ public sealed class RegulationChunk
     public required string Text { get; init; }
 
     /// <summary>
+    /// Gets the normalized content hash used for duplicate detection.
+    /// </summary>
+    public string? ContentHash { get; init; }
+
+    /// <summary>
+    /// Gets the canonical chunk identifier when this chunk duplicates another chunk.
+    /// </summary>
+    public string? DuplicateOfChunkId { get; init; }
+
+    /// <summary>
     /// Gets additional metadata associated with the chunk.
     /// </summary>
     public required IReadOnlyDictionary<string, string> Metadata { get; init; }

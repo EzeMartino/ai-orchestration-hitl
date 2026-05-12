@@ -149,12 +149,13 @@ if (args.Length > 0 && string.Equals(args[0], "inspect-chunks", StringComparison
 if (args.Length > 0 && string.Equals(args[0], "inspect-coverage", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
+    IngestRegulationSourceResponse? ingestionResponse = null;
 
     if (ShouldIngestBeforeRepositoryInspection(args))
     {
         var sourceDirectory = ResolveSourceDirectory(args);
         var ingestionService = host.Services.GetRequiredService<IRegulationIngestionService>();
-        await ingestionService.IngestAsync(
+        ingestionResponse = await ingestionService.IngestAsync(
             new IngestRegulationSourceRequest
             {
                 SourceDirectory = sourceDirectory
@@ -165,7 +166,7 @@ if (args.Length > 0 && string.Equals(args[0], "inspect-coverage", StringComparis
     var coverageService = host.Services.GetRequiredService<IRegulationCoverageInspectionService>();
     var response = await coverageService.InspectAsync(new InspectCoverageRequest(), CancellationToken.None);
 
-    Console.WriteLine(CoverageReportFormatter.Format(response));
+    Console.WriteLine(CoverageReportFormatter.Format(response, ingestionResponse));
 
     return;
 }
