@@ -69,12 +69,14 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient
             cancellationToken: cancellationToken
         );
 
-        var json = ExtractJson(result);
+        if (result.IsError == true)
+        {
+            throw new InvalidOperationException(
+                $"MCP tool returned an error: {ExtractText(result)}"
+            );
+        }
 
-        var response = JsonSerializer.Deserialize<CnvRegulationSearchResponse>(
-            json,
-            _jsonOptions
-        );
+        var response = DeserializeResponse(result);
 
         return response
             ?? new CnvRegulationSearchResponse(
@@ -95,7 +97,31 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient
         }
     }
 
-    private static string ExtractJson(CallToolResult result)
+    private CnvRegulationSearchResponse? DeserializeResponse(CallToolResult result)
+    {
+        if (result.StructuredContent is JsonElement structuredContent)
+        {
+            return structuredContent.Deserialize<CnvRegulationSearchResponse>(
+                _jsonOptions
+            );
+        }
+
+        var text = ExtractText(result);
+
+        if (!LooksLikeJson(text))
+        {
+            throw new InvalidOperationException(
+                $"MCP tool returned non-JSON text content: {text}"
+            );
+        }
+
+        return JsonSerializer.Deserialize<CnvRegulationSearchResponse>(
+            text,
+            _jsonOptions
+        );
+    }
+
+    private static string ExtractText(CallToolResult result)
     {
         var textContent = result.Content
             .OfType<TextContentBlock>()
@@ -111,5 +137,13 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient
         }
 
         return text;
+    }
+
+    private static bool LooksLikeJson(string value)
+    {
+        var trimmed = value.TrimStart();
+
+        return trimmed.StartsWith('{')
+            || trimmed.StartsWith('[');
     }
 }

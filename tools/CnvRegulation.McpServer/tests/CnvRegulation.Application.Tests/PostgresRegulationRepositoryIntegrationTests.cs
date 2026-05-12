@@ -549,7 +549,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             "Postgres",
             Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
         var connectionFactory = new RegulationDbConnectionFactory(options);
-        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory);
+        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory, options);
 
         await migrator.MigrateAsync(CancellationToken.None);
 
@@ -562,7 +562,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             "Postgres",
             Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
         var connectionFactory = new RegulationDbConnectionFactory(options);
-        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory);
+        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory, options);
 
         await migrator.MigrateAsync(CancellationToken.None);
 
@@ -577,7 +577,7 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             "Postgres",
             Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
         var connectionFactory = new RegulationDbConnectionFactory(options);
-        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory);
+        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory, options);
         var embeddingOptions = new EmbeddingOptions();
         var generator = new DeterministicFakeEmbeddingGenerator(embeddingOptions);
 

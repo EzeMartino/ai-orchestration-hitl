@@ -2,9 +2,32 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder
     .AddPostgres("postgres")
+    .WithImage("pgvector/pgvector", "pg17")
     .WithDataVolume();
 
 var orchestrationDb = postgres.AddDatabase("orchestrationdb");
+var cnvRegulationDb = postgres.AddDatabase("cnvregulationdb", "cnv_regulation");
+var cnvRegulationMcpProject = Path.GetFullPath(
+    Path.Combine(
+        builder.AppHostDirectory,
+        "..",
+        "..",
+        "tools",
+        "CnvRegulation.McpServer",
+        "src",
+        "CnvRegulation.McpServer"));
+var cnvRegulationDbMigration = builder
+    .AddExecutable(
+        "cnv-regulation-db-migration",
+        "dotnet",
+        builder.AppHostDirectory,
+        "run",
+        "--project",
+        cnvRegulationMcpProject,
+        "--",
+        "migrate-db")
+    .WithEnvironment("CNV_REGULATION_DB_CONNECTION_STRING", cnvRegulationDb)
+    .WaitFor(postgres);
 var defaultPythonHome = Path.GetFullPath(
     Path.Combine(builder.AppHostDirectory, "..", "..", "python-agents", "data_agent"));
 var pythonHome = ResolvePythonHome(
@@ -13,8 +36,11 @@ var pythonHome = ResolvePythonHome(
 var api = builder
     .AddProject<Projects.Orchestration_Api>("orchestration-api")
     .WithEnvironment("Python__Home", pythonHome)
+    .WithEnvironment("CNV_REGULATION_DB_CONNECTION_STRING", cnvRegulationDb)
     .WithReference(orchestrationDb)
-    .WaitFor(orchestrationDb);
+    .WaitFor(orchestrationDb)
+    .WaitFor(cnvRegulationDb)
+    .WaitForCompletion(cnvRegulationDbMigration);
 
 var frontendPath = Path.GetFullPath(
     Path.Combine(builder.AppHostDirectory, "..", "..", "frontend"));
