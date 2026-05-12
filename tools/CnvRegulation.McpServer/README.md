@@ -137,6 +137,22 @@ The report includes:
 - average and median chunk length
 - top quality warnings
 
+## Inspect coverage
+
+Run an aggregate coverage report over ingested sources:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --source-directory data/sources
+```
+
+For PostgreSQL, inspect the persisted repository:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
+```
+
+If `--source-directory` is passed, sources are ingested before the coverage report. The report includes document, chunk, article, source, resolution-number, duplicate URL, duplicate chunk, zero-chunk document, possible wrapper, and top warning counts.
+
 ## PostgreSQL persistence
 
 Default storage is in-memory. No database is required for local mock/dev mode:

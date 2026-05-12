@@ -146,6 +146,30 @@ if (args.Length > 0 && string.Equals(args[0], "inspect-chunks", StringComparison
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "inspect-coverage", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+
+    if (ShouldIngestBeforeRepositoryInspection(args))
+    {
+        var sourceDirectory = ResolveSourceDirectory(args);
+        var ingestionService = host.Services.GetRequiredService<IRegulationIngestionService>();
+        await ingestionService.IngestAsync(
+            new IngestRegulationSourceRequest
+            {
+                SourceDirectory = sourceDirectory
+            },
+            CancellationToken.None);
+    }
+
+    var coverageService = host.Services.GetRequiredService<IRegulationCoverageInspectionService>();
+    var response = await coverageService.InspectAsync(new InspectCoverageRequest(), CancellationToken.None);
+
+    Console.WriteLine(CoverageReportFormatter.Format(response));
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "ingest", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -210,6 +234,11 @@ static string? ResolveStorageProvider(string[] args)
 }
 
 static bool ShouldIngestBeforeChunkInspection(string[] args)
+{
+    return ShouldIngestBeforeRepositoryInspection(args);
+}
+
+static bool ShouldIngestBeforeRepositoryInspection(string[] args)
 {
     var storageProvider = ResolveStorageProvider(args);
     return !string.Equals(storageProvider, "Postgres", StringComparison.OrdinalIgnoreCase)

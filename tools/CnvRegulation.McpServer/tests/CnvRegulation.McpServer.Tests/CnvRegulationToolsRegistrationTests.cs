@@ -51,6 +51,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         provider.GetRequiredService<ISourceDownloadService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceInspectionService>().Should().NotBeNull();
         provider.GetRequiredService<IInfolegLinkDiscoveryService>().Should().NotBeNull();
+        provider.GetRequiredService<IRegulationCoverageInspectionService>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationQueryExpander>().Should().BeOfType<StaticRegulationQueryExpander>();
         provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<InMemoryRegulationSearchService>();
         provider.GetRequiredService<IRegulationDocumentService>().Should().BeOfType<InMemoryRegulationDocumentService>();
