@@ -159,6 +159,22 @@ dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage p
 
 If `--source-directory` is passed, sources are ingested before the coverage report. The report includes document, searchable/non-searchable document, chunk, unique searchable chunk, article, source, resolution-number, duplicate URL, duplicate chunk, filtered source, unsupported file, zero-chunk document, possible wrapper, and top warning counts.
 
+## Validate search quality
+
+Run curated search-quality checks against the configured search service:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --queries data/search-quality/cnv.search-quality.json
+```
+
+For PostgreSQL:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --queries data/search-quality/cnv.search-quality.json
+```
+
+The report shows pass/fail per query, expanded search queries, result counts, top result source/title/article, score, citation presence, warnings, and expectation failure reasons. The curated JSON is intentionally simple and should be updated as the corpus improves.
+
 ## PostgreSQL persistence
 
 Default storage is in-memory. No database is required for local mock/dev mode:

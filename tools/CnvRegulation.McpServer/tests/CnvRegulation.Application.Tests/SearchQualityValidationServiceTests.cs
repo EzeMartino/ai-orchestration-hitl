@@ -1,0 +1,153 @@
+using CnvRegulation.Application.Abstractions;
+using CnvRegulation.Application.Contracts;
+using CnvRegulation.Domain;
+using CnvRegulation.Infrastructure.Diagnostics;
+using CnvRegulation.Infrastructure.InMemory;
+using CnvRegulation.Infrastructure.Repositories;
+using CnvRegulation.Infrastructure.Search;
+using FluentAssertions;
+
+namespace CnvRegulation.Application.Tests;
+
+public sealed class SearchQualityValidationServiceTests
+{
+    [Fact]
+    public async Task ValidateAsync_ShouldPass_WhenSearchMatchesExpectations()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var querySetPath = Path.Combine(testDirectory.Path, "queries.json");
+        await File.WriteAllTextAsync(
+            querySetPath,
+            """
+            {
+              "queries": [
+                {
+                  "id": "alyc",
+                  "query": "ALyC obligaciones",
+                  "expectedAnyTerms": [ "agente", "liquidacion", "compensacion" ],
+                  "expectedSources": [ "CNV" ],
+                  "minResults": 1
+                }
+              ]
+            }
+            """);
+        var repository = new InMemoryRegulationRepository();
+        await repository.SaveAsync(
+            new RegulationDocument
+            {
+                Id = "cnv-test",
+                Source = "CNV",
+                DocumentType = "Texto Ordenado",
+                Title = "Normas CNV test",
+                Url = "https://www.cnv.gov.ar/",
+                Status = "candidate",
+                Text = "Obligaciones del agente de liquidacion y compensacion."
+            },
+            CancellationToken.None);
+        var queryExpander = CreateQueryExpander();
+        var searchService = new InMemoryRegulationSearchService(repository, repository, queryExpander);
+        var validator = new SearchQualityValidationService(searchService, queryExpander);
+
+        var report = await validator.ValidateAsync(
+            new ValidateSearchQualityRequest { QuerySetPath = querySetPath },
+            CancellationToken.None);
+
+        report.Queries.Should().Be(1);
+        report.Passed.Should().Be(1);
+        report.Failed.Should().Be(0);
+        var result = report.Results.Should().ContainSingle().Which;
+        result.ExpandedQueries.Should().Contain(query =>
+            StaticRegulationQueryExpander.Normalize(query).Contains("agente de liquidacion", StringComparison.OrdinalIgnoreCase));
+        result.CitationsPresent.Should().BeTrue();
+        result.TopResultSource.Should().Be("CNV");
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ShouldFail_WhenMinimumResultsAreMissing()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var querySetPath = Path.Combine(testDirectory.Path, "queries.json");
+        await File.WriteAllTextAsync(
+            querySetPath,
+            """
+            {
+              "queries": [
+                {
+                  "id": "missing",
+                  "query": "missing term",
+                  "expectedAnyTerms": [ "missing" ],
+                  "minResults": 1
+                }
+              ]
+            }
+            """);
+        var validator = new SearchQualityValidationService(new EmptySearchService(), CreateQueryExpander());
+
+        var report = await validator.ValidateAsync(
+            new ValidateSearchQualityRequest { QuerySetPath = querySetPath },
+            CancellationToken.None);
+
+        report.Queries.Should().Be(1);
+        report.Passed.Should().Be(0);
+        report.Failed.Should().Be(1);
+        report.Results[0].FailureReasons.Should().Contain(reason =>
+            reason.Contains("expected at least 1", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ValidateAsync_ShouldReturnWarning_WhenQueryFileIsMissing()
+    {
+        var validator = new SearchQualityValidationService(new EmptySearchService(), CreateQueryExpander());
+
+        var report = await validator.ValidateAsync(
+            new ValidateSearchQualityRequest { QuerySetPath = "missing.json" },
+            CancellationToken.None);
+
+        report.Queries.Should().Be(0);
+        report.Warnings.Should().Contain(warning => warning.Contains("does not exist", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static StaticRegulationQueryExpander CreateQueryExpander() =>
+        new(new RegulationAliasesOptions());
+
+    private sealed class EmptySearchService : IRegulationSearchService
+    {
+        public Task<SearchRegulationResponse> SearchAsync(
+            SearchRegulationRequest request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new SearchRegulationResponse
+            {
+                Query = request.Query,
+                Results = [],
+                Warnings = []
+            });
+        }
+    }
+
+    private sealed class TempDirectory : IDisposable
+    {
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static TempDirectory Create()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+
+            return new TempDirectory(path);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
+    }
+}

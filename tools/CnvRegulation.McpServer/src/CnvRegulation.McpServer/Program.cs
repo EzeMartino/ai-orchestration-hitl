@@ -171,6 +171,25 @@ if (args.Length > 0 && string.Equals(args[0], "inspect-coverage", StringComparis
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var querySetPath = ResolveSearchQualityQuerySetPath(args);
+    var limit = ResolveSearchQualityLimit(args);
+    var validationService = host.Services.GetRequiredService<ISearchQualityValidationService>();
+    var response = await validationService.ValidateAsync(
+        new ValidateSearchQualityRequest
+        {
+            QuerySetPath = querySetPath,
+            Limit = limit
+        },
+        CancellationToken.None);
+
+    Console.WriteLine(SearchQualityValidationReportFormatter.Format(response));
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "ingest", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -291,6 +310,23 @@ static int ResolveMaxLinksPerSource(string[] args)
 {
     var value = GetOptionValue(args, "--max-links-per-source");
     return int.TryParse(value, out var parsedValue) ? parsedValue : 20;
+}
+
+static string ResolveSearchQualityQuerySetPath(string[] args)
+{
+    var explicitPath = GetOptionValue(args, "--queries");
+    if (!string.IsNullOrWhiteSpace(explicitPath))
+    {
+        return explicitPath;
+    }
+
+    return Path.Combine(ResolveProjectRoot(), "data", "search-quality", "cnv.search-quality.json");
+}
+
+static int ResolveSearchQualityLimit(string[] args)
+{
+    var value = GetOptionValue(args, "--limit");
+    return int.TryParse(value, out var parsedValue) ? parsedValue : 5;
 }
 
 static string ResolveOutputDirectory(string[] args)

@@ -1,0 +1,141 @@
+{
+  "queries": [
+    {
+      "id": "alyc-obligaciones",
+      "query": "ALyC obligaciones",
+      "expectedAnyTerms": [
+        "agente",
+        "liquidaci\u00f3n",
+        "compensaci\u00f3n"
+      ],
+      "expectedSources": [
+        "CNV",
+        "Infoleg"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "alyc-nombre-completo",
+      "query": "agente de liquidaci\u00f3n y compensaci\u00f3n",
+      "expectedAnyTerms": [
+        "agente",
+        "liquidaci\u00f3n",
+        "compensaci\u00f3n"
+      ],
+      "expectedSources": [
+        "CNV",
+        "Infoleg"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "oferta-publica",
+      "query": "oferta p\u00fablica",
+      "expectedAnyTerms": [
+        "oferta p\u00fablica",
+        "r\u00e9gimen de oferta p\u00fablica"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "hecho-relevante",
+      "query": "hecho relevante",
+      "expectedAnyTerms": [
+        "hecho relevante",
+        "informaci\u00f3n relevante"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "informacion-relevante",
+      "query": "informaci\u00f3n relevante",
+      "expectedAnyTerms": [
+        "hecho relevante",
+        "informaci\u00f3n relevante"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "fci",
+      "query": "FCI",
+      "expectedAnyTerms": [
+        "fondo com\u00fan de inversi\u00f3n",
+        "fondos comunes de inversi\u00f3n"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "fondos-comunes",
+      "query": "fondos comunes de inversi\u00f3n",
+      "expectedAnyTerms": [
+        "fondo com\u00fan de inversi\u00f3n",
+        "fondos comunes de inversi\u00f3n"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "regimen-informativo",
+      "query": "r\u00e9gimen informativo",
+      "expectedAnyTerms": [
+        "informaci\u00f3n",
+        "r\u00e9gimen informativo"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "idoneidad",
+      "query": "idoneidad",
+      "expectedAnyTerms": [
+        "idoneidad",
+        "id\u00f3neos",
+        "personal id\u00f3neo"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "prevencion-lavado",
+      "query": "prevenci\u00f3n de lavado",
+      "expectedAnyTerms": [
+        "prevenci\u00f3n de lavado",
+        "lavado de activos",
+        "financiamiento del terrorismo"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "comitente",
+      "query": "comitente",
+      "expectedAnyTerms": [
+        "comitente"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "fiduciario-financiero",
+      "query": "fiduciario financiero",
+      "expectedAnyTerms": [
+        "fiduciario financiero",
+        "fideicomiso financiero"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "emisora",
+      "query": "emisora",
+      "expectedAnyTerms": [
+        "emisora",
+        "emisoras"
+      ],
+      "minResults": 1
+    },
+    {
+      "id": "mercado-autorizado",
+      "query": "mercado autorizado",
+      "expectedAnyTerms": [
+        "mercado autorizado",
+        "mercados autorizados"
+      ],
+      "minResults": 1
+    }
+  ]
+}
