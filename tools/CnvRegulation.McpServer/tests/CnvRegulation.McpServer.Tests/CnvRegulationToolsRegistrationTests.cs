@@ -45,7 +45,10 @@ public sealed class CnvRegulationToolsRegistrationTests
 
         provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<InMemoryRegulationRepository>();
         provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<InMemoryRegulationRepository>();
+        provider.GetRequiredService<IRegulationEmbeddingRepository>().Should().BeOfType<InMemoryRegulationRepository>();
         provider.GetRequiredService<IRegulationChunker>().Should().NotBeNull();
+        provider.GetRequiredService<IRegulationEmbeddingService>().Should().NotBeNull();
+        provider.GetRequiredService<IEmbeddingGenerator>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationChunkHasher>().Should().NotBeNull();
         provider.GetRequiredService<IRegulationIngestionService>().Should().NotBeNull();
         provider.GetRequiredService<ISourceDiscoveryService>().Should().NotBeNull();
@@ -80,6 +83,7 @@ public sealed class CnvRegulationToolsRegistrationTests
         using var provider = services.BuildServiceProvider();
         provider.GetRequiredService<IRegulationRepository>().Should().BeOfType<PostgresRegulationRepository>();
         provider.GetRequiredService<IRegulationChunkRepository>().Should().BeOfType<PostgresRegulationRepository>();
+        provider.GetRequiredService<IRegulationEmbeddingRepository>().Should().BeOfType<PostgresRegulationRepository>();
         provider.GetRequiredService<IRegulationSearchService>().Should().BeOfType<PostgresRegulationSearchService>();
         provider.GetRequiredService<IRegulationDatabaseMigrator>().Should().BeOfType<PostgresRegulationDatabaseMigrator>();
     }

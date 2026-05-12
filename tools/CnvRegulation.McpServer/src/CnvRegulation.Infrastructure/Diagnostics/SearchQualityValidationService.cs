@@ -50,7 +50,7 @@ public sealed class SearchQualityValidationService(
         foreach (var query in querySet.Queries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            results.Add(await ValidateQueryAsync(query, limit, cancellationToken).ConfigureAwait(false));
+            results.Add(await ValidateQueryAsync(query, limit, request.SearchMode, cancellationToken).ConfigureAwait(false));
         }
 
         return new SearchQualityValidationReport
@@ -67,6 +67,7 @@ public sealed class SearchQualityValidationService(
     private async Task<SearchQualityValidationResult> ValidateQueryAsync(
         SearchQualityQuery query,
         int limit,
+        string searchMode,
         CancellationToken cancellationToken)
     {
         var expansion = queryExpander.Expand(query.Query);
@@ -74,7 +75,8 @@ public sealed class SearchQualityValidationService(
             new SearchRegulationRequest
             {
                 Query = query.Query,
-                Limit = Math.Max(limit, query.MinResults)
+                Limit = Math.Max(limit, query.MinResults),
+                SearchMode = searchMode
             },
             cancellationToken).ConfigureAwait(false);
         var topResult = search.Results.FirstOrDefault();

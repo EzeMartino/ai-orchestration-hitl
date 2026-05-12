@@ -13,7 +13,8 @@ namespace CnvRegulation.Infrastructure.Persistence;
 /// </summary>
 public sealed class PostgresRegulationSearchService(
     RegulationDbConnectionFactory connectionFactory,
-    IRegulationQueryExpander queryExpander) : IRegulationSearchService
+    IRegulationQueryExpander queryExpander,
+    IEmbeddingGenerator? embeddingGenerator = null) : IRegulationSearchService
 {
     /// <inheritdoc />
     public async Task<SearchRegulationResponse> SearchAsync(
@@ -40,35 +41,19 @@ public sealed class PostgresRegulationSearchService(
             .OpenConnectionAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var chunkMatches = new List<QuerySearchResult>();
-        foreach (var searchQuery in expansion.SearchQueries)
+        var mode = NormalizeSearchMode(request.SearchMode);
+        var warnings = new List<string>(CreateWarnings(expansion, includeMockWarning: false));
+        var results = mode switch
         {
-            var parameters = CreateSearchParameters(request, searchQuery, limit);
-            var chunkRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
-                ChunkSearchSql,
-                parameters,
-                cancellationToken: cancellationToken)).ConfigureAwait(false);
+            "semantic" => await SearchSemanticAsync(connection, request, expansion, limit, warnings, cancellationToken).ConfigureAwait(false),
+            "hybrid" => await SearchHybridAsync(connection, request, expansion, limit, warnings, cancellationToken).ConfigureAwait(false),
+            _ => await SearchFullTextAsync(connection, request, expansion, limit, cancellationToken).ConfigureAwait(false)
+        };
 
-            chunkMatches.AddRange(chunkRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
-        }
-
-        var results = MergeSearchResults(chunkMatches, request.IncludeDuplicates, limit);
-
-        if (results.Length == 0)
+        var includeMockWarning = results.Length == 0;
+        if (includeMockWarning)
         {
-            var documentMatches = new List<QuerySearchResult>();
-            foreach (var searchQuery in expansion.SearchQueries)
-            {
-                var parameters = CreateSearchParameters(request, searchQuery, limit);
-                var documentRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
-                    DocumentSearchSql,
-                    parameters,
-                    cancellationToken: cancellationToken)).ConfigureAwait(false);
-
-                documentMatches.AddRange(documentRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
-            }
-
-            results = MergeSearchResults(documentMatches, request.IncludeDuplicates, limit);
+            warnings.Insert(0, MockRegulationData.MockWarning);
         }
 
         var filteredMocks = results.Length == 0
@@ -82,7 +67,7 @@ public sealed class PostgresRegulationSearchService(
         {
             Query = query,
             Results = results.Concat(filteredMocks).Take(limit).ToArray(),
-            Warnings = CreateWarnings(expansion, includeMockWarning: results.Length == 0)
+            Warnings = warnings
         };
     }
 
@@ -164,6 +149,135 @@ public sealed class PostgresRegulationSearchService(
         LIMIT @Limit;
         """;
 
+    private const string SemanticChunkSearchSql = $"""
+        SELECT
+            c.id AS ChunkId,
+            c.document_id AS DocumentId,
+            d.title AS DocumentTitle,
+            c.title AS Title,
+            c.chapter AS Chapter,
+            c.section AS Section,
+            c.article AS Article,
+            c.text AS Text,
+            c.content_hash AS ContentHash,
+            c.duplicate_of_chunk_id AS DuplicateOfChunkId,
+            d.source AS Source,
+            d.document_type AS DocumentType,
+            d.resolution_number AS ResolutionNumber,
+            d.publication_date AS PublicationDate,
+            d.url AS Url,
+            d.status AS Status,
+            d.metadata->>'sourceFile' AS SourceFile,
+            d.metadata->>'searchable' AS Searchable,
+            1 - (c.embedding <=> CAST(@Embedding AS vector)) AS Score
+        FROM regulation_chunks c
+        JOIN regulation_documents d ON d.id = c.document_id
+        WHERE c.embedding IS NOT NULL
+        {FilterSql}
+        ORDER BY c.embedding <=> CAST(@Embedding AS vector), c.chunk_index ASC
+        LIMIT @Limit;
+        """;
+
+    private static string NormalizeSearchMode(string? searchMode)
+    {
+        var normalized = (searchMode ?? "full_text").Trim().Replace("-", "_", StringComparison.Ordinal).ToLowerInvariant();
+        return normalized switch
+        {
+            "fts" or "fulltext" => "full_text",
+            "semantic" => "semantic",
+            "hybrid" => "hybrid",
+            _ => "full_text"
+        };
+    }
+
+    private async Task<RegulationSearchResult[]> SearchFullTextAsync(
+        System.Data.Common.DbConnection connection,
+        SearchRegulationRequest request,
+        RegulationQueryExpansion expansion,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var chunkMatches = new List<QuerySearchResult>();
+        foreach (var searchQuery in expansion.SearchQueries)
+        {
+            var parameters = CreateSearchParameters(request, searchQuery, limit);
+            var chunkRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
+                ChunkSearchSql,
+                parameters,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            chunkMatches.AddRange(chunkRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
+        }
+
+        var results = MergeSearchResults(chunkMatches, request.IncludeDuplicates, limit);
+        if (results.Length > 0)
+        {
+            return results;
+        }
+
+        var documentMatches = new List<QuerySearchResult>();
+        foreach (var searchQuery in expansion.SearchQueries)
+        {
+            var parameters = CreateSearchParameters(request, searchQuery, limit);
+            var documentRows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
+                DocumentSearchSql,
+                parameters,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            documentMatches.AddRange(documentRows.Select(row => CreateQuerySearchResult(row, searchQuery, expansion.NormalizedQuery)));
+        }
+
+        return MergeSearchResults(documentMatches, request.IncludeDuplicates, limit);
+    }
+
+    private async Task<RegulationSearchResult[]> SearchSemanticAsync(
+        System.Data.Common.DbConnection connection,
+        SearchRegulationRequest request,
+        RegulationQueryExpansion expansion,
+        int limit,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        if (embeddingGenerator is null)
+        {
+            warnings.Add("Semantic search requested, but no embedding generator is configured.");
+            return [];
+        }
+
+        var matches = new List<QuerySearchResult>();
+        foreach (var searchQuery in expansion.SearchQueries)
+        {
+            var embedding = await embeddingGenerator.GenerateAsync(searchQuery, cancellationToken).ConfigureAwait(false);
+            var parameters = CreateSemanticSearchParameters(request, searchQuery, embedding.Vector, limit);
+            var rows = await connection.QueryAsync<SearchRow>(new CommandDefinition(
+                SemanticChunkSearchSql,
+                parameters,
+                cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+            matches.AddRange(rows.Select(row => CreateSemanticSearchResult(row, searchQuery)));
+        }
+
+        warnings.Add("Semantic search applied with pgvector exact nearest-neighbor ranking.");
+
+        return MergeSearchResults(matches, request.IncludeDuplicates, limit);
+    }
+
+    private async Task<RegulationSearchResult[]> SearchHybridAsync(
+        System.Data.Common.DbConnection connection,
+        SearchRegulationRequest request,
+        RegulationQueryExpansion expansion,
+        int limit,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var fullText = await SearchFullTextAsync(connection, request, expansion, limit * 2, cancellationToken).ConfigureAwait(false);
+        var semantic = await SearchSemanticAsync(connection, request, expansion, limit * 2, warnings, cancellationToken).ConfigureAwait(false);
+
+        warnings.Add("Hybrid search applied. Full-text and semantic candidates were merged with source priority.");
+
+        return MergeHybridResults(fullText, semantic, limit);
+    }
+
     private static DynamicParameters CreateSearchParameters(
         SearchRegulationRequest request,
         string query,
@@ -179,6 +293,18 @@ public sealed class PostgresRegulationSearchService(
         parameters.Add("RequiresReview", request.RequiresReview);
         parameters.Add("IncludeNonSearchable", request.IncludeNonSearchable);
         parameters.Add("AreaLike", string.IsNullOrWhiteSpace(request.Area) ? null : $"%{request.Area.Trim()}%");
+
+        return parameters;
+    }
+
+    private static DynamicParameters CreateSemanticSearchParameters(
+        SearchRegulationRequest request,
+        string query,
+        IReadOnlyList<float> embedding,
+        int limit)
+    {
+        var parameters = CreateSearchParameters(request, query, limit);
+        parameters.Add("Embedding", PgVectorFormatting.Format(embedding));
 
         return parameters;
     }
@@ -200,6 +326,12 @@ public sealed class PostgresRegulationSearchService(
             Url = row.Url,
             Snippet = snippet,
             Score = score,
+            Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["searchMode"] = "full_text",
+                ["fullTextScore"] = row.Score.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture),
+                ["sourcePriorityBonus"] = CalculateSourcePriority(row).ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+            },
             Citations =
             [
                 new RegulationCitation
@@ -274,6 +406,27 @@ public sealed class PostgresRegulationSearchService(
             Url = result.Url,
             Snippet = result.Snippet,
             Score = score,
+            Metadata = result.Metadata,
+            Citations = result.Citations
+        };
+
+    private static RegulationSearchResult CopyWithScoreAndMetadata(
+        RegulationSearchResult result,
+        double score,
+        IReadOnlyDictionary<string, string> metadata) =>
+        new()
+        {
+            DocumentId = result.DocumentId,
+            ChunkId = result.ChunkId,
+            Title = result.Title,
+            Chapter = result.Chapter,
+            Section = result.Section,
+            Article = result.Article,
+            Source = result.Source,
+            Url = result.Url,
+            Snippet = result.Snippet,
+            Score = score,
+            Metadata = metadata,
             Citations = result.Citations
         };
 
@@ -303,6 +456,100 @@ public sealed class PostgresRegulationSearchService(
         var score = result.Score + CalculateOriginalQueryBonus(row.Text, searchQuery, originalNormalizedQuery);
 
         return new(CopyWithScore(result, score), searchQuery, row.ContentHash, row.DuplicateOfChunkId is not null);
+    }
+
+    private static QuerySearchResult CreateSemanticSearchResult(SearchRow row, string searchQuery)
+    {
+        var result = MapSearchResult(row, searchQuery);
+        var metadata = new Dictionary<string, string>(result.Metadata, StringComparer.OrdinalIgnoreCase)
+        {
+            ["searchMode"] = "semantic",
+            ["vectorScore"] = row.Score.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)
+        };
+
+        return new(CopyWithScoreAndMetadata(result, result.Score, metadata), searchQuery, row.ContentHash, row.DuplicateOfChunkId is not null);
+    }
+
+    private static RegulationSearchResult[] MergeHybridResults(
+        IReadOnlyList<RegulationSearchResult> fullText,
+        IReadOnlyList<RegulationSearchResult> semantic,
+        int limit)
+    {
+        var maxFullText = fullText.Count == 0 ? 1 : Math.Max(1, fullText.Max(result => result.Score));
+        var maxVector = semantic.Count == 0 ? 1 : Math.Max(1, semantic.Max(result => result.Score));
+        var candidates = fullText
+            .Select(result => new HybridCandidate(result, result.Score / maxFullText, 0))
+            .Concat(semantic.Select(result => new HybridCandidate(result, 0, result.Score / maxVector)))
+            .GroupBy(candidate => candidate.Result.ChunkId, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var best = group
+                    .OrderByDescending(candidate => candidate.Result.Score)
+                    .First()
+                    .Result;
+                var fullTextScore = group.Max(candidate => candidate.FullTextScore);
+                var vectorScore = group.Max(candidate => candidate.VectorScore);
+                var sourcePriorityBonus = EstimateSourcePriority(best);
+                var multiQueryBonus = Math.Min(0.20, (group.Count() - 1) * 0.05);
+                var finalScore =
+                    (0.55 * fullTextScore)
+                    + (0.30 * vectorScore)
+                    + (0.10 * sourcePriorityBonus)
+                    + (0.05 * multiQueryBonus);
+                var metadata = new Dictionary<string, string>(best.Metadata, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["searchMode"] = "hybrid",
+                    ["scoreBreakdown"] = string.Join(
+                        ';',
+                        $"fullTextScore={fullTextScore:0.######}",
+                        $"vectorScore={vectorScore:0.######}",
+                        $"sourcePriorityBonus={sourcePriorityBonus:0.######}",
+                        $"multiQueryBonus={multiQueryBonus:0.######}",
+                        $"finalScore={finalScore:0.######}")
+                };
+
+                return CopyWithScoreAndMetadata(best, finalScore, metadata);
+            })
+            .OrderByDescending(result => result.Score)
+            .ThenBy(result => result.ChunkId, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToArray();
+
+        return candidates;
+    }
+
+    private static double EstimateSourcePriority(RegulationSearchResult result)
+    {
+        var text = string.Join(' ', result.DocumentId, result.Title, result.Url, result.ChunkId);
+        if (result.Source.Equals("CNV", StringComparison.OrdinalIgnoreCase)
+            && (text.Contains("toc2013", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("N.T. 2013", StringComparison.OrdinalIgnoreCase)))
+        {
+            return 0.25;
+        }
+
+        if (result.Source.Equals("CNV", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.20;
+        }
+
+        if (result.Url.Contains("texact", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.15;
+        }
+
+        if (result.Url.Contains("norma.htm", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.10;
+        }
+
+        if (result.Url.Contains("/anexos/", StringComparison.OrdinalIgnoreCase)
+            || result.Url.Contains("verNorma.do", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.05;
+        }
+
+        return 0;
     }
 
     private static double CalculateSourcePriority(SearchRow row)
@@ -502,4 +749,9 @@ public sealed class PostgresRegulationSearchService(
         string SearchQuery,
         string? ContentHash,
         bool IsDuplicate);
+
+    private sealed record HybridCandidate(
+        RegulationSearchResult Result,
+        double FullTextScore,
+        double VectorScore);
 }

@@ -9,7 +9,7 @@ namespace CnvRegulation.Infrastructure.Persistence;
 /// PostgreSQL-backed repository for regulation documents and citable chunks.
 /// </summary>
 public sealed class PostgresRegulationRepository(
-    RegulationDbConnectionFactory connectionFactory) : IRegulationRepository, IRegulationChunkRepository
+    RegulationDbConnectionFactory connectionFactory) : IRegulationRepository, IRegulationChunkRepository, IRegulationEmbeddingRepository
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -233,6 +233,9 @@ public sealed class PostgresRegulationRepository(
                 article,
                 chunk_index AS ChunkIndex,
                 text,
+                embedding::text AS Embedding,
+                embedding_model AS EmbeddingModel,
+                embedding_generated_at AS EmbeddingGeneratedAt,
                 content_hash AS ContentHash,
                 duplicate_of_chunk_id AS DuplicateOfChunkId,
                 metadata::text AS Metadata
@@ -264,6 +267,9 @@ public sealed class PostgresRegulationRepository(
                 article,
                 chunk_index AS ChunkIndex,
                 text,
+                embedding::text AS Embedding,
+                embedding_model AS EmbeddingModel,
+                embedding_generated_at AS EmbeddingGeneratedAt,
                 content_hash AS ContentHash,
                 duplicate_of_chunk_id AS DuplicateOfChunkId,
                 metadata::text AS Metadata
@@ -273,6 +279,41 @@ public sealed class PostgresRegulationRepository(
             cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         return rows.Select(MapChunk).ToArray();
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateChunkEmbeddingAsync(
+        string chunkId,
+        IReadOnlyList<float> vector,
+        string model,
+        DateTimeOffset generatedAt,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(chunkId);
+        ArgumentNullException.ThrowIfNull(vector);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+
+        await using var connection = await connectionFactory
+            .OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE regulation_chunks
+            SET
+                embedding = CAST(@Embedding AS vector),
+                embedding_model = @Model,
+                embedding_generated_at = @GeneratedAt
+            WHERE id = @ChunkId;
+            """,
+            new
+            {
+                ChunkId = chunkId.Trim(),
+                Embedding = PgVectorFormatting.Format(vector),
+                Model = model.Trim(),
+                GeneratedAt = generatedAt
+            },
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
     private static object CreateDocumentParameters(RegulationDocument document) =>
@@ -338,6 +379,9 @@ public sealed class PostgresRegulationRepository(
             Article = row.Article,
             ChunkIndex = row.ChunkIndex,
             Text = row.Text,
+            Embedding = ParseEmbedding(row.Embedding),
+            EmbeddingModel = row.EmbeddingModel,
+            EmbeddingGeneratedAt = row.EmbeddingGeneratedAt,
             ContentHash = row.ContentHash,
             DuplicateOfChunkId = row.DuplicateOfChunkId,
             Metadata = DeserializeMetadata(row.Metadata)
@@ -358,6 +402,31 @@ public sealed class PostgresRegulationRepository(
 
         return JsonSerializer.Deserialize<Dictionary<string, string>>(metadata, JsonOptions)
             ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<float>? ParseEmbedding(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (trimmed.Length < 2 || trimmed[0] != '[' || trimmed[^1] != ']')
+        {
+            return null;
+        }
+
+        return trimmed[1..^1]
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => float.TryParse(
+                part,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsed)
+                    ? parsed
+                    : 0)
+            .ToArray();
     }
 
     private sealed class DocumentRow
@@ -406,6 +475,12 @@ public sealed class PostgresRegulationRepository(
         public int ChunkIndex { get; init; }
 
         public required string Text { get; init; }
+
+        public string? Embedding { get; init; }
+
+        public string? EmbeddingModel { get; init; }
+
+        public DateTimeOffset? EmbeddingGeneratedAt { get; init; }
 
         public string? ContentHash { get; init; }
 

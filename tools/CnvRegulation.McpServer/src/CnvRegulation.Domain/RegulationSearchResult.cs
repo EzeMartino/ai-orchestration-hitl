@@ -56,6 +56,12 @@ public sealed class RegulationSearchResult
     public double Score { get; init; }
 
     /// <summary>
+    /// Gets diagnostic metadata, such as hybrid score breakdown.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Metadata { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Gets citations that make the result traceable.
     /// </summary>
     public required IReadOnlyList<RegulationCitation> Citations { get; init; }

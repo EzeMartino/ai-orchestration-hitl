@@ -14,4 +14,9 @@ public sealed class ValidateSearchQualityRequest
     /// Gets the maximum search results per query.
     /// </summary>
     public int Limit { get; init; } = 5;
+
+    /// <summary>
+    /// Gets the search mode to validate: full_text, semantic, or hybrid.
+    /// </summary>
+    public string SearchMode { get; init; } = "full_text";
 }

@@ -116,4 +116,29 @@ public sealed class SearchQualityValidationReportFormatterTests
         output.Should().Contain("Hidden duplicates: 1");
         output.Should().Contain("Recommendation:");
     }
+
+    [Fact]
+    public void EmbeddingGenerationFormat_ShouldShowSummary()
+    {
+        var response = new GenerateEmbeddingsResponse
+        {
+            ChunksScanned = 10,
+            MissingEmbeddings = 8,
+            Generated = 6,
+            SkippedDuplicates = 1,
+            SkippedNonSearchable = 1,
+            SkippedEmpty = 0,
+            Provider = "Fake",
+            Model = "fake-deterministic",
+            Dimensions = 1536,
+            Warnings = []
+        };
+
+        var output = EmbeddingGenerationReportFormatter.Format(response);
+
+        output.Should().Contain("Embedding generation");
+        output.Should().Contain("Generated: 6");
+        output.Should().Contain("Provider: Fake");
+        output.Should().Contain("Dimensions: 1536");
+    }
 }

@@ -56,6 +56,21 @@ public sealed class RegulationChunk
     public string? DuplicateOfChunkId { get; init; }
 
     /// <summary>
+    /// Gets the semantic embedding vector when generated.
+    /// </summary>
+    public IReadOnlyList<float>? Embedding { get; init; }
+
+    /// <summary>
+    /// Gets the embedding model used for the vector.
+    /// </summary>
+    public string? EmbeddingModel { get; init; }
+
+    /// <summary>
+    /// Gets when the embedding was generated.
+    /// </summary>
+    public DateTimeOffset? EmbeddingGeneratedAt { get; init; }
+
+    /// <summary>
     /// Gets additional metadata associated with the chunk.
     /// </summary>
     public required IReadOnlyDictionary<string, string> Metadata { get; init; }

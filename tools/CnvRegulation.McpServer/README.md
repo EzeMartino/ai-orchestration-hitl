@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, PDF text normalization, source/chunk quality diagnostics, optional PostgreSQL persistence, and PostgreSQL full-text search.
+MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, PDF text normalization, source/chunk quality diagnostics, optional PostgreSQL persistence, PostgreSQL full-text search, and optional pgvector semantic/hybrid search.
 
 Do not use for real regulatory decisions.
 
@@ -170,7 +170,7 @@ dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --qu
 For PostgreSQL:
 
 ```powershell
-dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --queries data/search-quality/cnv.search-quality.json
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --queries data/search-quality/cnv.search-quality.json --mode full_text
 ```
 
 The report shows pass/fail per query, expanded search queries, result counts, top result source/title/article, score, citation presence, warnings, and expectation failure reasons. The curated JSON is intentionally simple and should be updated as the corpus improves.
@@ -250,6 +250,58 @@ Initial aliases include:
 - `status`
 - `requiresReview`
 
+## Semantic search with pgvector
+
+Full-text search remains the default. Semantic and hybrid modes require PostgreSQL with the pgvector extension installed.
+
+Schema migration enables pgvector and adds chunk embedding columns:
+
+- `embedding vector(1536)`
+- `embedding_model`
+- `embedding_generated_at`
+
+For the current corpus size, semantic search uses exact vector ordering instead of HNSW/IVFFlat:
+
+```sql
+ORDER BY embedding <=> @queryEmbedding
+```
+
+Generate deterministic local embeddings without an API key:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- migrate-db
+dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake
+```
+
+Run hybrid validation:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --mode hybrid --queries data/search-quality/cnv.search-quality.json
+```
+
+`search_cnv_regulation` accepts `searchMode`:
+
+- `full_text` (default)
+- `semantic`
+- `hybrid`
+
+Hybrid mode merges existing full-text candidates with pgvector candidates and includes score diagnostics in result metadata. The score combines normalized full-text score, vector score, source priority, and multi-query bonus while preserving duplicate/wrapper filtering.
+
+Configuration:
+
+```json
+{
+  "Embeddings": {
+    "Enabled": false,
+    "Provider": "Fake",
+    "Model": "text-embedding-3-small",
+    "Dimensions": 1536
+  }
+}
+```
+
+The `OpenAI` provider is available behind config or command options, but normal build/test never requires an API key. Use `CNV_REGULATION_OPENAI_API_KEY` or `OPENAI_API_KEY` only when explicitly generating real embeddings.
+
 PostgreSQL integration tests are skipped by default. To run them:
 
 ```powershell
@@ -258,7 +310,9 @@ $env:CNV_REGULATION_DB_CONNECTION_STRING = "Host=localhost;Port=5432;Database=cn
 dotnet test
 ```
 
-This phase does not add pgvector, embeddings, crawler/link-following, Semantic Kernel, or new app integration.
+Use a PostgreSQL image with pgvector installed, such as `pgvector/pgvector:pg16`, when running the pgvector integration path.
+
+This phase does not add advanced compliance analysis, unrestricted crawler changes, Semantic Kernel, or new app integration.
 
 ## Test
 
@@ -270,7 +324,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, query expansion, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text search, query alias expansion, local ingestion, diagnostics, controlled Infoleg link discovery, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text/semantic/hybrid search, deterministic and OpenAI embedding generators, query alias expansion, local ingestion, diagnostics, controlled Infoleg link discovery, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 

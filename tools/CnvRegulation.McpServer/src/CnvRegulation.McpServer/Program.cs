@@ -176,16 +176,39 @@ if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringC
     using var host = builder.Build();
     var querySetPath = ResolveSearchQualityQuerySetPath(args);
     var limit = ResolveSearchQualityLimit(args);
+    var mode = ResolveSearchMode(args);
     var validationService = host.Services.GetRequiredService<ISearchQualityValidationService>();
     var response = await validationService.ValidateAsync(
         new ValidateSearchQualityRequest
         {
             QuerySetPath = querySetPath,
-            Limit = limit
+            Limit = limit,
+            SearchMode = mode
         },
         CancellationToken.None);
 
     Console.WriteLine(SearchQualityValidationReportFormatter.Format(response));
+
+    return;
+}
+
+if (args.Length > 0 && string.Equals(args[0], "generate-embeddings", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var embeddingService = host.Services.GetRequiredService<IRegulationEmbeddingService>();
+    var response = await embeddingService.GenerateMissingEmbeddingsAsync(
+        new GenerateEmbeddingsRequest
+        {
+            Provider = GetOptionValue(args, "--provider"),
+            Model = GetOptionValue(args, "--model"),
+            Dimensions = ResolveNullableIntOption(args, "--dimensions"),
+            Limit = ResolveNullableIntOption(args, "--limit"),
+            IncludeDuplicates = HasOption(args, "--include-duplicates"),
+            IncludeNonSearchable = HasOption(args, "--include-non-searchable")
+        },
+        CancellationToken.None);
+
+    Console.WriteLine(EmbeddingGenerationReportFormatter.Format(response));
 
     return;
 }
@@ -348,6 +371,9 @@ static int ResolveSearchQualityLimit(string[] args)
     return int.TryParse(value, out var parsedValue) ? parsedValue : 5;
 }
 
+static string ResolveSearchMode(string[] args) =>
+    GetOptionValue(args, "--mode") ?? GetOptionValue(args, "--search-mode") ?? "full_text";
+
 static ExplainSearchQueryRequest ResolveExplainSearchQueryRequest(string[] args) =>
     new()
     {
@@ -378,6 +404,12 @@ static bool? ResolveNullableBoolOption(string[] args, string optionName)
 {
     var value = GetOptionValue(args, optionName);
     return bool.TryParse(value, out var parsedValue) ? parsedValue : null;
+}
+
+static int? ResolveNullableIntOption(string[] args, string optionName)
+{
+    var value = GetOptionValue(args, optionName);
+    return int.TryParse(value, out var parsedValue) ? parsedValue : null;
 }
 
 static string ResolveOutputDirectory(string[] args)

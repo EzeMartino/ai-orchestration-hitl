@@ -21,6 +21,11 @@ public sealed class SearchRegulationRequest
     public int Limit { get; init; } = 5;
 
     /// <summary>
+    /// Gets the search mode: full_text, semantic, or hybrid.
+    /// </summary>
+    public string SearchMode { get; init; } = "full_text";
+
+    /// <summary>
     /// Gets the optional source filter.
     /// </summary>
     public string? Source { get; init; }

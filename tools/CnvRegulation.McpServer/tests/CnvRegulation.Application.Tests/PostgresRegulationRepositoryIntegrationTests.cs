@@ -3,6 +3,7 @@ using CnvRegulation.Domain;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Deduplication;
 using CnvRegulation.Infrastructure.Diagnostics;
+using CnvRegulation.Infrastructure.Embeddings;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Parsing;
@@ -439,6 +440,109 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         search.Results.Should().Contain(result => result.DocumentId == documentId);
     }
 
+    [PostgresIntegrationFact]
+    public async Task PostgresGenerateEmbeddings_ShouldPersistVectorColumn()
+    {
+        var services = await CreateSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var chunk = CreateSearchChunk(
+            document.Id,
+            $"{document.Id}-embedding",
+            "mercado autorizado persistencia vectorial",
+            "embedding-hash",
+            duplicateOfChunkId: null);
+        var embeddingService = CreateEmbeddingService(services.Repository);
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [chunk], CancellationToken.None);
+
+        var response = await embeddingService.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake" },
+            CancellationToken.None);
+        var saved = await services.Repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+
+        response.Generated.Should().BeGreaterThan(0);
+        saved.Should().ContainSingle();
+        saved[0].Embedding.Should().NotBeNull();
+        saved[0].Embedding!.Should().HaveCount(1536);
+        saved[0].EmbeddingModel.Should().Be("fake-deterministic");
+        saved[0].EmbeddingGeneratedAt.Should().NotBeNull();
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresSemanticSearch_ShouldReturnNearestChunks()
+    {
+        var services = await CreateSemanticSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var relevantChunk = CreateSearchChunk(
+            document.Id,
+            $"{document.Id}-semantic-relevant",
+            "mercado autorizado agente",
+            "semantic-relevant",
+            duplicateOfChunkId: null);
+        var unrelatedChunk = CreateSearchChunk(
+            document.Id,
+            $"{document.Id}-semantic-unrelated",
+            "fideicomiso financiero fiduciario",
+            "semantic-unrelated",
+            duplicateOfChunkId: null);
+        var embeddingService = CreateEmbeddingService(services.Repository);
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [relevantChunk, unrelatedChunk], CancellationToken.None);
+        await embeddingService.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake" },
+            CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest
+            {
+                Query = "mercado autorizado",
+                SearchMode = "semantic",
+                Limit = 5
+            },
+            CancellationToken.None);
+
+        response.Results.Should().NotBeEmpty();
+        response.Results[0].ChunkId.Should().Be(relevantChunk.Id);
+        response.Results[0].Metadata.Should().ContainKey("vectorScore");
+        response.Warnings.Should().Contain(warning => warning.Contains("Semantic search applied", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [PostgresIntegrationFact]
+    public async Task PostgresHybridSearch_ShouldPreferRelevantFtsAndVectorMatches()
+    {
+        var services = await CreateSemanticSearchServicesAsync();
+        var document = CreateSearchDocument("CNV", "622/2013", requiresReview: true);
+        var relevantChunk = CreateSearchChunk(
+            document.Id,
+            $"{document.Id}-hybrid-relevant",
+            "mercado autorizado agente",
+            "hybrid-relevant",
+            duplicateOfChunkId: null);
+        var embeddingService = CreateEmbeddingService(services.Repository);
+
+        await services.Repository.SaveAsync(document, CancellationToken.None);
+        await services.Repository.ReplaceForDocumentAsync(document.Id, [relevantChunk], CancellationToken.None);
+        await embeddingService.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake" },
+            CancellationToken.None);
+
+        var response = await services.SearchService.SearchAsync(
+            new SearchRegulationRequest
+            {
+                Query = "mercado autorizado",
+                SearchMode = "hybrid",
+                Limit = 5
+            },
+            CancellationToken.None);
+
+        response.Results.Should().Contain(result => result.ChunkId == relevantChunk.Id);
+        response.Results[0].Metadata.Should().ContainKey("scoreBreakdown");
+        response.Results[0].Citations.Should().NotBeEmpty();
+        response.Warnings.Should().Contain(warning => warning.Contains("Hybrid search applied", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static async Task<PostgresRegulationRepository> CreateRepositoryAsync()
     {
         var options = RegulationDbOptions.Create(
@@ -465,6 +569,39 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
         return (
             new PostgresRegulationRepository(connectionFactory),
             new PostgresRegulationSearchService(connectionFactory, CreateQueryExpander()));
+    }
+
+    private static async Task<(PostgresRegulationRepository Repository, PostgresRegulationSearchService SearchService)> CreateSemanticSearchServicesAsync()
+    {
+        var options = RegulationDbOptions.Create(
+            "Postgres",
+            Environment.GetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING"));
+        var connectionFactory = new RegulationDbConnectionFactory(options);
+        var migrator = new PostgresRegulationDatabaseMigrator(connectionFactory);
+        var embeddingOptions = new EmbeddingOptions();
+        var generator = new DeterministicFakeEmbeddingGenerator(embeddingOptions);
+
+        await migrator.MigrateAsync(CancellationToken.None);
+
+        return (
+            new PostgresRegulationRepository(connectionFactory),
+            new PostgresRegulationSearchService(connectionFactory, CreateQueryExpander(), generator));
+    }
+
+    private static RegulationEmbeddingService CreateEmbeddingService(PostgresRegulationRepository repository)
+    {
+        var embeddingOptions = new EmbeddingOptions();
+        var httpClient = new HttpClient();
+
+        return new RegulationEmbeddingService(
+            repository,
+            repository,
+            repository,
+            new DeterministicFakeEmbeddingGenerator(embeddingOptions),
+            new OpenAiEmbeddingGenerator(httpClient, embeddingOptions),
+            embeddingOptions,
+            httpClient,
+            TimeProvider.System);
     }
 
     private static RegulationDocument CreateDocument()

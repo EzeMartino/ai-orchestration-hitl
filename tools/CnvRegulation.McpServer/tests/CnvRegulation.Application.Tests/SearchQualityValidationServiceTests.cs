@@ -174,6 +174,40 @@ public sealed class SearchQualityValidationServiceTests
         report.Passed.Should().Be(4);
     }
 
+    [Fact]
+    public async Task ValidateSearchQuality_ShouldRunInHybridMode()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var querySetPath = Path.Combine(testDirectory.Path, "queries.json");
+        await File.WriteAllTextAsync(
+            querySetPath,
+            """
+            {
+              "queries": [
+                {
+                  "id": "hybrid",
+                  "query": "mercado autorizado",
+                  "expectedAnyTerms": [ "mercado autorizado" ],
+                  "minResults": 1
+                }
+              ]
+            }
+            """);
+        var searchService = new CapturingSearchService();
+        var validator = new SearchQualityValidationService(searchService, CreateQueryExpander());
+
+        var report = await validator.ValidateAsync(
+            new ValidateSearchQualityRequest
+            {
+                QuerySetPath = querySetPath,
+                SearchMode = "hybrid"
+            },
+            CancellationToken.None);
+
+        report.Passed.Should().Be(1);
+        searchService.LastRequest!.SearchMode.Should().Be("hybrid");
+    }
+
     private static StaticRegulationQueryExpander CreateQueryExpander() =>
         new(new RegulationAliasesOptions());
 
@@ -187,6 +221,48 @@ public sealed class SearchQualityValidationServiceTests
             {
                 Query = request.Query,
                 Results = [],
+                Warnings = []
+            });
+        }
+    }
+
+    private sealed class CapturingSearchService : IRegulationSearchService
+    {
+        public SearchRegulationRequest? LastRequest { get; private set; }
+
+        public Task<SearchRegulationResponse> SearchAsync(
+            SearchRegulationRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+
+            return Task.FromResult(new SearchRegulationResponse
+            {
+                Query = request.Query,
+                Results =
+                [
+                    new RegulationSearchResult
+                    {
+                        DocumentId = "doc",
+                        ChunkId = "chunk",
+                        Title = "Documento",
+                        Source = "CNV",
+                        Url = "https://www.cnv.gov.ar/",
+                        Snippet = "mercado autorizado",
+                        Score = 1,
+                        Citations =
+                        [
+                            new RegulationCitation
+                            {
+                                Source = "CNV",
+                                DocumentType = "Texto Ordenado",
+                                Title = "Documento",
+                                Url = "https://www.cnv.gov.ar/",
+                                QuotedText = "mercado autorizado"
+                            }
+                        ]
+                    }
+                ],
                 Warnings = []
             });
         }

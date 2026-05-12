@@ -2,6 +2,7 @@ using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Deduplication;
 using CnvRegulation.Infrastructure.Diagnostics;
+using CnvRegulation.Infrastructure.Embeddings;
 using CnvRegulation.Infrastructure.Ingestion;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Persistence;
@@ -46,8 +47,16 @@ public static class CnvRegulationServiceCollectionExtensions
         var dbOptions = RegulationDbOptions.Create(
             storageProvider ?? configuration?["RegulationDb:Provider"],
             configuration?["RegulationDb:ConnectionString"]);
+        var embeddingOptions = EmbeddingOptions.Create(
+            configuration?["Embeddings:Enabled"],
+            configuration?["Embeddings:Provider"],
+            configuration?["Embeddings:Model"],
+            configuration?["Embeddings:Dimensions"],
+            configuration?["Embeddings:ApiKey"],
+            configuration?["Embeddings:Endpoint"]);
 
         services.AddSingleton(dbOptions);
+        services.AddSingleton(embeddingOptions);
         if (ShouldUsePostgres(dbOptions, storageProvider))
         {
             services.AddSingleton<RegulationDbConnectionFactory>();
@@ -57,6 +66,8 @@ public static class CnvRegulationServiceCollectionExtensions
                 provider.GetRequiredService<PostgresRegulationRepository>());
             services.AddSingleton<IRegulationChunkRepository>(provider =>
                 provider.GetRequiredService<PostgresRegulationRepository>());
+            services.AddSingleton<IRegulationEmbeddingRepository>(provider =>
+                provider.GetRequiredService<PostgresRegulationRepository>());
             services.AddSingleton<IRegulationSearchService, PostgresRegulationSearchService>();
         }
         else
@@ -65,6 +76,8 @@ public static class CnvRegulationServiceCollectionExtensions
             services.AddSingleton<IRegulationRepository>(provider =>
                 provider.GetRequiredService<InMemoryRegulationRepository>());
             services.AddSingleton<IRegulationChunkRepository>(provider =>
+                provider.GetRequiredService<InMemoryRegulationRepository>());
+            services.AddSingleton<IRegulationEmbeddingRepository>(provider =>
                 provider.GetRequiredService<InMemoryRegulationRepository>());
             services.AddSingleton<IRegulationSearchService, InMemoryRegulationSearchService>();
         }
@@ -76,6 +89,13 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<WrapperDocumentDetector>();
         services.AddSingleton<RegulationAliasesOptions>();
         services.AddSingleton<IRegulationQueryExpander, StaticRegulationQueryExpander>();
+        services.AddSingleton<DeterministicFakeEmbeddingGenerator>();
+        services.AddSingleton<OpenAiEmbeddingGenerator>();
+        services.AddSingleton<IEmbeddingGenerator>(provider =>
+            embeddingOptions.Provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase)
+                ? provider.GetRequiredService<OpenAiEmbeddingGenerator>()
+                : provider.GetRequiredService<DeterministicFakeEmbeddingGenerator>());
+        services.AddSingleton<IRegulationEmbeddingService, RegulationEmbeddingService>();
         services.AddSingleton<PlainTextRegulationParser>();
         services.AddSingleton<HtmlRegulationParser>();
         services.AddSingleton<IPdfTextExtractor, PdfPigTextExtractor>();

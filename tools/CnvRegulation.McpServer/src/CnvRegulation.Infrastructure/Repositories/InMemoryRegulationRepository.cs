@@ -7,7 +7,7 @@ namespace CnvRegulation.Infrastructure.Repositories;
 /// <summary>
 /// In-memory repository for locally ingested regulation documents.
 /// </summary>
-public sealed class InMemoryRegulationRepository : IRegulationRepository, IRegulationChunkRepository
+public sealed class InMemoryRegulationRepository : IRegulationRepository, IRegulationChunkRepository, IRegulationEmbeddingRepository
 {
     private readonly ConcurrentDictionary<string, RegulationDocument> documents = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, RegulationChunk> chunks = new(StringComparer.OrdinalIgnoreCase);
@@ -104,5 +104,42 @@ public sealed class InMemoryRegulationRepository : IRegulationRepository, IRegul
             .ToArray();
 
         return Task.FromResult(snapshot);
+    }
+
+    /// <inheritdoc />
+    public Task UpdateChunkEmbeddingAsync(
+        string chunkId,
+        IReadOnlyList<float> vector,
+        string model,
+        DateTimeOffset generatedAt,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(chunkId);
+        ArgumentNullException.ThrowIfNull(vector);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (chunks.TryGetValue(chunkId.Trim(), out var chunk))
+        {
+            chunks[chunk.Id] = new RegulationChunk
+            {
+                Id = chunk.Id,
+                DocumentId = chunk.DocumentId,
+                Title = chunk.Title,
+                Chapter = chunk.Chapter,
+                Section = chunk.Section,
+                Article = chunk.Article,
+                ChunkIndex = chunk.ChunkIndex,
+                Text = chunk.Text,
+                ContentHash = chunk.ContentHash,
+                DuplicateOfChunkId = chunk.DuplicateOfChunkId,
+                Embedding = vector.ToArray(),
+                EmbeddingModel = model,
+                EmbeddingGeneratedAt = generatedAt,
+                Metadata = chunk.Metadata
+            };
+        }
+
+        return Task.CompletedTask;
     }
 }

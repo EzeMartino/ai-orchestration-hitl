@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE IF NOT EXISTS regulation_documents (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
@@ -25,6 +27,9 @@ CREATE TABLE IF NOT EXISTS regulation_chunks (
     article TEXT NULL,
     chunk_index INTEGER NOT NULL,
     text TEXT NOT NULL,
+    embedding vector(1536) NULL,
+    embedding_model TEXT NULL,
+    embedding_generated_at TIMESTAMPTZ NULL,
     content_hash TEXT NULL,
     duplicate_of_chunk_id TEXT NULL,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -36,6 +41,15 @@ ADD COLUMN IF NOT EXISTS content_hash TEXT NULL;
 
 ALTER TABLE regulation_chunks
 ADD COLUMN IF NOT EXISTS duplicate_of_chunk_id TEXT NULL;
+
+ALTER TABLE regulation_chunks
+ADD COLUMN IF NOT EXISTS embedding vector(1536) NULL;
+
+ALTER TABLE regulation_chunks
+ADD COLUMN IF NOT EXISTS embedding_model TEXT NULL;
+
+ALTER TABLE regulation_chunks
+ADD COLUMN IF NOT EXISTS embedding_generated_at TIMESTAMPTZ NULL;
 
 CREATE INDEX IF NOT EXISTS idx_regulation_documents_source
 ON regulation_documents(source);
