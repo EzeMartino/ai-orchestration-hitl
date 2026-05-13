@@ -497,7 +497,7 @@ function App() {
       <section className="shell">
         <header className="header">
           <div>
-            <p className="eyebrow">AI Orchestration Platform</p>
+            <p className="eyebrow">LLM-Ready Orchestration Platform</p>
             <h1>Financial Analysis Control Room</h1>
             <p className="subtitle">
               Real-time activity feed for supervised agent workflows.
@@ -613,7 +613,7 @@ function App() {
                 <p className="approvalEyebrow">Human intervention required</p>
                 <h2>High-severity anomaly detected</h2>
                 <p>
-                  The autonomous workflow has been paused. A human auditor must
+                  The supervised workflow has been paused. A human auditor must
                   review the evidence before the system can continue or
                   terminate the analysis.
                 </p>
