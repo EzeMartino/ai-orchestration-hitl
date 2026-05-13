@@ -294,14 +294,14 @@ namespace Orchestration.Application.AnalysisSessions
                     riskLevel = plannerResult.LegalResult.RiskLevel,
                     engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
+                    warnings = plannerResult.LegalResult.Warnings,
                     evidence = plannerResult.LegalResult.Evidence.Select(e => new
                     {
                         regulation = e.Regulation,
                         section = e.Section,
                         finding = e.Finding,
                         source = e.Source
-                    }),
-                    warnings = plannerResult.LegalResult.Warnings
+                    })
                 }
             };
 

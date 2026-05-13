@@ -65,7 +65,7 @@ type AnomalyContext = {
   compliance?: ComplianceContext;
 };
 
-const apiBaseUrl = "https://localhost:7020";
+const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
 
 function parseAnomalyContext(contextJson?: string): AnomalyContext | null {
   if (!contextJson) {

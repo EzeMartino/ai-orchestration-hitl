@@ -99,7 +99,10 @@ app.MapDefaultEndpoints();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseCors("Frontend");
 

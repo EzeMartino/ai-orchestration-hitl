@@ -87,6 +87,7 @@ builder
         "127.0.0.1",
         "--port",
         "5173")
+    .WithEnvironment("VITE_API_URL", api.GetEndpoint("http"))
     .WithHttpEndpoint(targetPort: 5173, port: 5173, isProxied: false)
     .WithExternalHttpEndpoints()
     .WaitFor(api);
