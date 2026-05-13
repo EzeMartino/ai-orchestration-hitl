@@ -37,7 +37,8 @@ public class PlannerAgentTests
                 RiskLevel: "Low",
                 Summary: "No compliance risk.",
                 Engine: "TestEngine",
-                Evidence: []
+                Evidence: [],
+                Warnings: []
             )
         );
 
@@ -99,7 +100,8 @@ public class PlannerAgentTests
                         Finding: "Human review required.",
                         Source: "Test source"
                     )
-                ]
+                ],
+                Warnings: []
             )
         );
 

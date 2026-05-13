@@ -57,7 +57,8 @@ public sealed class SemanticKernelLegalAgent : ILegalAgent
                     x.Finding,
                     x.Source
                 ))
-                .ToList()
+                .ToList(),
+            Warnings: pluginResult.Warnings
         );
     }
 }

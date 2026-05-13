@@ -40,6 +40,9 @@ public class SemanticKernelLegalAgentTests
         result.HasComplianceRisk.Should().BeTrue();
         result.RiskLevel.Should().Be("Medium");
         result.Evidence.Should().NotBeEmpty();
+        result.Warnings.Should().Contain(
+            "Mock regulatory knowledge source. Do not use for real legal decisions."
+        );
 
         result.Evidence
             .Should()

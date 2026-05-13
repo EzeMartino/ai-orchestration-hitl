@@ -99,6 +99,9 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
 
         result.HasComplianceRisk.Should().BeTrue();
         result.Findings.Should().NotBeEmpty();
+        result.Warnings.Should().Contain(
+            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+        );
 
         client.ReceivedQueries.Should().Contain("agentes");
 

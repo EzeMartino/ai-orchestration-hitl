@@ -48,6 +48,7 @@ type ComplianceContext = {
   engine?: string;
   summary: string;
   evidence: ComplianceEvidenceItem[];
+  warnings?: string[];
 };
 
 type AnomalyContext = {
@@ -139,6 +140,11 @@ function CompliancePanel({
     return null;
   }
 
+  const reviewNotes = [
+    "This is regulatory retrieval evidence, not legal advice.",
+    ...(compliance.warnings ?? []),
+  ];
+
   return (
     <section className="compliancePanel">
       <div className="complianceHeader">
@@ -177,6 +183,15 @@ function CompliancePanel({
             </div>
           </article>
         ))}
+      </div>
+
+      <div className="legalWarnings">
+        <strong>Review notes</strong>
+        <ul>
+          {reviewNotes.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
       </div>
     </section>
   );

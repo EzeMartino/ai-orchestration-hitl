@@ -5,5 +5,6 @@ public sealed record LegalAgentResult(
     string RiskLevel,
     string Summary,
     string Engine,
-    IReadOnlyList<LegalEvidence> Evidence
+    IReadOnlyList<LegalEvidence> Evidence,
+    IReadOnlyList<string> Warnings
 );

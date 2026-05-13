@@ -52,7 +52,11 @@ public sealed class MockRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
             RiskLevel: riskLevel,
             Summary: summary,
             SourceEngine: "Mock Regulatory Knowledge Source",
-            Findings: findings
+            Findings: findings,
+            Warnings:
+            [
+                "Mock regulatory knowledge source. Do not use for real legal decisions."
+            ]
         );
 
         return Task.FromResult(result);

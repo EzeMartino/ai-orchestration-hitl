@@ -10,6 +10,11 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
     private readonly ICnvRegulationMcpClient _client;
     private readonly CnvRegulationMcpOptions _options;
 
+    private sealed record RegulatorySearchOutcome(
+        List<RegulatoryFinding> Findings,
+        List<string> Warnings
+    );
+
     public McpRegulatoryKnowledgeSource(
         ICnvRegulationMcpClient client,
         IOptions<CnvRegulationMcpOptions> options)
@@ -22,11 +27,12 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
-        var findings = await SearchFindingsAsync(
+        var outcome = await SearchFindingsAsync(
             report,
             cancellationToken
         );
 
+        var findings = outcome.Findings;
         var hasRisk = findings.Count > 0;
 
         var summary = hasRisk
@@ -38,7 +44,8 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
             RiskLevel: hasRisk ? "Medium" : "Low",
             Summary: summary,
             SourceEngine: "MCP CNV Regulation Server",
-            Findings: findings
+            Findings: findings,
+            Warnings: outcome.Warnings
         );
     }
 
@@ -97,11 +104,12 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
-    private async Task<List<RegulatoryFinding>> SearchFindingsAsync(
+    private async Task<RegulatorySearchOutcome> SearchFindingsAsync(
     FinancialReportContext report,
     CancellationToken cancellationToken)
     {
         var queries = BuildCandidateQueries(report);
+        var warnings = new List<string>();
 
         foreach (var query in queries)
         {
@@ -117,6 +125,8 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
                 cancellationToken
             );
 
+            warnings.AddRange(response.Warnings);
+
             var findings = response.Results
                 .Where(result => result.Citations.Count > 0)
                 .SelectMany(MapFindings)
@@ -124,11 +134,24 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
 
             if (findings.Count > 0)
             {
-                return findings;
+                warnings.Add(
+                    "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+                );
+
+                return new RegulatorySearchOutcome(
+                    findings,
+                    warnings.Distinct().ToList()
+                );
             }
         }
 
-        return [];
+        warnings.Add(
+            "No cited CNV regulatory evidence was found by the MCP search strategy."
+        );
+
+        return new RegulatorySearchOutcome(
+            [],
+            warnings.Distinct().ToList()
+        );
     }
 }
-

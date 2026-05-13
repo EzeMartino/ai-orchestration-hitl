@@ -5,5 +5,6 @@ public sealed record RegulatoryReviewResult(
     string RiskLevel,
     string Summary,
     string SourceEngine,
-    IReadOnlyList<RegulatoryFinding> Findings
+    IReadOnlyList<RegulatoryFinding> Findings,
+    IReadOnlyList<string> Warnings
 );

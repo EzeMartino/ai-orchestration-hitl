@@ -21,6 +21,10 @@ public sealed class MockLegalAgent : ILegalAgent
                     Finding: "High-risk transaction patterns require human review before account-level action.",
                     Source: "Mock regulatory knowledge base"
                 )
+            ],
+            Warnings:
+            [
+                "Mock compliance knowledge base. Do not use for real legal decisions."
             ]
         );
 

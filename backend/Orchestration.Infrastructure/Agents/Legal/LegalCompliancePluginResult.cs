@@ -5,7 +5,8 @@ public sealed record LegalCompliancePluginResult(
     string RiskLevel,
     string Summary,
     string Engine,
-    IReadOnlyList<LegalComplianceEvidenceResult> Evidence
+    IReadOnlyList<LegalComplianceEvidenceResult> Evidence,
+    IReadOnlyList<string> Warnings
 );
 
 public sealed record LegalComplianceEvidenceResult(

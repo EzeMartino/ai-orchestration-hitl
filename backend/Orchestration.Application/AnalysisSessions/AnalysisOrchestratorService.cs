@@ -300,7 +300,8 @@ namespace Orchestration.Application.AnalysisSessions
                         section = e.Section,
                         finding = e.Finding,
                         source = e.Source
-                    })
+                    }),
+                    warnings = plannerResult.LegalResult.Warnings
                 }
             };
 

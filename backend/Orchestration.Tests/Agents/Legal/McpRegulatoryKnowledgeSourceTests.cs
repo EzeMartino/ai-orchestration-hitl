@@ -45,6 +45,9 @@ public class McpRegulatoryKnowledgeSourceTests
         result.HasComplianceRisk.Should().BeTrue();
         result.RiskLevel.Should().Be("Medium");
         result.Findings.Should().NotBeEmpty();
+        result.Warnings.Should().Contain(
+            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+        );
 
         result.Findings
             .Should()
