@@ -16,6 +16,16 @@ var cnvRegulationMcpProject = Path.GetFullPath(
         "CnvRegulation.McpServer",
         "src",
         "CnvRegulation.McpServer"));
+var cnvRegulationSourcesDirectory = Path.GetFullPath(
+    Path.Combine(
+        builder.AppHostDirectory,
+        "..",
+        "..",
+        "tools",
+        "CnvRegulation.McpServer",
+        "data",
+        "sources"));
+
 var cnvRegulationDbMigration = builder
     .AddExecutable(
         "cnv-regulation-db-migration",
@@ -28,6 +38,25 @@ var cnvRegulationDbMigration = builder
         "migrate-db")
     .WithEnvironment("CNV_REGULATION_DB_CONNECTION_STRING", cnvRegulationDb)
     .WaitFor(postgres);
+
+var cnvRegulationDbIngestion = builder
+    .AddExecutable(
+        "cnv-regulation-db-ingestion",
+        "dotnet",
+        builder.AppHostDirectory,
+        "run",
+        "--project",
+        cnvRegulationMcpProject,
+        "--",
+        "ingest",
+        "--source-directory",
+        cnvRegulationSourcesDirectory,
+        "--storage",
+        "postgres")
+    .WithEnvironment("CNV_REGULATION_DB_CONNECTION_STRING", cnvRegulationDb)
+    .WaitForCompletion(cnvRegulationDbMigration)
+    .WithExplicitStart();
+
 var defaultPythonHome = Path.GetFullPath(
     Path.Combine(builder.AppHostDirectory, "..", "..", "python-agents", "data_agent"));
 var pythonHome = ResolvePythonHome(
