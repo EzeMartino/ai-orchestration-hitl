@@ -3,7 +3,7 @@ using CnvRegulation.Domain;
 namespace CnvRegulation.Application.Contracts;
 
 /// <summary>
-/// Represents one mock compliance analysis finding.
+/// Represents one compliance analysis finding.
 /// </summary>
 public sealed class ComplianceFinding
 {
@@ -13,7 +13,7 @@ public sealed class ComplianceFinding
     public required string RiskLevel { get; init; }
 
     /// <summary>
-    /// Gets the issue detected by the mock analysis.
+    /// Gets the issue detected by the analysis.
     /// </summary>
     public required string Issue { get; init; }
 
@@ -28,7 +28,7 @@ public sealed class ComplianceFinding
     public required string ReasoningSummary { get; init; }
 
     /// <summary>
-    /// Gets the mock confidence score.
+    /// Gets the confidence score.
     /// </summary>
     public double Confidence { get; init; }
 }

@@ -1,7 +1,7 @@
 namespace CnvRegulation.Application.Contracts;
 
 /// <summary>
-/// Request for mock compliance analysis against CNV material.
+/// Request for compliance analysis against CNV material.
 /// </summary>
 public sealed class AnalyzeTextAgainstCnvRequest
 {
@@ -16,7 +16,12 @@ public sealed class AnalyzeTextAgainstCnvRequest
     public string? RegulationArea { get; init; }
 
     /// <summary>
-    /// Gets whether strict mock checks should be applied.
+    /// Gets whether strict checks should prefer full-text evidence.
     /// </summary>
     public bool StrictMode { get; init; } = true;
+
+    /// <summary>
+    /// Gets whether hybrid search may be used as secondary exploratory evidence.
+    /// </summary>
+    public bool UseHybridSearch { get; init; }
 }

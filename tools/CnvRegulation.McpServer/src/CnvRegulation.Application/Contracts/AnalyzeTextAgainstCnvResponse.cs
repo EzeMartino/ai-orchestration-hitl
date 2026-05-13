@@ -1,7 +1,7 @@
 namespace CnvRegulation.Application.Contracts;
 
 /// <summary>
-/// Response returned by mock CNV compliance analysis.
+/// Response returned by CNV compliance analysis.
 /// </summary>
 public sealed class AnalyzeTextAgainstCnvResponse
 {
@@ -11,7 +11,7 @@ public sealed class AnalyzeTextAgainstCnvResponse
     public required string Status { get; init; }
 
     /// <summary>
-    /// Gets mock findings found during analysis.
+    /// Gets findings found during analysis.
     /// </summary>
     public required IReadOnlyList<ComplianceFinding> Findings { get; init; }
 

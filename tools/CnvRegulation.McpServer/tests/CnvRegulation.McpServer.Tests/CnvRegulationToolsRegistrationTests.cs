@@ -1,5 +1,6 @@
 using System.Reflection;
 using CnvRegulation.Application.Abstractions;
+using CnvRegulation.Application.Analysis;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Infrastructure.InMemory;
 using CnvRegulation.Infrastructure.Persistence;
@@ -63,7 +64,9 @@ public sealed class CnvRegulationToolsRegistrationTests
         provider.GetRequiredService<IRegulationDocumentService>().Should().BeOfType<InMemoryRegulationDocumentService>();
         provider.GetRequiredService<IRegulationArticleService>().Should().BeOfType<InMemoryRegulationArticleService>();
         provider.GetRequiredService<IRecentResolutionService>().Should().BeOfType<InMemoryRecentResolutionService>();
-        provider.GetRequiredService<IComplianceAnalysisService>().Should().BeOfType<MockComplianceAnalysisService>();
+        provider.GetRequiredService<IRegulatoryTopicExtractor>().Should().BeOfType<RegulatoryTopicExtractor>();
+        provider.GetRequiredService<IRegulatoryFindingBuilder>().Should().BeOfType<RegulatoryFindingBuilder>();
+        provider.GetRequiredService<IComplianceAnalysisService>().Should().BeOfType<CnvTextAnalysisService>();
     }
 
     [Fact]

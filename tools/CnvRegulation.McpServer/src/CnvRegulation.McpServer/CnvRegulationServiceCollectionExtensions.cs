@@ -1,4 +1,5 @@
 using CnvRegulation.Application.Abstractions;
+using CnvRegulation.Application.Analysis;
 using CnvRegulation.Infrastructure.Chunking;
 using CnvRegulation.Infrastructure.Deduplication;
 using CnvRegulation.Infrastructure.Diagnostics;
@@ -116,7 +117,9 @@ public static class CnvRegulationServiceCollectionExtensions
         services.AddSingleton<IRegulationDocumentService, InMemoryRegulationDocumentService>();
         services.AddSingleton<IRegulationArticleService, InMemoryRegulationArticleService>();
         services.AddSingleton<IRecentResolutionService, InMemoryRecentResolutionService>();
-        services.AddSingleton<IComplianceAnalysisService, MockComplianceAnalysisService>();
+        services.AddSingleton<IRegulatoryTopicExtractor, RegulatoryTopicExtractor>();
+        services.AddSingleton<IRegulatoryFindingBuilder, RegulatoryFindingBuilder>();
+        services.AddSingleton<IComplianceAnalysisService, CnvTextAnalysisService>();
 
         return services;
     }

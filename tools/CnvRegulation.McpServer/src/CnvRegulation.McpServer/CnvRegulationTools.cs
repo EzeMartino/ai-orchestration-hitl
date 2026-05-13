@@ -148,7 +148,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Performs a mock CNV compliance analysis.
+    /// Performs an evidence-based CNV compliance analysis.
     /// </summary>
     [McpServerTool(
         Name = "analyze_text_against_cnv",
@@ -158,12 +158,13 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Runs a mock regulatory review aid against supplied text and returns findings with citations.")]
+    [Description("Runs an evidence-based regulatory review aid against supplied text and returns findings with citations.")]
     public static Task<AnalyzeTextAgainstCnvResponse> AnalyzeTextAgainstCnvAsync(
         IComplianceAnalysisService complianceAnalysisService,
-        [Description("Text to analyze against mock CNV regulatory checks.")] string text,
+        [Description("Text to analyze against CNV regulatory checks.")] string text,
         [Description("Optional regulatory area, such as Agentes.")] string? regulationArea = null,
-        [Description("Whether to apply strict mock analysis mode.")] bool strictMode = true,
+        [Description("Whether to prefer full-text evidence strictly.")] bool strictMode = true,
+        [Description("Whether to use hybrid search only as secondary exploratory evidence.")] bool useHybridSearch = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(complianceAnalysisService);
@@ -173,7 +174,8 @@ public static class CnvRegulationTools
             {
                 Text = text,
                 RegulationArea = regulationArea,
-                StrictMode = strictMode
+                StrictMode = strictMode,
+                UseHybridSearch = useHybridSearch
             },
             cancellationToken);
     }

@@ -4,7 +4,7 @@ MCP server for querying Argentine CNV regulatory material.
 
 ## Current status
 
-MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, PDF text normalization, source/chunk quality diagnostics, optional PostgreSQL persistence, PostgreSQL full-text search, and optional pgvector semantic/hybrid search.
+MVP with mock fallback data, local `.txt`/`.html`/`.pdf` ingestion, curated source discovery/download, in-memory chunking, PDF text normalization, source/chunk quality diagnostics, optional PostgreSQL persistence, PostgreSQL full-text search, optional pgvector semantic/hybrid search, and evidence-based text analysis.
 
 Do not use for real regulatory decisions.
 
@@ -15,6 +15,31 @@ Do not use for real regulatory decisions.
 - `get_cnv_article`
 - `get_recent_cnv_resolutions`
 - `analyze_text_against_cnv`
+
+## Analyze Text Against CNV
+
+`analyze_text_against_cnv` is an automated regulatory review aid, not legal advice. It does not use an LLM and never claims definitive compliance.
+
+Pipeline:
+
+1. Extract deterministic regulatory topics from the input text.
+2. Search cited CNV evidence with `full_text` first.
+3. Optionally run `hybrid` as a secondary exploratory pass when `useHybridSearch=true`.
+4. Build findings only from retrieved results that include citations.
+5. Return `requires_review` or `insufficient_evidence`, warnings, confidence, citations, and disclaimer.
+
+Example MCP input:
+
+```json
+{
+  "text": "El agente podrá ofrecer instrumentos a clientes sin verificar su perfil ni informar riesgos.",
+  "regulationArea": "ALyC",
+  "strictMode": true,
+  "useHybridSearch": false
+}
+```
+
+Hybrid remains optional and is not the default ranking mode.
 
 ## Run
 
