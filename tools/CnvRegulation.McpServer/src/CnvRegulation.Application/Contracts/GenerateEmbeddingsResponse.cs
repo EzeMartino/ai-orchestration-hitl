@@ -79,4 +79,14 @@ public sealed class GenerateEmbeddingsResponse
     /// Gets warnings.
     /// </summary>
     public required IReadOnlyList<string> Warnings { get; init; }
+
+    /// <summary>
+    /// Gets failed or skipped embedding items.
+    /// </summary>
+    public IReadOnlyList<EmbeddingFailureItem> FailedItems { get; init; } = [];
+
+    /// <summary>
+    /// Gets the written failed report path when requested.
+    /// </summary>
+    public string? FailedReportPath { get; init; }
 }

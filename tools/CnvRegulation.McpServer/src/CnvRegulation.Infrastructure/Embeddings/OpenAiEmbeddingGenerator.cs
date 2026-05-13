@@ -30,7 +30,9 @@ public sealed class OpenAiEmbeddingGenerator(HttpClient httpClient, EmbeddingOpt
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             throw new HttpRequestException(
-                $"OpenAI embeddings request failed ({(int)response.StatusCode} {response.ReasonPhrase}): {Truncate(errorBody)}");
+                $"OpenAI embeddings request failed ({(int)response.StatusCode} {response.ReasonPhrase}): {Truncate(errorBody)}",
+                inner: null,
+                response.StatusCode);
         }
 
         var payload = await response.Content

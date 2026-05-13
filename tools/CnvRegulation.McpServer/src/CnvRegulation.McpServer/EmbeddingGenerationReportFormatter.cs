@@ -35,10 +35,18 @@ public static class EmbeddingGenerationReportFormatter
         builder.AppendLine(CultureInfo.InvariantCulture, $"Provider: {response.Provider}");
         builder.AppendLine(CultureInfo.InvariantCulture, $"Model: {response.Model}");
         builder.AppendLine(CultureInfo.InvariantCulture, $"Dimensions: {response.Dimensions}");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Failed report: {FormatFailedReportPath(response.FailedReportPath)}");
 
         foreach (var warning in response.Warnings)
         {
             builder.AppendLine(CultureInfo.InvariantCulture, $"Warning: {warning}");
+        }
+
+        foreach (var failedItem in response.FailedItems.Take(10))
+        {
+            builder.AppendLine(
+                CultureInfo.InvariantCulture,
+                $"Failure: {failedItem.ChunkId} | {failedItem.Status} | {failedItem.Reason}");
         }
 
         return builder.ToString();
@@ -46,4 +54,7 @@ public static class EmbeddingGenerationReportFormatter
 
     private static string FormatActualTokenCount(int? tokenCount) =>
         tokenCount is null ? "n/a" : tokenCount.Value.ToString(CultureInfo.InvariantCulture);
+
+    private static string FormatFailedReportPath(string? failedReportPath) =>
+        string.IsNullOrWhiteSpace(failedReportPath) ? "(not requested)" : failedReportPath;
 }

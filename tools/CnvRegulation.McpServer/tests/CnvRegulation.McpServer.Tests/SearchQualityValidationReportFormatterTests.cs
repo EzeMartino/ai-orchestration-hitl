@@ -136,7 +136,23 @@ public sealed class SearchQualityValidationReportFormatterTests
             Provider = "Fake",
             Model = "fake-deterministic",
             Dimensions = 1536,
-            Warnings = []
+            Warnings = [],
+            FailedReportPath = "data/embedding-reports/failed-embeddings.json",
+            FailedItems =
+            [
+                new EmbeddingFailureItem
+                {
+                    DocumentId = "doc",
+                    ChunkId = "chunk-long",
+                    Source = "CNV",
+                    Title = "Normas CNV",
+                    Article = "Articulo 1",
+                    Status = "skipped_too_long",
+                    Reason = "Chunk length exceeds max input length.",
+                    TextLength = 64000,
+                    EstimatedTokens = 16000
+                }
+            ]
         };
 
         var output = EmbeddingGenerationReportFormatter.Format(response);
@@ -145,6 +161,8 @@ public sealed class SearchQualityValidationReportFormatterTests
         output.Should().Contain("Generated: 6");
         output.Should().Contain("Eligible chunks: 6");
         output.Should().Contain("Actual tokens: n/a");
+        output.Should().Contain("Failed report: data/embedding-reports/failed-embeddings.json");
+        output.Should().Contain("Failure: chunk-long | skipped_too_long");
         output.Should().Contain("Provider: Fake");
         output.Should().Contain("Dimensions: 1536");
     }

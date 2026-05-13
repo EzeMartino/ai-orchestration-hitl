@@ -224,6 +224,8 @@ if (args.Length > 0 && string.Equals(args[0], "generate-embeddings", StringCompa
             OnlyMissing = HasOption(args, "--only-missing"),
             BatchSize = ResolveNullableIntOption(args, "--batch-size") ?? 32,
             DelayMs = ResolveNullableIntOption(args, "--delay-ms") ?? 0,
+            MaxInputCharacters = ResolveNullableIntOption(args, "--max-input-chars") ?? 24_000,
+            FailedReportPath = GetOptionValue(args, "--failed-report"),
             IncludeDuplicates = HasOption(args, "--include-duplicates"),
             IncludeNonSearchable = HasOption(args, "--include-non-searchable")
         },

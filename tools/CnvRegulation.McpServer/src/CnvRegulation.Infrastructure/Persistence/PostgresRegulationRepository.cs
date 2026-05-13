@@ -316,6 +316,46 @@ public sealed class PostgresRegulationRepository(
             cancellationToken: cancellationToken)).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task UpdateChunkEmbeddingStatusAsync(
+        string chunkId,
+        string status,
+        string? reason,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(chunkId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["embeddingStatus"] = status.Trim(),
+            ["embeddingStatusUpdatedAt"] = updatedAt.ToString("O")
+        };
+
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            metadata["embeddingFailureReason"] = reason.Trim();
+        }
+
+        await using var connection = await connectionFactory
+            .OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE regulation_chunks
+            SET metadata = metadata || CAST(@Metadata AS jsonb)
+            WHERE id = @ChunkId;
+            """,
+            new
+            {
+                ChunkId = chunkId.Trim(),
+                Metadata = SerializeMetadata(metadata)
+            },
+            cancellationToken: cancellationToken)).ConfigureAwait(false);
+    }
+
     private static object CreateDocumentParameters(RegulationDocument document) =>
         new
         {

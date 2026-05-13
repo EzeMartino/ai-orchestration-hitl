@@ -2,6 +2,8 @@ using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Contracts;
 using CnvRegulation.Domain;
 using CnvRegulation.Infrastructure.Search;
+using System.Net;
+using System.Text.Json;
 
 namespace CnvRegulation.Infrastructure.Embeddings;
 
@@ -18,6 +20,13 @@ public sealed class RegulationEmbeddingService(
     HttpClient httpClient,
     TimeProvider timeProvider) : IRegulationEmbeddingService
 {
+    private const int MaxTransientRetries = 2;
+
+    private static readonly JsonSerializerOptions ReportJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true
+    };
+
     /// <inheritdoc />
     public async Task<GenerateEmbeddingsResponse> GenerateMissingEmbeddingsAsync(
         GenerateEmbeddingsRequest request,
@@ -45,6 +54,8 @@ public sealed class RegulationEmbeddingService(
         var hasActualTokenCount = false;
         var batchSize = request.BatchSize <= 0 ? 32 : request.BatchSize;
         var delayMs = Math.Max(0, request.DelayMs);
+        var maxInputCharacters = request.MaxInputCharacters <= 0 ? 24_000 : request.MaxInputCharacters;
+        var failedItems = new List<EmbeddingFailureItem>();
 
         foreach (var chunk in chunks)
         {
@@ -86,6 +97,32 @@ public sealed class RegulationEmbeddingService(
             eligible++;
             estimatedTokenCount += EstimateTokenCount(chunk.Text);
 
+            if (chunk.Text.Length > maxInputCharacters)
+            {
+                var reason = $"Chunk length {chunk.Text.Length} exceeds max input length {maxInputCharacters}.";
+                failed++;
+                if (!request.DryRun)
+                {
+                    await embeddingRepository.UpdateChunkEmbeddingStatusAsync(
+                        chunk.Id,
+                        "skipped_too_long",
+                        reason,
+                        timeProvider.GetUtcNow(),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                failedItems.Add(CreateFailureItem(
+                    document,
+                    chunk,
+                    status: "skipped_too_long",
+                    reason: reason,
+                    estimatedTokens: EstimateTokenCount(chunk.Text)));
+                AddWarning(
+                    warnings,
+                    $"Skipped embedding for chunk '{chunk.Id}' because it exceeds max input length {maxInputCharacters}.");
+                continue;
+            }
+
             if (request.Limit is > 0 && generated + failed >= request.Limit.Value)
             {
                 continue;
@@ -98,7 +135,8 @@ public sealed class RegulationEmbeddingService(
 
             try
             {
-                var embedding = await generator.GenerateAsync(chunk.Text, cancellationToken).ConfigureAwait(false);
+                var embedding = await GenerateWithTransientRetryAsync(generator, chunk.Text, delayMs, cancellationToken)
+                    .ConfigureAwait(false);
                 if (embedding.Dimensions != dimensions)
                 {
                     throw new InvalidOperationException(
@@ -126,10 +164,19 @@ public sealed class RegulationEmbeddingService(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 failed++;
-                if (warnings.Count < 10)
-                {
-                    warnings.Add($"Failed to generate embedding for chunk '{chunk.Id}': {exception.Message}");
-                }
+                await embeddingRepository.UpdateChunkEmbeddingStatusAsync(
+                    chunk.Id,
+                    "failed",
+                    exception.Message,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken).ConfigureAwait(false);
+                failedItems.Add(CreateFailureItem(
+                    document,
+                    chunk,
+                    status: "failed",
+                    reason: exception.Message,
+                    estimatedTokens: EstimateTokenCount(chunk.Text)));
+                AddWarning(warnings, $"Failed to generate embedding for chunk '{chunk.Id}': {exception.Message}");
             }
 
             if (delayMs > 0 && generated > 0 && generated % batchSize == 0)
@@ -154,6 +201,14 @@ public sealed class RegulationEmbeddingService(
             warnings.Add($"Unknown provider '{provider}' was not used.");
         }
 
+        var model = ResolveModel(provider, request.Model);
+        var failedReportPath = await WriteFailedReportAsync(
+            request.FailedReportPath,
+            provider,
+            model,
+            failedItems,
+            cancellationToken).ConfigureAwait(false);
+
         return new GenerateEmbeddingsResponse
         {
             ChunksScanned = chunks.Count,
@@ -166,12 +221,34 @@ public sealed class RegulationEmbeddingService(
             SkippedNonSearchable = skippedNonSearchable,
             SkippedEmpty = skippedEmpty,
             Provider = provider,
-            Model = ResolveModel(provider, request.Model),
+            Model = model,
             Dimensions = dimensions,
             EstimatedTokenCount = estimatedTokenCount,
             ActualTokenCount = hasActualTokenCount ? actualTokenCount : null,
-            Warnings = warnings
+            Warnings = warnings,
+            FailedItems = failedItems,
+            FailedReportPath = failedReportPath
         };
+    }
+
+    private async Task<EmbeddingResult> GenerateWithTransientRetryAsync(
+        IEmbeddingGenerator generator,
+        string text,
+        int delayMs,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return await generator.GenerateAsync(text, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException exception) when (IsTransient(exception.StatusCode) && attempt < MaxTransientRetries)
+            {
+                var retryDelay = delayMs > 0 ? delayMs : 250 * (attempt + 1);
+                await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private IEmbeddingGenerator ResolveGenerator(string provider, GenerateEmbeddingsRequest request)
@@ -226,4 +303,73 @@ public sealed class RegulationEmbeddingService(
 
     private static int EstimateTokenCount(string text) =>
         Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+
+    private static bool IsTransient(HttpStatusCode? statusCode) =>
+        statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+
+    private static EmbeddingFailureItem CreateFailureItem(
+        RegulationDocument document,
+        RegulationChunk chunk,
+        string status,
+        string reason,
+        int estimatedTokens) =>
+        new()
+        {
+            DocumentId = document.Id,
+            ChunkId = chunk.Id,
+            Source = document.Source,
+            Title = document.Title,
+            Article = chunk.Article,
+            Status = status,
+            Reason = reason,
+            TextLength = chunk.Text.Length,
+            EstimatedTokens = estimatedTokens
+        };
+
+    private static void AddWarning(List<string> warnings, string warning)
+    {
+        if (warnings.Count < 10)
+        {
+            warnings.Add(warning);
+        }
+    }
+
+    private async Task<string?> WriteFailedReportAsync(
+        string? failedReportPath,
+        string provider,
+        string model,
+        IReadOnlyList<EmbeddingFailureItem> failedItems,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(failedReportPath))
+        {
+            return null;
+        }
+
+        var path = Path.GetFullPath(failedReportPath.Trim());
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var report = new EmbeddingFailureReport
+        {
+            GeneratedAt = timeProvider.GetUtcNow(),
+            Provider = provider,
+            Model = model,
+            Failed = failedItems.Count,
+            Items = failedItems
+        };
+
+        await using var stream = File.Create(path);
+        await JsonSerializer.SerializeAsync(stream, report, ReportJsonOptions, cancellationToken).ConfigureAwait(false);
+
+        return path;
+    }
 }

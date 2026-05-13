@@ -46,6 +46,16 @@ public sealed class GenerateEmbeddingsRequest
     public int DelayMs { get; init; }
 
     /// <summary>
+    /// Gets the maximum input text length allowed before skipping a chunk.
+    /// </summary>
+    public int MaxInputCharacters { get; init; } = 24_000;
+
+    /// <summary>
+    /// Gets the optional JSON report path for failed or skipped embeddings.
+    /// </summary>
+    public string? FailedReportPath { get; init; }
+
+    /// <summary>
     /// Gets whether duplicate chunks should be embedded.
     /// </summary>
     public bool IncludeDuplicates { get; init; }

@@ -280,12 +280,16 @@ Safe generation options:
 - `--only-missing`: resume mode; skip chunks that already have embeddings.
 - `--batch-size 32`: process generated embeddings in batches.
 - `--delay-ms 250`: wait between batches for basic rate limiting.
+- `--max-input-chars 24000`: skip chunks that are too large for safe embedding input.
+- `--failed-report data/embedding-reports/failed-embeddings.json`: write skipped/failed chunk ids and reasons.
+
+Long chunks are skipped by default instead of silently truncated. Failed reports include document id, chunk id, source, title, article, status, reason, text length, and estimated tokens. `400 Bad Request` responses are recorded as failures and are not retried; transient responses such as `429` and `5xx` are retried briefly.
 
 Real OpenAI smoke test:
 
 ```powershell
 $env:DOTNET_ENVIRONMENT = "Development"
-dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250
+dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250 --failed-report data/embedding-reports/failed-embeddings.json
 ```
 
 Run hybrid validation:

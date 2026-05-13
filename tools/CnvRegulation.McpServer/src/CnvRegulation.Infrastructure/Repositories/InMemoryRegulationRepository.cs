@@ -142,4 +142,51 @@ public sealed class InMemoryRegulationRepository : IRegulationRepository, IRegul
 
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc />
+    public Task UpdateChunkEmbeddingStatusAsync(
+        string chunkId,
+        string status,
+        string? reason,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(chunkId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (chunks.TryGetValue(chunkId.Trim(), out var chunk))
+        {
+            var metadata = new Dictionary<string, string>(chunk.Metadata, StringComparer.OrdinalIgnoreCase)
+            {
+                ["embeddingStatus"] = status.Trim(),
+                ["embeddingStatusUpdatedAt"] = updatedAt.ToString("O")
+            };
+
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                metadata["embeddingFailureReason"] = reason.Trim();
+            }
+
+            chunks[chunk.Id] = new RegulationChunk
+            {
+                Id = chunk.Id,
+                DocumentId = chunk.DocumentId,
+                Title = chunk.Title,
+                Chapter = chunk.Chapter,
+                Section = chunk.Section,
+                Article = chunk.Article,
+                ChunkIndex = chunk.ChunkIndex,
+                Text = chunk.Text,
+                ContentHash = chunk.ContentHash,
+                DuplicateOfChunkId = chunk.DuplicateOfChunkId,
+                Embedding = chunk.Embedding,
+                EmbeddingModel = chunk.EmbeddingModel,
+                EmbeddingGeneratedAt = chunk.EmbeddingGeneratedAt,
+                Metadata = metadata
+            };
+        }
+
+        return Task.CompletedTask;
+    }
 }
