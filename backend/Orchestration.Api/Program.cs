@@ -56,10 +56,23 @@ builder.Services
 builder.Services.Configure<CnvRegulationMcpOptions>(
     builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName)
 );
+builder.Services.AddScoped<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+
+var cnvMcpOptions = builder.Configuration
+    .GetSection(CnvRegulationMcpOptions.SectionName)
+    .Get<CnvRegulationMcpOptions>() ?? new CnvRegulationMcpOptions();
+
+if (cnvMcpOptions.Enabled)
+{
+    builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();
+}
+else
+{
+    builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
+}
+
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
-builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();
-builder.Services.AddScoped<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
 
 // Persistence configuration
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
