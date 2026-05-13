@@ -243,6 +243,10 @@ public sealed class SearchQualityValidationServiceTests
         var result = report.Results.Should().ContainSingle().Which;
         result.TopResultChanged.Should().BeTrue();
         result.CandidateScoreBreakdown.Should().Contain("finalScore");
+        result.BaselineResult.Should().NotBeNull();
+        result.CandidateResult.Should().NotBeNull();
+        result.CandidateResult!.TopResultSnippet.Should().Be("mercado autorizado");
+        result.CandidateResult.TopResultCitation.Should().NotBeNull();
     }
 
     private static StaticRegulationQueryExpander CreateQueryExpander() =>

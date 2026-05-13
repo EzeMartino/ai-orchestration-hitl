@@ -307,6 +307,20 @@ $env:Embeddings__Model = "text-embedding-3-small"
 dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json
 ```
 
+Write a manual relevance review report:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json --output-report data/search-quality/reports/fulltext-vs-hybrid.review.json
+```
+
+Use `.md` for a Markdown report:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json --output-report data/search-quality/reports/fulltext-vs-hybrid.review.md
+```
+
+The review report includes expanded queries, full-text and hybrid top results, snippets, citations, warnings, hybrid score breakdown, `topResultChanged`, and editable fields `reviewDecision` and `reviewNotes`. `reviewDecision` starts as `unknown`; expected manual values are `full_text_better`, `hybrid_better`, `equivalent`, or `needs_legal_review`.
+
 `search_cnv_regulation` accepts `searchMode`:
 
 - `full_text` (default)

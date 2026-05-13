@@ -1,4 +1,5 @@
 using CnvRegulation.Application.Contracts;
+using CnvRegulation.Domain;
 using FluentAssertions;
 
 namespace CnvRegulation.McpServer.Tests;
@@ -205,5 +206,150 @@ public sealed class SearchQualityValidationReportFormatterTests
         output.Should().Contain("hybrid top:");
         output.Should().Contain("Top changed: yes");
         output.Should().Contain("Score breakdown: fullTextScore=0.8;vectorScore=0.7;finalScore=0.76");
+    }
+
+    [Fact]
+    public async Task SearchQualityReviewReportWriter_ShouldWriteJsonReport()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var reportPath = Path.Combine(testDirectory.Path, "fulltext-vs-hybrid.review.json");
+        var comparison = CreateComparisonReport();
+        var report = SearchQualityReviewReportFactory.Create(comparison, DateTimeOffset.Parse("2026-05-13T00:00:00Z"));
+
+        var writtenPath = await SearchQualityReviewReportWriter.WriteAsync(report, reportPath, CancellationToken.None);
+
+        writtenPath.Should().Be(Path.GetFullPath(reportPath));
+        var json = await File.ReadAllTextAsync(reportPath);
+        json.Should().Contain("\"generatedAt\": \"2026-05-13T00:00:00+00:00\"");
+        json.Should().Contain("\"reviewDecision\": \"unknown\"");
+        json.Should().Contain("\"scoreBreakdown\"");
+        json.Should().Contain("\"citation\"");
+    }
+
+    [Fact]
+    public async Task SearchQualityReviewReportWriter_ShouldWriteMarkdownReport()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var reportPath = Path.Combine(testDirectory.Path, "fulltext-vs-hybrid.review.md");
+        var comparison = CreateComparisonReport();
+        var report = SearchQualityReviewReportFactory.Create(comparison, DateTimeOffset.Parse("2026-05-13T00:00:00Z"));
+
+        await SearchQualityReviewReportWriter.WriteAsync(report, reportPath, CancellationToken.None);
+
+        var markdown = await File.ReadAllTextAsync(reportPath);
+        markdown.Should().Contain("# Search Quality Review");
+        markdown.Should().Contain("## alyc");
+        markdown.Should().Contain("### Full-text");
+        markdown.Should().Contain("### Hybrid");
+        markdown.Should().Contain("Review decision: unknown");
+    }
+
+    private static SearchQualityComparisonReport CreateComparisonReport() =>
+        new()
+        {
+            QuerySetPath = "queries.json",
+            BaselineMode = "full_text",
+            CandidateMode = "hybrid",
+            Queries = 1,
+            BaselinePassed = 1,
+            BaselineFailed = 0,
+            CandidatePassed = 1,
+            CandidateFailed = 0,
+            Warnings = [],
+            Results =
+            [
+                new SearchQualityComparisonResult
+                {
+                    Id = "alyc",
+                    Query = "ALyC obligaciones",
+                    BaselinePassed = true,
+                    CandidatePassed = true,
+                    BaselineTopResult = "CNV | Normas CNV | Articulo 1 | 0.800",
+                    BaselineResult = CreateValidationResult(
+                        "ALyC obligaciones",
+                        "CNV",
+                        "Normas CNV",
+                        "Articulo 1",
+                        0.8,
+                        scoreBreakdown: null),
+                    CandidateTopResult = "Infoleg | RG 622 | Articulo 4 | 0.900",
+                    CandidateResult = CreateValidationResult(
+                        "ALyC obligaciones",
+                        "Infoleg",
+                        "RG 622",
+                        "Articulo 4",
+                        0.9,
+                        "fullTextScore=0.8;vectorScore=0.7;sourcePriorityBonus=0.1;multiQueryBonus=0.03;finalScore=0.76"),
+                    TopResultChanged = true,
+                    CandidateScoreBreakdown = "fullTextScore=0.8;vectorScore=0.7;finalScore=0.76",
+                    FailureReasons = []
+                }
+            ]
+        };
+
+    private static SearchQualityValidationResult CreateValidationResult(
+        string query,
+        string source,
+        string title,
+        string article,
+        double score,
+        string? scoreBreakdown) =>
+        new()
+        {
+            Id = "alyc",
+            Query = query,
+            ExpandedTerms = ["agente de liquidacion y compensacion"],
+            ExpandedQueries = ["alyc obligaciones", "agente de liquidacion y compensacion obligaciones"],
+            ResultCount = 1,
+            TopResultSource = source,
+            TopResultTitle = title,
+            TopResultArticle = article,
+            TopResultScore = score,
+            TopResultSnippet = "snippet regulatorio",
+            TopResultCitation = new RegulationCitation
+            {
+                Source = source,
+                DocumentType = "Texto Ordenado",
+                Title = title,
+                Article = article,
+                Url = "https://www.cnv.gov.ar/",
+                QuotedText = "snippet regulatorio"
+            },
+            TopResultMetadata = string.IsNullOrWhiteSpace(scoreBreakdown)
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["scoreBreakdown"] = scoreBreakdown
+                },
+            CitationsPresent = true,
+            Warnings = ["candidate source"],
+            Passed = true,
+            FailureReasons = []
+        };
+
+    private sealed class TempDirectory : IDisposable
+    {
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
+
+        public string Path { get; }
+
+        public static TempDirectory Create()
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+
+            return new TempDirectory(path);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
     }
 }

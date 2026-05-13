@@ -31,9 +31,19 @@ public sealed class SearchQualityComparisonResult
     public required string BaselineTopResult { get; init; }
 
     /// <summary>
+    /// Gets baseline validation details.
+    /// </summary>
+    public SearchQualityValidationResult? BaselineResult { get; init; }
+
+    /// <summary>
     /// Gets candidate top result summary.
     /// </summary>
     public required string CandidateTopResult { get; init; }
+
+    /// <summary>
+    /// Gets candidate validation details.
+    /// </summary>
+    public SearchQualityValidationResult? CandidateResult { get; init; }
 
     /// <summary>
     /// Gets whether top results differ.

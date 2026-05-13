@@ -192,6 +192,18 @@ if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringC
 
         Console.WriteLine(SearchQualityComparisonReportFormatter.Format(comparison));
 
+        var outputReport = GetOptionValue(args, "--output-report");
+        if (!string.IsNullOrWhiteSpace(outputReport))
+        {
+            var reviewReport = SearchQualityReviewReportFactory.Create(comparison, TimeProvider.System.GetUtcNow());
+            var reportPath = await SearchQualityReviewReportWriter.WriteAsync(
+                reviewReport,
+                outputReport,
+                CancellationToken.None);
+
+            Console.WriteLine($"Review report written: {reportPath}");
+        }
+
         return;
     }
 

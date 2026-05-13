@@ -150,6 +150,8 @@ public sealed class SearchQualityValidationService(
             TopResultTitle = topResult?.Title,
             TopResultArticle = topResult?.Article,
             TopResultScore = topResult?.Score,
+            TopResultSnippet = topResult?.Snippet,
+            TopResultCitation = topResult?.Citations.FirstOrDefault(),
             TopResultMetadata = topResult?.Metadata ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             CitationsPresent = citationsPresent,
             Warnings = search.Warnings,
@@ -171,7 +173,9 @@ public sealed class SearchQualityValidationService(
                 BaselinePassed = baseline.Passed,
                 CandidatePassed = false,
                 BaselineTopResult = FormatTopResult(baseline),
+                BaselineResult = baseline,
                 CandidateTopResult = "(missing)",
+                CandidateResult = null,
                 TopResultChanged = true,
                 CandidateScoreBreakdown = null,
                 FailureReasons = ["candidate mode did not return a validation result"]
@@ -190,7 +194,9 @@ public sealed class SearchQualityValidationService(
             BaselinePassed = baseline.Passed,
             CandidatePassed = candidate.Passed,
             BaselineTopResult = FormatTopResult(baseline),
+            BaselineResult = baseline,
             CandidateTopResult = FormatTopResult(candidate),
+            CandidateResult = candidate,
             TopResultChanged = !SameTopResult(baseline, candidate),
             CandidateScoreBreakdown = candidate.TopResultMetadata.GetValueOrDefault("scoreBreakdown"),
             FailureReasons = failureReasons

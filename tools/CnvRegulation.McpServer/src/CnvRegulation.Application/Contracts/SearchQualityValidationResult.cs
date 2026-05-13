@@ -1,5 +1,7 @@
 namespace CnvRegulation.Application.Contracts;
 
+using CnvRegulation.Domain;
+
 /// <summary>
 /// Per-query search-quality validation result.
 /// </summary>
@@ -49,6 +51,16 @@ public sealed class SearchQualityValidationResult
     /// Gets the top result score.
     /// </summary>
     public double? TopResultScore { get; init; }
+
+    /// <summary>
+    /// Gets the top result snippet.
+    /// </summary>
+    public string? TopResultSnippet { get; init; }
+
+    /// <summary>
+    /// Gets the top result citation.
+    /// </summary>
+    public RegulationCitation? TopResultCitation { get; init; }
 
     /// <summary>
     /// Gets top result diagnostic metadata.
