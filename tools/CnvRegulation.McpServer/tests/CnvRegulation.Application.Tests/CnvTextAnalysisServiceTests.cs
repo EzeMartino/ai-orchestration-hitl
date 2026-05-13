@@ -100,6 +100,7 @@ public sealed class CnvTextAnalysisServiceTests
 
         searchService.Requests.Should().NotBeEmpty();
         searchService.Requests[0].SearchMode.Should().Be("full_text");
+        searchService.Requests.Should().OnlyContain(request => request.Area == null);
         searchService.Requests.Should().OnlyContain(request => request.SearchMode == "full_text");
     }
 
@@ -140,7 +141,7 @@ public sealed class CnvTextAnalysisServiceTests
     }
 
     [Theory]
-    [InlineData("ALyC obligaciones", "ALyC obligations")]
+    [InlineData("ALyC obligaciones", "ALyC obligaciones")]
     [InlineData("oferta publica de valores negociables", "Oferta publica")]
     [InlineData("hecho relevante por AIF", "Hecho relevante")]
     [InlineData("prevencion de lavado UIF", "Prevencion de lavado")]

@@ -37,7 +37,7 @@ public sealed class RegulatoryTopicExtractor : IRegulatoryTopicExtractor
         AddWhen(
             topics,
             normalized,
-            "ALyC obligations",
+            "ALyC obligaciones",
             "ALyC obligaciones",
             0.86,
             "alyc",
@@ -84,7 +84,9 @@ public sealed class RegulatoryTopicExtractor : IRegulatoryTopicExtractor
             "idoneo",
             "idoneos",
             "examen",
-            "personal idoneo");
+            "personal idoneo",
+            "perfil",
+            "perfiles");
         AddWhen(
             topics,
             normalized,

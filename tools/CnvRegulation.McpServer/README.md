@@ -41,6 +41,34 @@ Example MCP input:
 
 Hybrid remains optional and is not the default ranking mode.
 
+## Validate analysis quality
+
+Run curated text-analysis checks against `analyze_text_against_cnv`:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --cases data/analysis-quality/cnv.analysis-quality.json
+```
+
+For PostgreSQL:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --storage postgres --cases data/analysis-quality/cnv.analysis-quality.json
+```
+
+Hybrid can be enabled as a secondary exploratory pass:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --storage postgres --cases data/analysis-quality/cnv.analysis-quality.json --use-hybrid-search true
+```
+
+The report shows pass/fail per case, expected and actual status, expected and detected topics, findings, citations, risk levels, warnings, and failure reasons. JSON and Markdown reports can be written with `--output-report`:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --storage postgres --cases data/analysis-quality/cnv.analysis-quality.json --output-report data/analysis-quality/reports/cnv.analysis-quality.md
+```
+
+Hybrid remains optional and full-text remains the primary evidence path.
+
 ## Run
 
 ```powershell
@@ -391,7 +419,7 @@ dotnet test
 
 - `src/CnvRegulation.Domain`: regulatory document, chunk, search result, and citation models.
 - `src/CnvRegulation.Application`: request/response contracts plus document, chunking, repository, query expansion, and service interfaces.
-- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text/semantic/hybrid search, deterministic and OpenAI embedding generators, query alias expansion, local ingestion, diagnostics, controlled Infoleg link discovery, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, and mock service implementations.
+- `src/CnvRegulation.Infrastructure`: in-memory and PostgreSQL repositories, PostgreSQL full-text/semantic/hybrid search, deterministic and OpenAI embedding generators, query alias expansion, local ingestion, diagnostics, controlled Infoleg link discovery, text/HTML/PDF parsers, PDF normalizer, chunk quality inspector, chunker, legal structure detector, sidecar metadata reader, analysis quality validator, and mock service implementations.
 - `src/CnvRegulation.McpServer`: stdio MCP host, CLI commands, and tool definitions.
 - `tests`: xUnit coverage for mock services, contracts, diagnostics, repository behavior, and MCP tool registration.
 

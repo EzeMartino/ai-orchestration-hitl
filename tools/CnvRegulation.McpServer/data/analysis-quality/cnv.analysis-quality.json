@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "id": "alyc-client-risk-disclosure",
+      "text": "El agente podra ofrecer instrumentos a clientes sin verificar su perfil ni informar los riesgos asociados.",
+      "regulationArea": "ALyC",
+      "expectedStatus": "requires_review",
+      "expectedTopics": [
+        "ALyC obligaciones",
+        "idoneidad"
+      ],
+      "minFindings": 1,
+      "minCitations": 1
+    },
+    {
+      "id": "oferta-publica-general",
+      "text": "La sociedad difundira publicamente una invitacion a invertir en valores negociables sin autorizacion previa.",
+      "regulationArea": "Oferta publica",
+      "expectedStatus": "requires_review",
+      "expectedTopics": [
+        "oferta publica"
+      ],
+      "minFindings": 1,
+      "minCitations": 1
+    },
+    {
+      "id": "hecho-relevante-aif",
+      "text": "La emisora decidio no publicar en la AIF un evento relevante para los inversores.",
+      "regulationArea": "Emisoras",
+      "expectedStatus": "requires_review",
+      "expectedTopics": [
+        "hecho relevante",
+        "emisora"
+      ],
+      "minFindings": 1,
+      "minCitations": 1
+    },
+    {
+      "id": "aml-client-onboarding",
+      "text": "El agente aceptara clientes sin documentacion respaldatoria ni controles de prevencion de lavado.",
+      "regulationArea": "PLD/FT",
+      "expectedStatus": "requires_review",
+      "expectedTopics": [
+        "prevencion de lavado"
+      ],
+      "minFindings": 1,
+      "minCitations": 1
+    },
+    {
+      "id": "irrelevant-text",
+      "text": "La empresa actualizara el color del boton principal en la interfaz web.",
+      "regulationArea": null,
+      "expectedStatus": "insufficient_evidence",
+      "expectedTopics": [],
+      "minFindings": 0,
+      "minCitations": 0
+    }
+  ]
+}

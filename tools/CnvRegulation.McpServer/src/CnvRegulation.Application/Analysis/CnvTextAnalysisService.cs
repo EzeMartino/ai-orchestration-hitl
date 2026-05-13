@@ -115,7 +115,6 @@ public sealed class CnvTextAnalysisService(
             new SearchRegulationRequest
             {
                 Query = topic.SearchQuery,
-                Area = request.RegulationArea,
                 Limit = 3,
                 SearchMode = searchMode,
                 IncludeDuplicates = false,

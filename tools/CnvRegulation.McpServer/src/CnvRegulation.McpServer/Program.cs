@@ -221,6 +221,36 @@ if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringC
     return;
 }
 
+if (args.Length > 0 && string.Equals(args[0], "validate-analysis-quality", StringComparison.OrdinalIgnoreCase))
+{
+    using var host = builder.Build();
+    var caseSetPath = ResolveAnalysisQualityCaseSetPath(args);
+    var validationService = host.Services.GetRequiredService<IAnalysisQualityValidationService>();
+    var response = await validationService.ValidateAsync(
+        new ValidateAnalysisQualityRequest
+        {
+            CaseSetPath = caseSetPath,
+            UseHybridSearch = ResolveBoolOption(args, "--use-hybrid-search", defaultValue: false),
+            StrictMode = ResolveBoolOption(args, "--strict-mode", defaultValue: true)
+        },
+        CancellationToken.None);
+
+    Console.WriteLine(AnalysisQualityValidationReportFormatter.Format(response));
+
+    var outputReport = GetOptionValue(args, "--output-report");
+    if (!string.IsNullOrWhiteSpace(outputReport))
+    {
+        var reportPath = await AnalysisQualityValidationReportWriter.WriteAsync(
+            response,
+            outputReport,
+            CancellationToken.None);
+
+        Console.WriteLine($"Analysis quality report written: {reportPath}");
+    }
+
+    return;
+}
+
 if (args.Length > 0 && string.Equals(args[0], "generate-embeddings", StringComparison.OrdinalIgnoreCase))
 {
     using var host = builder.Build();
@@ -400,6 +430,17 @@ static string ResolveSearchQualityQuerySetPath(string[] args)
     return Path.Combine(ResolveProjectRoot(), "data", "search-quality", "cnv.search-quality.json");
 }
 
+static string ResolveAnalysisQualityCaseSetPath(string[] args)
+{
+    var explicitPath = GetOptionValue(args, "--cases");
+    if (!string.IsNullOrWhiteSpace(explicitPath))
+    {
+        return explicitPath;
+    }
+
+    return Path.Combine(ResolveProjectRoot(), "data", "analysis-quality", "cnv.analysis-quality.json");
+}
+
 static int ResolveSearchQualityLimit(string[] args)
 {
     var value = GetOptionValue(args, "--limit");
@@ -454,6 +495,17 @@ static bool? ResolveNullableBoolOption(string[] args, string optionName)
 {
     var value = GetOptionValue(args, optionName);
     return bool.TryParse(value, out var parsedValue) ? parsedValue : null;
+}
+
+static bool ResolveBoolOption(string[] args, string optionName, bool defaultValue)
+{
+    var value = GetOptionValue(args, optionName);
+    if (bool.TryParse(value, out var parsedValue))
+    {
+        return parsedValue;
+    }
+
+    return HasOption(args, optionName) || defaultValue;
 }
 
 static int? ResolveNullableIntOption(string[] args, string optionName)

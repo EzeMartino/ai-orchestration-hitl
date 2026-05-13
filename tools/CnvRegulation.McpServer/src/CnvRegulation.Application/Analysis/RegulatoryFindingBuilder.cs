@@ -75,6 +75,8 @@ public sealed class RegulatoryFindingBuilder : IRegulatoryFindingBuilder
                 "The text may require review against CNV rules related to public offering or negotiable securities.",
             "Hecho relevante" =>
                 "The text may require review against CNV rules related to relevant information or disclosure channels.",
+            "ALyC obligaciones" =>
+                "The text may require review against CNV rules related to agent obligations.",
             _ =>
                 $"The text may require review against CNV rules related to {topic.Name}."
         };
