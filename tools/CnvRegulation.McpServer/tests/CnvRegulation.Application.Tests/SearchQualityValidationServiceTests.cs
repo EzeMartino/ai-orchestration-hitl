@@ -208,6 +208,43 @@ public sealed class SearchQualityValidationServiceTests
         searchService.LastRequest!.SearchMode.Should().Be("hybrid");
     }
 
+    [Fact]
+    public async Task CompareAsync_ShouldReportTopResultDifferencesAndHybridBreakdown()
+    {
+        using var testDirectory = TempDirectory.Create();
+        var querySetPath = Path.Combine(testDirectory.Path, "queries.json");
+        await File.WriteAllTextAsync(
+            querySetPath,
+            """
+            {
+              "queries": [
+                {
+                  "id": "compare",
+                  "query": "mercado autorizado",
+                  "expectedAnyTerms": [ "mercado autorizado" ],
+                  "minResults": 1
+                }
+              ]
+            }
+            """);
+        var validator = new SearchQualityValidationService(new ModeAwareSearchService(), CreateQueryExpander());
+
+        var report = await validator.CompareAsync(
+            new CompareSearchQualityRequest
+            {
+                QuerySetPath = querySetPath,
+                Modes = ["full_text", "hybrid"]
+            },
+            CancellationToken.None);
+
+        report.Queries.Should().Be(1);
+        report.BaselinePassed.Should().Be(1);
+        report.CandidatePassed.Should().Be(1);
+        var result = report.Results.Should().ContainSingle().Which;
+        result.TopResultChanged.Should().BeTrue();
+        result.CandidateScoreBreakdown.Should().Contain("finalScore");
+    }
+
     private static StaticRegulationQueryExpander CreateQueryExpander() =>
         new(new RegulationAliasesOptions());
 
@@ -250,6 +287,52 @@ public sealed class SearchQualityValidationServiceTests
                         Url = "https://www.cnv.gov.ar/",
                         Snippet = "mercado autorizado",
                         Score = 1,
+                        Citations =
+                        [
+                            new RegulationCitation
+                            {
+                                Source = "CNV",
+                                DocumentType = "Texto Ordenado",
+                                Title = "Documento",
+                                Url = "https://www.cnv.gov.ar/",
+                                QuotedText = "mercado autorizado"
+                            }
+                        ]
+                    }
+                ],
+                Warnings = []
+            });
+        }
+    }
+
+    private sealed class ModeAwareSearchService : IRegulationSearchService
+    {
+        public Task<SearchRegulationResponse> SearchAsync(
+            SearchRegulationRequest request,
+            CancellationToken cancellationToken)
+        {
+            var isHybrid = request.SearchMode.Equals("hybrid", StringComparison.OrdinalIgnoreCase);
+
+            return Task.FromResult(new SearchRegulationResponse
+            {
+                Query = request.Query,
+                Results =
+                [
+                    new RegulationSearchResult
+                    {
+                        DocumentId = isHybrid ? "hybrid-doc" : "fts-doc",
+                        ChunkId = isHybrid ? "hybrid-chunk" : "fts-chunk",
+                        Title = isHybrid ? "Documento hybrid" : "Documento fts",
+                        Source = "CNV",
+                        Url = "https://www.cnv.gov.ar/",
+                        Snippet = "mercado autorizado",
+                        Score = isHybrid ? 0.9 : 0.8,
+                        Metadata = isHybrid
+                            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["scoreBreakdown"] = "fullTextScore=0.8;vectorScore=0.7;finalScore=0.76"
+                            }
+                            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                         Citations =
                         [
                             new RegulationCitation

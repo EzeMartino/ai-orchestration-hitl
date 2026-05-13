@@ -38,7 +38,8 @@ public sealed class OpenAiEmbeddingGenerator(HttpClient httpClient, EmbeddingOpt
         {
             Vector = vector,
             Model = payload.Model ?? options.Model,
-            Dimensions = vector.Length
+            Dimensions = vector.Length,
+            TokenCount = payload.Usage?.TotalTokens
         };
     }
 
@@ -54,11 +55,20 @@ public sealed class OpenAiEmbeddingGenerator(HttpClient httpClient, EmbeddingOpt
 
         [JsonPropertyName("data")]
         public IReadOnlyList<OpenAiEmbeddingData> Data { get; init; } = [];
+
+        [JsonPropertyName("usage")]
+        public OpenAiUsage? Usage { get; init; }
     }
 
     private sealed class OpenAiEmbeddingData
     {
         [JsonPropertyName("embedding")]
         public float[] Embedding { get; init; } = [];
+    }
+
+    private sealed class OpenAiUsage
+    {
+        [JsonPropertyName("total_tokens")]
+        public int TotalTokens { get; init; }
     }
 }

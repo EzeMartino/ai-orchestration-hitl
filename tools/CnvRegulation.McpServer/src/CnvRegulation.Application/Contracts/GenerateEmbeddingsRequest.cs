@@ -26,6 +26,26 @@ public sealed class GenerateEmbeddingsRequest
     public int? Limit { get; init; }
 
     /// <summary>
+    /// Gets whether the command should only report eligible chunks without persisting embeddings.
+    /// </summary>
+    public bool DryRun { get; init; }
+
+    /// <summary>
+    /// Gets whether only chunks without embeddings should be processed.
+    /// </summary>
+    public bool OnlyMissing { get; init; }
+
+    /// <summary>
+    /// Gets the generation batch size.
+    /// </summary>
+    public int BatchSize { get; init; } = 32;
+
+    /// <summary>
+    /// Gets the delay between generation batches in milliseconds.
+    /// </summary>
+    public int DelayMs { get; init; }
+
+    /// <summary>
     /// Gets whether duplicate chunks should be embedded.
     /// </summary>
     public bool IncludeDuplicates { get; init; }

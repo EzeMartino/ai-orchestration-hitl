@@ -85,6 +85,81 @@ public sealed class EmbeddingServiceTests
         response.SkippedNonSearchable.Should().Be(1);
     }
 
+    [Fact]
+    public async Task GenerateEmbeddings_ShouldDryRunWithoutPersistingEmbeddings()
+    {
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+        var document = CreateDocument();
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(
+            document.Id,
+            [CreateChunk(document.Id, "chunk-1", "mercado autorizado", duplicateOfChunkId: null)],
+            CancellationToken.None);
+
+        var response = await service.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake", Dimensions = 32, DryRun = true },
+            CancellationToken.None);
+        var saved = await repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+
+        response.EligibleChunks.Should().Be(1);
+        response.Generated.Should().Be(0);
+        response.EstimatedTokenCount.Should().BeGreaterThan(0);
+        response.Warnings.Should().Contain(warning => warning.Contains("Dry run", StringComparison.OrdinalIgnoreCase));
+        saved[0].Embedding.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GenerateEmbeddings_ShouldReportAlreadyEmbeddedChunksForResume()
+    {
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+        var document = CreateDocument();
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(
+            document.Id,
+            [CreateChunk(document.Id, "chunk-1", "mercado autorizado", duplicateOfChunkId: null)],
+            CancellationToken.None);
+        await service.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake", Dimensions = 32 },
+            CancellationToken.None);
+
+        var response = await service.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake", Dimensions = 32, OnlyMissing = true },
+            CancellationToken.None);
+
+        response.Generated.Should().Be(0);
+        response.AlreadyEmbedded.Should().Be(1);
+        response.Warnings.Should().Contain(warning => warning.Contains("Resume mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GenerateEmbeddings_ShouldRespectLimit()
+    {
+        var repository = new InMemoryRegulationRepository();
+        var service = CreateService(repository);
+        var document = CreateDocument();
+
+        await repository.SaveAsync(document, CancellationToken.None);
+        await repository.ReplaceForDocumentAsync(
+            document.Id,
+            [
+                CreateChunk(document.Id, "chunk-1", "mercado autorizado", duplicateOfChunkId: null),
+                CreateChunk(document.Id, "chunk-2", "oferta publica", duplicateOfChunkId: null)
+            ],
+            CancellationToken.None);
+
+        var response = await service.GenerateMissingEmbeddingsAsync(
+            new GenerateEmbeddingsRequest { Provider = "fake", Dimensions = 32, Limit = 1 },
+            CancellationToken.None);
+        var saved = await repository.ListByDocumentIdAsync(document.Id, CancellationToken.None);
+
+        response.Generated.Should().Be(1);
+        saved.Count(chunk => chunk.Embedding is not null).Should().Be(1);
+    }
+
     private static RegulationEmbeddingService CreateService(InMemoryRegulationRepository repository)
     {
         var options = new EmbeddingOptions { Dimensions = 32 };

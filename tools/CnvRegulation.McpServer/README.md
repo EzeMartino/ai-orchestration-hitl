@@ -273,10 +273,30 @@ dotnet run --project src/CnvRegulation.McpServer -- migrate-db
 dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake
 ```
 
+Safe generation options:
+
+- `--limit 25`: cap generated embeddings for smoke tests.
+- `--dry-run`: report eligible work without persisting embeddings.
+- `--only-missing`: resume mode; skip chunks that already have embeddings.
+- `--batch-size 32`: process generated embeddings in batches.
+- `--delay-ms 250`: wait between batches for basic rate limiting.
+
+Real OpenAI smoke test:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250
+```
+
 Run hybrid validation:
 
 ```powershell
 dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --mode hybrid --queries data/search-quality/cnv.search-quality.json
+```
+
+Compare full-text baseline against hybrid:
+
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json
 ```
 
 `search_cnv_regulation` accepts `searchMode`:
@@ -300,7 +320,7 @@ Configuration:
 }
 ```
 
-The `OpenAI` provider is available behind config or command options, but normal build/test never requires an API key. Use `CNV_REGULATION_OPENAI_API_KEY` or `OPENAI_API_KEY` only when explicitly generating real embeddings.
+The `OpenAI` provider is available behind config, user-secrets, or environment variables, but normal build/test never requires an API key. Use `CNV_REGULATION_OPENAI_API_KEY` or `OPENAI_API_KEY` only when explicitly generating real embeddings. Full-text search remains the default search mode.
 
 PostgreSQL integration tests are skipped by default. To run them:
 

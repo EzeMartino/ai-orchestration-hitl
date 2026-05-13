@@ -178,6 +178,23 @@ if (args.Length > 0 && string.Equals(args[0], "validate-search-quality", StringC
     var limit = ResolveSearchQualityLimit(args);
     var mode = ResolveSearchMode(args);
     var validationService = host.Services.GetRequiredService<ISearchQualityValidationService>();
+    var compareModes = ResolveCompareSearchModes(args);
+    if (compareModes.Count > 0)
+    {
+        var comparison = await validationService.CompareAsync(
+            new CompareSearchQualityRequest
+            {
+                QuerySetPath = querySetPath,
+                Limit = limit,
+                Modes = compareModes
+            },
+            CancellationToken.None);
+
+        Console.WriteLine(SearchQualityComparisonReportFormatter.Format(comparison));
+
+        return;
+    }
+
     var response = await validationService.ValidateAsync(
         new ValidateSearchQualityRequest
         {
@@ -203,6 +220,10 @@ if (args.Length > 0 && string.Equals(args[0], "generate-embeddings", StringCompa
             Model = GetOptionValue(args, "--model"),
             Dimensions = ResolveNullableIntOption(args, "--dimensions"),
             Limit = ResolveNullableIntOption(args, "--limit"),
+            DryRun = HasOption(args, "--dry-run"),
+            OnlyMissing = HasOption(args, "--only-missing"),
+            BatchSize = ResolveNullableIntOption(args, "--batch-size") ?? 32,
+            DelayMs = ResolveNullableIntOption(args, "--delay-ms") ?? 0,
             IncludeDuplicates = HasOption(args, "--include-duplicates"),
             IncludeNonSearchable = HasOption(args, "--include-non-searchable")
         },
@@ -373,6 +394,21 @@ static int ResolveSearchQualityLimit(string[] args)
 
 static string ResolveSearchMode(string[] args) =>
     GetOptionValue(args, "--mode") ?? GetOptionValue(args, "--search-mode") ?? "full_text";
+
+static IReadOnlyList<string> ResolveCompareSearchModes(string[] args)
+{
+    var value = GetOptionValue(args, "--compare-modes");
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return [];
+    }
+
+    return value
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(mode => !string.IsNullOrWhiteSpace(mode))
+        .Take(2)
+        .ToArray();
+}
 
 static ExplainSearchQueryRequest ResolveExplainSearchQueryRequest(string[] args) =>
     new()

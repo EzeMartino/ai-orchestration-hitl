@@ -34,9 +34,17 @@ public sealed class RegulationEmbeddingService(
         var warnings = new List<string>();
         var generated = 0;
         var missing = 0;
+        var eligible = 0;
+        var alreadyEmbedded = 0;
+        var failed = 0;
         var skippedDuplicates = 0;
         var skippedNonSearchable = 0;
         var skippedEmpty = 0;
+        var estimatedTokenCount = 0;
+        var actualTokenCount = 0;
+        var hasActualTokenCount = false;
+        var batchSize = request.BatchSize <= 0 ? 32 : request.BatchSize;
+        var delayMs = Math.Max(0, request.DelayMs);
 
         foreach (var chunk in chunks)
         {
@@ -53,6 +61,7 @@ public sealed class RegulationEmbeddingService(
             }
             else
             {
+                alreadyEmbedded++;
                 continue;
             }
 
@@ -74,25 +83,69 @@ public sealed class RegulationEmbeddingService(
                 continue;
             }
 
-            var embedding = await generator.GenerateAsync(chunk.Text, cancellationToken).ConfigureAwait(false);
-            if (embedding.Dimensions != dimensions)
+            eligible++;
+            estimatedTokenCount += EstimateTokenCount(chunk.Text);
+
+            if (request.Limit is > 0 && generated + failed >= request.Limit.Value)
             {
-                throw new InvalidOperationException(
-                    $"Embedding dimensions mismatch. Expected {dimensions}, got {embedding.Dimensions} from {embedding.Model}.");
+                continue;
             }
 
-            await embeddingRepository.UpdateChunkEmbeddingAsync(
-                chunk.Id,
-                embedding.Vector,
-                string.IsNullOrWhiteSpace(request.Model) ? embedding.Model : request.Model.Trim(),
-                timeProvider.GetUtcNow(),
-                cancellationToken).ConfigureAwait(false);
-            generated++;
-
-            if (request.Limit is > 0 && generated >= request.Limit.Value)
+            if (request.DryRun)
             {
-                break;
+                continue;
             }
+
+            try
+            {
+                var embedding = await generator.GenerateAsync(chunk.Text, cancellationToken).ConfigureAwait(false);
+                if (embedding.Dimensions != dimensions)
+                {
+                    throw new InvalidOperationException(
+                        $"Embedding dimensions mismatch. Expected {dimensions}, got {embedding.Dimensions} from {embedding.Model}.");
+                }
+
+                await embeddingRepository.UpdateChunkEmbeddingAsync(
+                    chunk.Id,
+                    embedding.Vector,
+                    string.IsNullOrWhiteSpace(request.Model) ? embedding.Model : request.Model.Trim(),
+                    timeProvider.GetUtcNow(),
+                    cancellationToken).ConfigureAwait(false);
+
+                generated++;
+                if (embedding.TokenCount is > 0)
+                {
+                    actualTokenCount += embedding.TokenCount.Value;
+                    hasActualTokenCount = true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failed++;
+                if (warnings.Count < 10)
+                {
+                    warnings.Add($"Failed to generate embedding for chunk '{chunk.Id}': {exception.Message}");
+                }
+            }
+
+            if (delayMs > 0 && generated > 0 && generated % batchSize == 0)
+            {
+                await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (request.DryRun)
+        {
+            warnings.Add("Dry run only. No embeddings were generated or persisted.");
+        }
+
+        if (request.OnlyMissing)
+        {
+            warnings.Add("Resume mode: chunks with existing embeddings were skipped.");
         }
 
         if (!provider.Equals("Fake", StringComparison.OrdinalIgnoreCase)
@@ -105,13 +158,18 @@ public sealed class RegulationEmbeddingService(
         {
             ChunksScanned = chunks.Count,
             MissingEmbeddings = missing,
+            EligibleChunks = eligible,
+            AlreadyEmbedded = alreadyEmbedded,
             Generated = generated,
+            Failed = failed,
             SkippedDuplicates = skippedDuplicates,
             SkippedNonSearchable = skippedNonSearchable,
             SkippedEmpty = skippedEmpty,
             Provider = provider,
             Model = ResolveModel(provider, request.Model),
             Dimensions = dimensions,
+            EstimatedTokenCount = estimatedTokenCount,
+            ActualTokenCount = hasActualTokenCount ? actualTokenCount : null,
             Warnings = warnings
         };
     }
@@ -152,4 +210,7 @@ public sealed class RegulationEmbeddingService(
             ? options.Model
             : "fake-deterministic";
     }
+
+    private static int EstimateTokenCount(string text) =>
+        Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
 }

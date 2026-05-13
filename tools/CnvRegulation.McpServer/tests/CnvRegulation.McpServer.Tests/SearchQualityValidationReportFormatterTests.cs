@@ -124,10 +124,15 @@ public sealed class SearchQualityValidationReportFormatterTests
         {
             ChunksScanned = 10,
             MissingEmbeddings = 8,
+            EligibleChunks = 6,
+            AlreadyEmbedded = 2,
             Generated = 6,
+            Failed = 0,
             SkippedDuplicates = 1,
             SkippedNonSearchable = 1,
             SkippedEmpty = 0,
+            EstimatedTokenCount = 120,
+            ActualTokenCount = null,
             Provider = "Fake",
             Model = "fake-deterministic",
             Dimensions = 1536,
@@ -138,7 +143,49 @@ public sealed class SearchQualityValidationReportFormatterTests
 
         output.Should().Contain("Embedding generation");
         output.Should().Contain("Generated: 6");
+        output.Should().Contain("Eligible chunks: 6");
+        output.Should().Contain("Actual tokens: n/a");
         output.Should().Contain("Provider: Fake");
         output.Should().Contain("Dimensions: 1536");
+    }
+
+    [Fact]
+    public void SearchQualityComparisonFormat_ShouldShowModeDifferencesAndScoreBreakdown()
+    {
+        var report = new SearchQualityComparisonReport
+        {
+            QuerySetPath = "queries.json",
+            BaselineMode = "full_text",
+            CandidateMode = "hybrid",
+            Queries = 1,
+            BaselinePassed = 1,
+            BaselineFailed = 0,
+            CandidatePassed = 1,
+            CandidateFailed = 0,
+            Warnings = [],
+            Results =
+            [
+                new SearchQualityComparisonResult
+                {
+                    Id = "alyc",
+                    Query = "ALyC obligaciones",
+                    BaselinePassed = true,
+                    CandidatePassed = true,
+                    BaselineTopResult = "CNV | Normas CNV | Articulo 1 | 0.800",
+                    CandidateTopResult = "CNV | Normas CNV | Articulo 2 | 0.900",
+                    TopResultChanged = true,
+                    CandidateScoreBreakdown = "fullTextScore=0.8;vectorScore=0.7;finalScore=0.76",
+                    FailureReasons = []
+                }
+            ]
+        };
+
+        var output = SearchQualityComparisonReportFormatter.Format(report);
+
+        output.Should().Contain("Search quality comparison");
+        output.Should().Contain("full_text: 1 passed, 0 failed");
+        output.Should().Contain("hybrid top:");
+        output.Should().Contain("Top changed: yes");
+        output.Should().Contain("Score breakdown: fullTextScore=0.8;vectorScore=0.7;finalScore=0.76");
     }
 }

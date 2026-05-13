@@ -19,4 +19,9 @@ public sealed class EmbeddingResult
     /// Gets the vector dimensions.
     /// </summary>
     public required int Dimensions { get; init; }
+
+    /// <summary>
+    /// Gets provider-reported token count when available.
+    /// </summary>
+    public int? TokenCount { get; init; }
 }

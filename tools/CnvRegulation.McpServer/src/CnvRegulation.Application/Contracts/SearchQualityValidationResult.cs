@@ -51,6 +51,12 @@ public sealed class SearchQualityValidationResult
     public double? TopResultScore { get; init; }
 
     /// <summary>
+    /// Gets top result diagnostic metadata.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> TopResultMetadata { get; init; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Gets whether citations were present.
     /// </summary>
     public bool CitationsPresent { get; init; }

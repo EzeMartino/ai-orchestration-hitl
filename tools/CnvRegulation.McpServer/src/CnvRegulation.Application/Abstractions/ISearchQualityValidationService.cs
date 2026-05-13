@@ -16,4 +16,14 @@ public interface ISearchQualityValidationService
     Task<SearchQualityValidationReport> ValidateAsync(
         ValidateSearchQualityRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Compares search-quality validation across two modes.
+    /// </summary>
+    /// <param name="request">The comparison request.</param>
+    /// <param name="cancellationToken">A token that can cancel the operation.</param>
+    /// <returns>The comparison report.</returns>
+    Task<SearchQualityComparisonReport> CompareAsync(
+        CompareSearchQualityRequest request,
+        CancellationToken cancellationToken);
 }

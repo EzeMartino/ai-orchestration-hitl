@@ -64,6 +64,61 @@ public sealed class SearchQualityValidationService(
         };
     }
 
+    /// <inheritdoc />
+    public async Task<SearchQualityComparisonReport> CompareAsync(
+        CompareSearchQualityRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var modes = request.Modes
+            .Where(mode => !string.IsNullOrWhiteSpace(mode))
+            .Select(mode => mode.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToArray();
+        if (modes.Length < 2)
+        {
+            modes = ["full_text", "hybrid"];
+        }
+
+        var baseline = await ValidateAsync(
+            new ValidateSearchQualityRequest
+            {
+                QuerySetPath = request.QuerySetPath,
+                Limit = request.Limit,
+                SearchMode = modes[0]
+            },
+            cancellationToken).ConfigureAwait(false);
+        var candidate = await ValidateAsync(
+            new ValidateSearchQualityRequest
+            {
+                QuerySetPath = request.QuerySetPath,
+                Limit = request.Limit,
+                SearchMode = modes[1]
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        var candidateById = candidate.Results.ToDictionary(result => result.Id, StringComparer.OrdinalIgnoreCase);
+        var results = baseline.Results
+            .Select(result => CreateComparisonResult(result, candidateById.GetValueOrDefault(result.Id)))
+            .ToArray();
+
+        return new SearchQualityComparisonReport
+        {
+            QuerySetPath = request.QuerySetPath,
+            BaselineMode = modes[0],
+            CandidateMode = modes[1],
+            Queries = Math.Max(baseline.Queries, candidate.Queries),
+            BaselinePassed = baseline.Passed,
+            BaselineFailed = baseline.Failed,
+            CandidatePassed = candidate.Passed,
+            CandidateFailed = candidate.Failed,
+            Results = results,
+            Warnings = baseline.Warnings.Concat(candidate.Warnings).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+        };
+    }
+
     private async Task<SearchQualityValidationResult> ValidateQueryAsync(
         SearchQualityQuery query,
         int limit,
@@ -95,11 +150,71 @@ public sealed class SearchQualityValidationService(
             TopResultTitle = topResult?.Title,
             TopResultArticle = topResult?.Article,
             TopResultScore = topResult?.Score,
+            TopResultMetadata = topResult?.Metadata ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
             CitationsPresent = citationsPresent,
             Warnings = search.Warnings,
             Passed = failureReasons.Count == 0,
             FailureReasons = failureReasons
         };
+    }
+
+    private static SearchQualityComparisonResult CreateComparisonResult(
+        SearchQualityValidationResult baseline,
+        SearchQualityValidationResult? candidate)
+    {
+        if (candidate is null)
+        {
+            return new SearchQualityComparisonResult
+            {
+                Id = baseline.Id,
+                Query = baseline.Query,
+                BaselinePassed = baseline.Passed,
+                CandidatePassed = false,
+                BaselineTopResult = FormatTopResult(baseline),
+                CandidateTopResult = "(missing)",
+                TopResultChanged = true,
+                CandidateScoreBreakdown = null,
+                FailureReasons = ["candidate mode did not return a validation result"]
+            };
+        }
+
+        var failureReasons = baseline.FailureReasons
+            .Select(reason => $"baseline: {reason}")
+            .Concat(candidate.FailureReasons.Select(reason => $"candidate: {reason}"))
+            .ToArray();
+
+        return new SearchQualityComparisonResult
+        {
+            Id = baseline.Id,
+            Query = baseline.Query,
+            BaselinePassed = baseline.Passed,
+            CandidatePassed = candidate.Passed,
+            BaselineTopResult = FormatTopResult(baseline),
+            CandidateTopResult = FormatTopResult(candidate),
+            TopResultChanged = !SameTopResult(baseline, candidate),
+            CandidateScoreBreakdown = candidate.TopResultMetadata.GetValueOrDefault("scoreBreakdown"),
+            FailureReasons = failureReasons
+        };
+    }
+
+    private static bool SameTopResult(SearchQualityValidationResult first, SearchQualityValidationResult second) =>
+        string.Equals(first.TopResultSource, second.TopResultSource, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(first.TopResultTitle, second.TopResultTitle, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(first.TopResultArticle, second.TopResultArticle, StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatTopResult(SearchQualityValidationResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.TopResultSource))
+        {
+            return "(none)";
+        }
+
+        var article = string.IsNullOrWhiteSpace(result.TopResultArticle) ? "(no article)" : result.TopResultArticle;
+        var score = result.TopResultScore is null
+            ? "n/a"
+            : result.TopResultScore.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        return $"{result.TopResultSource} | {result.TopResultTitle} | {article} | {score}";
     }
 
     private static IReadOnlyList<string> CreateFailureReasons(
