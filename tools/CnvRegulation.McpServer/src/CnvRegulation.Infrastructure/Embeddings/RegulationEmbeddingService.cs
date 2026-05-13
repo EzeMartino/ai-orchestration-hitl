@@ -189,7 +189,7 @@ public sealed class RegulationEmbeddingService(
                 {
                     Enabled = options.Enabled,
                     Provider = options.Provider,
-                    Model = string.IsNullOrWhiteSpace(request.Model) ? options.Model : request.Model.Trim(),
+                    Model = ResolveOpenAiModel(request.Model),
                     Dimensions = request.Dimensions ?? options.Dimensions,
                     OpenAiApiKey = options.OpenAiApiKey,
                     Endpoint = options.Endpoint
@@ -207,8 +207,21 @@ public sealed class RegulationEmbeddingService(
         }
 
         return provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase)
-            ? options.Model
+            ? ResolveOpenAiModel(requestedModel: null)
             : "fake-deterministic";
+    }
+
+    private string ResolveOpenAiModel(string? requestedModel)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedModel))
+        {
+            return requestedModel.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(options.Model)
+            || options.Model.Equals("fake-deterministic", StringComparison.OrdinalIgnoreCase)
+            ? "text-embedding-3-small"
+            : options.Model;
     }
 
     private static int EstimateTokenCount(string text) =>

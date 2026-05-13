@@ -18,7 +18,7 @@ public sealed class EmbeddingOptions
     /// <summary>
     /// Gets the configured model.
     /// </summary>
-    public string Model { get; init; } = "fake-deterministic";
+    public string Model { get; init; } = "text-embedding-3-small";
 
     /// <summary>
     /// Gets the vector dimensions.
@@ -61,7 +61,7 @@ public sealed class EmbeddingOptions
         {
             Enabled = bool.TryParse(enabled, out var parsedEnabled) && parsedEnabled,
             Provider = string.IsNullOrWhiteSpace(provider) ? "Fake" : provider.Trim(),
-            Model = string.IsNullOrWhiteSpace(model) ? "fake-deterministic" : model.Trim(),
+            Model = string.IsNullOrWhiteSpace(model) ? "text-embedding-3-small" : model.Trim(),
             Dimensions = resolvedDimensions,
             OpenAiApiKey = apiKey
                 ?? Environment.GetEnvironmentVariable("CNV_REGULATION_OPENAI_API_KEY")

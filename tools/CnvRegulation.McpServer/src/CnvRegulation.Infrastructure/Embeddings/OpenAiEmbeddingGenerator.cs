@@ -26,7 +26,13 @@ public sealed class OpenAiEmbeddingGenerator(HttpClient httpClient, EmbeddingOpt
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.OpenAiApiKey);
 
         using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new HttpRequestException(
+                $"OpenAI embeddings request failed ({(int)response.StatusCode} {response.ReasonPhrase}): {Truncate(errorBody)}");
+        }
+
         var payload = await response.Content
             .ReadFromJsonAsync<OpenAiEmbeddingResponse>(cancellationToken)
             .ConfigureAwait(false)
@@ -41,6 +47,17 @@ public sealed class OpenAiEmbeddingGenerator(HttpClient httpClient, EmbeddingOpt
             Dimensions = vector.Length,
             TokenCount = payload.Usage?.TotalTokens
         };
+    }
+
+    private static string Truncate(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "(empty response)";
+        }
+
+        const int maxLength = 500;
+        return value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength), "...");
     }
 
     private sealed record OpenAiEmbeddingRequest(

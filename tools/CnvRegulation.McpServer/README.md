@@ -284,6 +284,7 @@ Safe generation options:
 Real OpenAI smoke test:
 
 ```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250
 ```
 
@@ -296,6 +297,9 @@ dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --st
 Compare full-text baseline against hybrid:
 
 ```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
+$env:Embeddings__Provider = "OpenAI"
+$env:Embeddings__Model = "text-embedding-3-small"
 dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json
 ```
 
