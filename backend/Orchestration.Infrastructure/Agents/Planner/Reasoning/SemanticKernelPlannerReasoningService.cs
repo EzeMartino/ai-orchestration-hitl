@@ -1,0 +1,192 @@
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
+using Orchestration.Application.Agents.Planner.Reasoning;
+
+namespace Orchestration.Infrastructure.Agents.Planner.Reasoning;
+
+public sealed class SemanticKernelPlannerReasoningService : IPlannerReasoningService
+{
+    private const string SystemPrompt = """
+You are a planning assistant inside a human-supervised financial analysis workflow.
+
+You do not approve, reject, block, freeze, move funds, or make operational decisions.
+
+Your job is to summarize collected evidence from specialized tools:
+- DataAgent: statistical anomaly evidence.
+- LegalAgent: regulatory retrieval evidence.
+
+You must be explicit about limitations.
+You must not provide legal, financial, or investment advice.
+You must not claim that a regulation was violated.
+You may only say that evidence suggests human review is required.
+
+Return concise structured JSON with:
+- summary
+- recommendedActions
+- riskFactors
+- limitations
+""";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly LlmOptions _options;
+    private readonly DeterministicPlannerReasoningService _fallback;
+    private readonly Kernel _kernel;
+    private readonly IChatCompletionService _chatCompletionService;
+
+    public SemanticKernelPlannerReasoningService(
+        IOptions<LlmOptions> options,
+        DeterministicPlannerReasoningService fallback)
+    {
+        _options = options.Value;
+        _fallback = fallback;
+
+        var kernelBuilder = Kernel.CreateBuilder();
+        kernelBuilder.AddOpenAIChatCompletion(
+            modelId: _options.Model,
+            apiKey: _options.ApiKey,
+            serviceId: _options.ServiceId
+        );
+
+        _kernel = kernelBuilder.Build();
+        _chatCompletionService = _kernel.GetRequiredService<IChatCompletionService>(
+            _options.ServiceId
+        );
+    }
+
+    public async Task<PlannerReasoningResult> GenerateReasoningAsync(
+        PlannerReasoningInput input,
+        CancellationToken cancellationToken)
+    {
+        var engine = $"Semantic Kernel + {_options.Provider}/{_options.Model}";
+
+        try
+        {
+            var history = new ChatHistory();
+            history.AddSystemMessage(SystemPrompt);
+            history.AddUserMessage(BuildUserPrompt(input));
+
+            var response = await _chatCompletionService.GetChatMessageContentAsync(
+                history,
+                kernel: _kernel,
+                cancellationToken: cancellationToken
+            );
+
+            return TryParseResponse(response.Content, engine)
+                ?? await _fallback.GenerateReasoningAsync(input, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return await _fallback.GenerateReasoningAsync(input, cancellationToken);
+        }
+    }
+
+    internal static PlannerReasoningResult? TryParseResponse(
+        string? content,
+        string engine)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        var json = ExtractJson(content);
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<PlannerReasoningResponse>(
+                json,
+                JsonOptions
+            );
+
+            if (parsed is null || string.IsNullOrWhiteSpace(parsed.Summary))
+            {
+                return null;
+            }
+
+            return new PlannerReasoningResult(
+                Engine: engine,
+                Summary: parsed.Summary,
+                RecommendedActions: parsed.RecommendedActions.WhereNotBlank(),
+                RiskFactors: parsed.RiskFactors.WhereNotBlank(),
+                Limitations: parsed.Limitations.WhereNotBlank()
+            );
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string ExtractJson(string content)
+    {
+        var trimmed = content.Trim();
+
+        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        var firstLineEnd = trimmed.IndexOf('\n');
+        var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+
+        if (firstLineEnd < 0 || lastFence <= firstLineEnd)
+        {
+            return trimmed;
+        }
+
+        return trimmed[(firstLineEnd + 1)..lastFence].Trim();
+    }
+
+    private static string BuildUserPrompt(PlannerReasoningInput input)
+    {
+        var payload = new
+        {
+            input.SessionId,
+            input.ReportName,
+            input.TotalAmount,
+            input.TransactionCount,
+            dataAgent = new
+            {
+                summary = input.DataSummary,
+                severity = input.DataSeverity,
+                engine = input.DataEngine,
+                evidence = input.DataEvidence
+            },
+            legalAgent = new
+            {
+                summary = input.LegalSummary,
+                riskLevel = input.LegalRiskLevel,
+                engine = input.LegalEngine,
+                evidence = input.LegalEvidence,
+                warnings = input.LegalWarnings
+            }
+        };
+
+        return JsonSerializer.Serialize(payload, JsonOptions);
+    }
+
+    private sealed record PlannerReasoningResponse(
+        string Summary,
+        IReadOnlyList<string>? RecommendedActions,
+        IReadOnlyList<string>? RiskFactors,
+        IReadOnlyList<string>? Limitations
+    );
+}
+
+file static class PlannerReasoningResponseExtensions
+{
+    public static IReadOnlyList<string> WhereNotBlank(
+        this IReadOnlyList<string>? values)
+    {
+        return values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToList() ?? [];
+    }
+}

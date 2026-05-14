@@ -11,6 +11,7 @@ using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
+using Orchestration.Infrastructure.Agents.Planner.Reasoning;
 using Orchestration.Infrastructure.Persistence;
 
 
@@ -28,6 +29,7 @@ builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublishe
 builder.Services.AddScoped<AnalysisOrchestratorService>();
 
 // Planner agent configuration
+builder.Services.AddPlannerReasoning(builder.Configuration);
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration

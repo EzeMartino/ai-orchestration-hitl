@@ -536,8 +536,72 @@ code {
   color: #334155;
 }
 
+.plannerPanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #c7d2fe;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.plannerHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.plannerEyebrow {
+  margin: 0 0 0.4rem;
+  color: #4338ca;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.plannerHeader h2 {
+  margin: 0;
+  color: #111827;
+}
+
+.plannerHeader p {
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+
+.plannerGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.plannerList {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.plannerList strong {
+  color: #111827;
+}
+
+.plannerList ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+  color: #334155;
+}
+
 .event-neutral {
   border-left-color: #0f2747;
+}
+
+.event-info {
+  border-left-color: #2563eb;
+  background: #eff6ff;
 }
 
 .event-warning {
@@ -687,12 +751,14 @@ code {
 @media (max-width: 800px) {
   .header,
   .sessionHeader,
+  .plannerHeader,
   .evidenceHeader,
   .complianceHeader {
     flex-direction: column;
   }
 
   .sessionGrid,
+  .plannerGrid,
   .evidenceGrid {
     grid-template-columns: 1fr;
   }

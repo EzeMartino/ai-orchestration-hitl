@@ -1,6 +1,7 @@
-﻿using Orchestration.Application.Activity;
+using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 
@@ -11,15 +12,18 @@ public sealed class PlannerAgent : IPlannerAgent
     private readonly IDataAgent _dataAgent;
     private readonly ILegalAgent _legalAgent;
     private readonly IActivityEventPublisher _activityPublisher;
+    private readonly IPlannerReasoningService _reasoningService;
 
     public PlannerAgent(
         IDataAgent dataAgent,
         ILegalAgent legalAgent,
-        IActivityEventPublisher activityPublisher)
+        IActivityEventPublisher activityPublisher,
+        IPlannerReasoningService reasoningService)
     {
         _dataAgent = dataAgent;
         _legalAgent = legalAgent;
         _activityPublisher = activityPublisher;
+        _reasoningService = reasoningService;
     }
 
     public async Task<PlannerAgentResult> RunAsync(
@@ -94,6 +98,19 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
+        var reasoningResult = await _reasoningService.GenerateReasoningAsync(
+            BuildReasoningInput(report, dataResult, legalResult),
+            cancellationToken
+        );
+
+        await PublishAsync(
+            session.Id,
+            "planner_reasoning_completed",
+            "PlannerAgent",
+            reasoningResult.Summary,
+            cancellationToken
+        );
+
         var requiresHumanApproval =
             dataResult.HasAnomaly ||
             legalResult.HasComplianceRisk;
@@ -114,7 +131,8 @@ public sealed class PlannerAgent : IPlannerAgent
             RequiresHumanApproval: requiresHumanApproval,
             Summary: summary,
             DataResult: dataResult,
-            LegalResult: legalResult
+            LegalResult: legalResult,
+            ReasoningResult: reasoningResult
         );
     }
 
@@ -127,6 +145,32 @@ public sealed class PlannerAgent : IPlannerAgent
             TotalAmount: 125000m,
             TransactionCount: 42,
             SubmittedAt: session.CreatedAt
+        );
+    }
+
+    private static PlannerReasoningInput BuildReasoningInput(
+        FinancialReportContext report,
+        DataAgentResult dataResult,
+        LegalAgentResult legalResult)
+    {
+        return new PlannerReasoningInput(
+            SessionId: report.SessionId,
+            ReportName: report.ReportName,
+            TotalAmount: report.TotalAmount,
+            TransactionCount: report.TransactionCount,
+            DataSummary: dataResult.Summary,
+            DataSeverity: dataResult.Severity,
+            DataEngine: dataResult.Engine,
+            DataEvidence: dataResult.Evidence
+                .Select(evidence => $"{evidence.Metric}: value {evidence.Value}, threshold {evidence.Threshold}. {evidence.Interpretation}")
+                .ToList(),
+            LegalSummary: legalResult.Summary,
+            LegalRiskLevel: legalResult.RiskLevel,
+            LegalEngine: legalResult.Engine,
+            LegalEvidence: legalResult.Evidence
+                .Select(evidence => $"{evidence.Regulation} {evidence.Section}: {evidence.Finding} Source: {evidence.Source}")
+                .ToList(),
+            LegalWarnings: legalResult.Warnings
         );
     }
 

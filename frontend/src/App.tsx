@@ -51,8 +51,17 @@ type ComplianceContext = {
   warnings?: string[];
 };
 
+type PlannerContext = {
+  engine?: string;
+  summary: string;
+  recommendedActions: string[];
+  riskFactors: string[];
+  limitations: string[];
+};
+
 type AnomalyContext = {
   summary?: string;
+  planner?: PlannerContext;
   anomaly?: {
     detected: boolean;
     severity: string;
@@ -81,6 +90,56 @@ function parseAnomalyContext(contextJson?: string): AnomalyContext | null {
 
 function StatusBadge({ status }: { status: string }) {
   return <span className={`statusBadge status-${status}`}>{status}</span>;
+}
+
+function PlannerPanel({ planner }: { planner?: PlannerContext }) {
+  if (!planner) {
+    return null;
+  }
+
+  return (
+    <section className="plannerPanel">
+      <div className="plannerHeader">
+        <div>
+          <p className="plannerEyebrow">Planner review</p>
+          <h2>Controlled reasoning summary</h2>
+          <p>{planner.summary}</p>
+
+          {planner.engine && (
+            <div className="engineBadge">
+              Planner engine: <strong>{planner.engine}</strong>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="plannerGrid">
+        <PlannerList
+          title="Recommended actions"
+          items={planner.recommendedActions}
+        />
+        <PlannerList title="Risk factors" items={planner.riskFactors} />
+        <PlannerList title="Limitations" items={planner.limitations} />
+      </div>
+    </section>
+  );
+}
+
+function PlannerList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="plannerList">
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function EvidencePanel({ anomaly }: { anomaly: AnomalyContext["anomaly"] }) {
@@ -198,6 +257,10 @@ function CompliancePanel({
 }
 
 function getEventTone(type: string) {
+  if (type.includes("planner_reasoning") || type.includes("llm_reasoning")) {
+    return "event-info";
+  }
+
   if (type.includes("anomaly")) {
     return "event-danger";
   }
@@ -489,6 +552,7 @@ function App() {
 
   const latestEvent = events[0];
   const anomalyContext = parseAnomalyContext(session?.contextJson);
+  const planner = anomalyContext?.planner;
   const anomaly = anomalyContext?.anomaly;
   const compliance = anomalyContext?.compliance;
 
@@ -592,6 +656,7 @@ function App() {
             </section>
           )}
 
+          <PlannerPanel planner={planner} />
           <EvidencePanel anomaly={anomaly} />
           <CompliancePanel compliance={compliance} />
 

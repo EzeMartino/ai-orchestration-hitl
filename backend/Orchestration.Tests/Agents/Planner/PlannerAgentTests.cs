@@ -1,7 +1,8 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
+using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Tests.Agents;
@@ -11,49 +12,65 @@ namespace Orchestration.Tests.Agents.Planner;
 public class PlannerAgentTests
 {
     [Fact]
+    public async Task RunAsync_Should_call_reasoning_service()
+    {
+        var reasoningService = new FakePlannerReasoningService();
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            new FakeActivityEventPublisher(),
+            reasoningService
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        reasoningService.WasCalled.Should().BeTrue();
+        reasoningService.Input.Should().NotBeNull();
+        result.ReasoningResult.Engine.Should().Be("Test Planner Reasoning");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_publish_planner_reasoning_completed_event()
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            publisher,
+            new FakePlannerReasoningService()
+        );
+
+        await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        publisher.PublishedEvents
+            .Should()
+            .Contain(x =>
+                x.Type == "planner_reasoning_completed" &&
+                x.Agent == "PlannerAgent");
+    }
+
+    [Fact]
     public async Task RunAsync_Should_require_human_approval_when_data_agent_detects_anomaly()
     {
-        var dataAgent = new FakeDataAgent(
-            new DataAgentResult(
-                HasAnomaly: true,
-                Severity: "High",
-                Summary: "Anomaly detected.",
-                Engine: "TestEngine",
-                Evidence:
-                [
-                    new AnomalyEvidence(
-                        Metric: "TransactionAmountZScore",
-                        Value: 4.5,
-                        Threshold: 3.0,
-                        Interpretation: "Above threshold."
-                    )
-                ]
-            )
-        );
-
-        var legalAgent = new FakeLegalAgent(
-            new LegalAgentResult(
-                HasComplianceRisk: false,
-                RiskLevel: "Low",
-                Summary: "No compliance risk.",
-                Engine: "TestEngine",
-                Evidence: [],
-                Warnings: []
-            )
-        );
-
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: true));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
         var publisher = new FakeActivityEventPublisher();
 
         var plannerAgent = new PlannerAgent(
             dataAgent,
             legalAgent,
-            publisher
+            publisher,
+            new FakePlannerReasoningService()
         );
 
-        var session = AnalysisSession.Create();
-
         var result = await plannerAgent.RunAsync(
-            session,
+            AnalysisSession.Create(),
             CancellationToken.None
         );
 
@@ -76,53 +93,64 @@ public class PlannerAgentTests
     [Fact]
     public async Task RunAsync_Should_require_human_approval_when_legal_agent_detects_compliance_risk()
     {
-        var dataAgent = new FakeDataAgent(
-            new DataAgentResult(
-                HasAnomaly: false,
-                Severity: "Low",
-                Summary: "No anomaly detected.",
-                Engine: "TestEngine",
-                Evidence: []
-            )
-        );
-
-        var legalAgent = new FakeLegalAgent(
-            new LegalAgentResult(
-                HasComplianceRisk: true,
-                RiskLevel: "Medium",
-                Summary: "Compliance review required.",
-                Engine: "TestEngine",
-                Evidence:
-                [
-                    new LegalEvidence(
-                        Regulation: "Internal AML Policy",
-                        Section: "Transaction Monitoring",
-                        Finding: "Human review required.",
-                        Source: "Test source"
-                    )
-                ],
-                Warnings: []
-            )
-        );
-
-        var publisher = new FakeActivityEventPublisher();
-
         var plannerAgent = new PlannerAgent(
-            dataAgent,
-            legalAgent,
-            publisher
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: true)),
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService()
         );
-
-        var session = AnalysisSession.Create();
 
         var result = await plannerAgent.RunAsync(
-            session,
+            AnalysisSession.Create(),
             CancellationToken.None
         );
 
         result.RequiresHumanApproval.Should().BeTrue();
         result.DataResult.HasAnomaly.Should().BeFalse();
         result.LegalResult.HasComplianceRisk.Should().BeTrue();
+    }
+
+    private static DataAgentResult CreateDataResult(bool hasAnomaly)
+    {
+        return new DataAgentResult(
+            HasAnomaly: hasAnomaly,
+            Severity: hasAnomaly ? "High" : "Low",
+            Summary: hasAnomaly ? "Anomaly detected." : "No anomaly detected.",
+            Engine: "TestEngine",
+            Evidence: hasAnomaly
+                ? [
+                    new AnomalyEvidence(
+                        Metric: "TransactionAmountZScore",
+                        Value: 4.5,
+                        Threshold: 3.0,
+                        Interpretation: "Above threshold."
+                    )
+                ]
+                : []
+        );
+    }
+
+    private static LegalAgentResult CreateLegalResult(bool hasComplianceRisk)
+    {
+        return new LegalAgentResult(
+            HasComplianceRisk: hasComplianceRisk,
+            RiskLevel: hasComplianceRisk ? "Medium" : "Low",
+            Summary: hasComplianceRisk ? "Compliance review required." : "No compliance risk.",
+            Engine: "TestEngine",
+            Evidence: hasComplianceRisk
+                ? [
+                    new LegalEvidence(
+                        Regulation: "CNV",
+                        Section: "Transaction Monitoring",
+                        Finding: "Human review required.",
+                        Source: "Test source"
+                    )
+                ]
+                : [],
+            Warnings: hasComplianceRisk
+                ? ["Automated regulatory retrieval only."]
+                : []
+        );
     }
 
     private sealed class FakeDataAgent : IDataAgent
@@ -164,6 +192,31 @@ public class PlannerAgentTests
             WasCalled = true;
 
             return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class FakePlannerReasoningService : IPlannerReasoningService
+    {
+        public bool WasCalled { get; private set; }
+
+        public PlannerReasoningInput? Input { get; private set; }
+
+        public Task<PlannerReasoningResult> GenerateReasoningAsync(
+            PlannerReasoningInput input,
+            CancellationToken cancellationToken)
+        {
+            WasCalled = true;
+            Input = input;
+
+            return Task.FromResult(
+                new PlannerReasoningResult(
+                    Engine: "Test Planner Reasoning",
+                    Summary: "Planner reviewed collected evidence.",
+                    RecommendedActions: ["Review evidence."],
+                    RiskFactors: ["Risk factor."],
+                    Limitations: ["Human approval required."]
+                )
+            );
         }
     }
 }

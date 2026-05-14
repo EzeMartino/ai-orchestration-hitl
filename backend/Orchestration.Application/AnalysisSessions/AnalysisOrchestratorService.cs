@@ -265,11 +265,19 @@ namespace Orchestration.Application.AnalysisSessions
             );
         }
 
-        private static string BuildAnalysisContext(PlannerAgentResult plannerResult)
+        internal static string BuildAnalysisContext(PlannerAgentResult plannerResult)
         {
             var context = new
             {
                 summary = plannerResult.Summary,
+                planner = new
+                {
+                    engine = plannerResult.ReasoningResult.Engine,
+                    summary = plannerResult.ReasoningResult.Summary,
+                    recommendedActions = plannerResult.ReasoningResult.RecommendedActions,
+                    riskFactors = plannerResult.ReasoningResult.RiskFactors,
+                    limitations = plannerResult.ReasoningResult.Limitations
+                },
                 anomaly = new
                 {
                     detected = plannerResult.DataResult.HasAnomaly,
