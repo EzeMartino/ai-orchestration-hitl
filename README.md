@@ -1,42 +1,59 @@
 # Financial Analysis Control Room
 
-LLM-ready orchestration platform for supervised financial anomaly review, combining .NET workflow orchestration, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
+Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
 
-This repository is best described as an **LLM-Ready Human-in-the-Loop Orchestration Platform**. It supports optional controlled LLM planner reasoning, while workflow control remains deterministic, auditable, and constrained by explicit state transitions.
+This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
 
 ## Current AI Status
 
-This project supports optional controlled LLM planner reasoning through Semantic Kernel.
+This project now supports **optional controlled LLM-assisted planner reasoning**.
 
-LLM usage is advisory only and does not control workflow state:
+The LLM is used only to generate structured reasoning summaries for the `PlannerAgent`. It does not control workflow transitions, approve or reject sessions, execute tools autonomously, or make legal/financial decisions.
 
-- `PlannerAgent` coordinates the workflow in .NET and may request an LLM-generated reasoning summary.
+Current implementation:
+
+- `PlannerAgent` coordinates the workflow in .NET.
+- `PlannerAgent` can optionally use Semantic Kernel + OpenAI for advisory reasoning summaries.
+- If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning.
 - `DataAgent` runs Python-based anomaly detection through Semantic Kernel + CSnakes.
 - `LegalAgent` retrieves cited CNV regulatory evidence through Semantic Kernel + MCP.
 - The workflow pauses for human approval when risk is detected.
 - All activity is streamed in real time and persisted for audit review.
 
-If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning. The architecture keeps LLM output subordinate to the state machine, HITL controls, MCP integration, Python analytics, and audit trail.
+The architecture is intentionally designed so LLM-backed reasoning can assist the workflow without bypassing the state machine, HITL controls, MCP evidence retrieval, Python analytics, or audit trail.
 
 ## Controlled LLM Planner Reasoning
 
-The `PlannerAgent` can optionally use an LLM through Semantic Kernel to generate reasoning summaries.
+The `PlannerAgent` can optionally use an LLM through Semantic Kernel to generate structured reasoning summaries.
 
-The LLM does not control workflow transitions.
+The LLM output is advisory only.
 
-The LLM cannot approve, reject, complete, or fail an analysis session.
+The LLM cannot:
 
-If the LLM is disabled or fails, the system falls back to deterministic planner reasoning.
+- approve an analysis session,
+- reject an analysis session,
+- complete a workflow,
+- fail a workflow,
+- bypass human approval,
+- directly execute tools,
+- override the state machine.
 
-The state machine and HITL approval gates remain mandatory.
+If LLM reasoning is disabled or fails, the system uses deterministic planner reasoning. The state machine and HITL approval gates remain mandatory.
 
 Planner reasoning metadata is persisted in `ContextJson`, including:
 
+- engine,
+- summary,
+- recommended actions,
+- risk factors,
+- limitations,
 - whether LLM reasoning was used,
 - whether deterministic fallback was used,
 - provider,
 - model,
 - safe fallback reason when applicable.
+
+No API keys, stack traces, or secrets are persisted.
 
 ## What This Project Is
 
@@ -82,6 +99,10 @@ ASP.NET Core API
   |
   |-- PlannerAgent
         |
+        |-- Planner Reasoning
+        |     |-- Deterministic fallback
+        |     |-- Semantic Kernel + OpenAI optional
+        |
         |-- DataAgent
         |     |-- Semantic Kernel
         |     |-- PythonAnomalyDetectionPlugin
@@ -104,7 +125,7 @@ PostgreSQL
 
 ### PlannerAgent
 
-Current implementation: deterministic .NET workflow coordinator with optional controlled LLM reasoning summaries.
+Current implementation: deterministic .NET workflow coordinator with optional controlled LLM-assisted reasoning.
 
 Responsibilities:
 
@@ -112,15 +133,25 @@ Responsibilities:
 - delegates anomaly detection to the DataAgent,
 - delegates regulatory evidence retrieval to the LegalAgent,
 - combines agent results,
-- optionally asks Semantic Kernel for an advisory reasoning summary,
-- decides whether human approval is required,
+- generates a planner reasoning summary,
+- decides whether human approval is required through deterministic rules,
 - updates workflow state.
 
-Current LLM guardrails:
+Current reasoning behavior:
 
-- the LLM cannot approve, reject, complete, fail, or skip analysis states,
-- the LLM cannot call tools autonomously,
-- deterministic workflow rules still decide whether human approval is required.
+```text
+PlannerAgent
+  -> IPlannerReasoningService
+      -> DeterministicPlannerReasoningService
+      OR
+      -> SemanticKernelPlannerReasoningService
+          -> Semantic Kernel
+          -> OpenAI chat completion
+          -> defensive JSON parsing
+          -> deterministic fallback on failure
+```
+
+The `PlannerAgent` does not allow the LLM to approve, reject, complete, fail, or transition a workflow state.
 
 ### DataAgent
 
@@ -203,6 +234,8 @@ The platform persists:
 
 - analysis sessions,
 - current workflow state,
+- planner reasoning summaries,
+- LLM/fallback metadata,
 - agent evidence,
 - legal/regulatory findings,
 - warnings and disclaimers,
@@ -210,6 +243,13 @@ The platform persists:
 - human decisions.
 
 The Activity Feed is not only streamed via SignalR; it is also stored in PostgreSQL and can be restored when loading previous sessions.
+
+Planner reasoning events include:
+
+- `planner_reasoning_completed`
+- `planner_reasoning_fallback_used`
+
+These events make it clear whether reasoning came from deterministic fallback or an LLM-assisted path.
 
 ## MCP Regulatory Retrieval
 
@@ -265,6 +305,10 @@ The current implementation is deterministic and testable. It does not require an
 
 ## Screenshots
 
+### Planner Review
+
+![Planner Review](docs/screenshots/planner-review-deterministic.png)
+
 ### Completed Dashboard
 
 ![Completed Dashboard](docs/screenshots/dashboard-session-completed.png)
@@ -308,9 +352,9 @@ Aspire starts:
 - optional CNV ingestion executable,
 - React frontend.
 
-### Enabling LLM Reasoning
+### Enabling LLM Planner Reasoning
 
-LLM planner reasoning is disabled by default and does not require an API key.
+The system works without an LLM by default.
 
 To enable controlled LLM planner reasoning, set:
 
@@ -319,15 +363,14 @@ Llm__Enabled=true
 Llm__Provider=OpenAI
 Llm__Model=<model-name>
 Llm__ApiKey=<api-key>
-```
-
-Optional:
-
-```text
 Llm__ServiceId=planner-reasoning
 ```
 
-Do not commit API keys. Use environment variables, user secrets, or local-only configuration.
+Do not commit API keys.
+
+When `Llm__Enabled=false`, no API key or model is required.
+
+When `Llm__Enabled=true`, missing model or API key fails early with a clear configuration error.
 
 ### CNV Regulation Ingestion
 
@@ -369,9 +412,13 @@ Current test coverage includes:
 
 - state machine transitions,
 - PlannerAgent delegation,
+- deterministic planner reasoning,
+- Semantic Kernel planner reasoning fallback,
+- defensive LLM JSON parsing,
+- LLM disabled configuration path,
 - controlled planner reasoning metadata,
-- deterministic LLM fallback behavior,
 - LLM configuration validation,
+- planner `ContextJson` metadata,
 - CSnakes DataAgent integration,
 - Semantic Kernel DataAgent wrapper,
 - Semantic Kernel LegalAgent wrapper,
@@ -394,6 +441,10 @@ The LegalAgent retrieves regulatory evidence from CNV-related sources. It does n
 
 The DataAgent detects statistical anomalies. It does not block transactions, move money, freeze accounts, or make operational decisions.
 
+The LLM does not make financial, legal, or operational decisions.
+
+The LLM may generate reasoning summaries, but workflow transitions remain controlled by deterministic application logic.
+
 Human approval is required before completing risky workflows.
 
 This is intentional: the project demonstrates how higher-automation systems can be constrained by workflow state, evidence review, and human approval.
@@ -402,20 +453,16 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ### Next: Controlled Tool Calling
 
+The next planned step is to allow the LLM to propose a tool execution plan while keeping workflow control deterministic.
+
 Planned upgrades:
 
-- Allow the PlannerAgent to reason over submitted financial report content.
-- Enable controlled tool-calling for DataAgent and LegalAgent.
-- Keep HITL approval gates mandatory.
-- Preserve deterministic state transitions.
-- Persist LLM reasoning summaries and tool calls as audit events.
-- Add model/provider metadata to the engine badges.
-
-Future engine example:
-
-```text
-Semantic Kernel + GPT-4.1 + Python/CSnakes
-Semantic Kernel + GPT-4.1 + MCP CNV Regulation Server
-```
+- allow the `PlannerAgent` LLM reasoning layer to propose tool usage,
+- validate proposed tools against an allowlist,
+- execute only approved deterministic tools,
+- persist proposed vs executed tool calls,
+- reject unsafe or unknown tool requests,
+- keep HITL approval gates mandatory,
+- preserve deterministic state transitions.
 
 The LLM must not bypass the state machine or human approval flow.
