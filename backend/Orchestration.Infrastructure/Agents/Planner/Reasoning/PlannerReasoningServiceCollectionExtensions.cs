@@ -45,17 +45,22 @@ public static class PlannerReasoningServiceCollectionExtensions
             );
         }
 
+        var missingRequiredValues = new List<string>();
+
         if (string.IsNullOrWhiteSpace(options.Model))
         {
-            throw new InvalidOperationException(
-                "Llm:Model is required when Llm:Enabled is true."
-            );
+            missingRequiredValues.Add("Llm:Model");
         }
 
         if (string.IsNullOrWhiteSpace(options.ApiKey))
         {
+            missingRequiredValues.Add("Llm:ApiKey");
+        }
+
+        if (missingRequiredValues.Count > 0)
+        {
             throw new InvalidOperationException(
-                "Llm:ApiKey is required when Llm:Enabled is true. Use environment variable Llm__ApiKey or user secrets; do not hardcode API keys."
+                $"Llm:Enabled is true but required configuration is missing: {string.Join(", ", missingRequiredValues)}."
             );
         }
 

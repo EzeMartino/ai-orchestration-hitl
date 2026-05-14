@@ -105,9 +105,9 @@ public sealed class PlannerAgent : IPlannerAgent
 
         await PublishAsync(
             session.Id,
-            "planner_reasoning_completed",
+            GetReasoningEventType(reasoningResult),
             "PlannerAgent",
-            reasoningResult.Summary,
+            GetReasoningEventMessage(reasoningResult),
             cancellationToken
         );
 
@@ -134,6 +134,30 @@ public sealed class PlannerAgent : IPlannerAgent
             LegalResult: legalResult,
             ReasoningResult: reasoningResult
         );
+    }
+
+    private static string GetReasoningEventType(
+        PlannerReasoningResult reasoningResult)
+    {
+        return reasoningResult.UsedFallback && !string.IsNullOrWhiteSpace(reasoningResult.FailureReason)
+            ? "planner_reasoning_fallback_used"
+            : "planner_reasoning_completed";
+    }
+
+    private static string GetReasoningEventMessage(
+        PlannerReasoningResult reasoningResult)
+    {
+        if (reasoningResult.UsedFallback && !string.IsNullOrWhiteSpace(reasoningResult.FailureReason))
+        {
+            return "LLM reasoning failed; deterministic fallback was used.";
+        }
+
+        if (reasoningResult.UsedLlm)
+        {
+            return $"Planner reasoning completed using {reasoningResult.Engine}.";
+        }
+
+        return "Planner reasoning completed using deterministic fallback.";
     }
 
     private static FinancialReportContext BuildReportContext(

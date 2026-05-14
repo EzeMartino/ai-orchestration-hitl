@@ -52,7 +52,39 @@ public class PlannerAgentTests
             .Should()
             .Contain(x =>
                 x.Type == "planner_reasoning_completed" &&
-                x.Agent == "PlannerAgent");
+                x.Agent == "PlannerAgent" &&
+                x.Message == "Planner reasoning completed using deterministic fallback.");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_publish_fallback_event_when_llm_reasoning_falls_back_after_failure()
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var reasoningResult = CreatePlannerReasoningResult() with
+        {
+            Provider = "OpenAI",
+            Model = "test-model",
+            FailureReason = "LLM returned invalid JSON."
+        };
+
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            publisher,
+            new FakePlannerReasoningService(reasoningResult)
+        );
+
+        await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        publisher.PublishedEvents
+            .Should()
+            .Contain(x =>
+                x.Type == "planner_reasoning_fallback_used" &&
+                x.Agent == "PlannerAgent" &&
+                x.Message == "LLM reasoning failed; deterministic fallback was used.");
     }
 
     [Fact]
@@ -197,6 +229,14 @@ public class PlannerAgentTests
 
     private sealed class FakePlannerReasoningService : IPlannerReasoningService
     {
+        private readonly PlannerReasoningResult _result;
+
+        public FakePlannerReasoningService(
+            PlannerReasoningResult? result = null)
+        {
+            _result = result ?? CreatePlannerReasoningResult();
+        }
+
         public bool WasCalled { get; private set; }
 
         public PlannerReasoningInput? Input { get; private set; }
@@ -208,15 +248,23 @@ public class PlannerAgentTests
             WasCalled = true;
             Input = input;
 
-            return Task.FromResult(
-                new PlannerReasoningResult(
-                    Engine: "Test Planner Reasoning",
-                    Summary: "Planner reviewed collected evidence.",
-                    RecommendedActions: ["Review evidence."],
-                    RiskFactors: ["Risk factor."],
-                    Limitations: ["Human approval required."]
-                )
-            );
+            return Task.FromResult(_result);
         }
+    }
+
+    private static PlannerReasoningResult CreatePlannerReasoningResult()
+    {
+        return new PlannerReasoningResult(
+            Engine: "Test Planner Reasoning",
+            Summary: "Planner reviewed collected evidence.",
+            RecommendedActions: ["Review evidence."],
+            RiskFactors: ["Risk factor."],
+            Limitations: ["Human approval required."],
+            UsedLlm: false,
+            UsedFallback: true,
+            Provider: null,
+            Model: null,
+            FailureReason: null
+        );
     }
 }

@@ -2,21 +2,41 @@
 
 LLM-ready orchestration platform for supervised financial anomaly review, combining .NET workflow orchestration, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
 
-This repository is best described as an **LLM-Ready Human-in-the-Loop Orchestration Platform**. It is designed so LLM-backed reasoning can be added later, while the current system remains deterministic, auditable, and constrained by explicit workflow state.
+This repository is best described as an **LLM-Ready Human-in-the-Loop Orchestration Platform**. It supports optional controlled LLM planner reasoning, while workflow control remains deterministic, auditable, and constrained by explicit state transitions.
 
 ## Current AI Status
 
-This project is **LLM-ready**, but it does not currently connect to a Large Language Model.
+This project supports optional controlled LLM planner reasoning through Semantic Kernel.
 
-The current implementation uses deterministic agents and tool-based orchestration:
+LLM usage is advisory only and does not control workflow state:
 
-- `PlannerAgent` coordinates the workflow in .NET.
+- `PlannerAgent` coordinates the workflow in .NET and may request an LLM-generated reasoning summary.
 - `DataAgent` runs Python-based anomaly detection through Semantic Kernel + CSnakes.
 - `LegalAgent` retrieves cited CNV regulatory evidence through Semantic Kernel + MCP.
 - The workflow pauses for human approval when risk is detected.
 - All activity is streamed in real time and persisted for audit review.
 
-The architecture is intentionally designed so LLM-backed reasoning can be added later without replacing the state machine, HITL controls, MCP integration, Python analytics, or audit trail.
+If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning. The architecture keeps LLM output subordinate to the state machine, HITL controls, MCP integration, Python analytics, and audit trail.
+
+## Controlled LLM Planner Reasoning
+
+The `PlannerAgent` can optionally use an LLM through Semantic Kernel to generate reasoning summaries.
+
+The LLM does not control workflow transitions.
+
+The LLM cannot approve, reject, complete, or fail an analysis session.
+
+If the LLM is disabled or fails, the system falls back to deterministic planner reasoning.
+
+The state machine and HITL approval gates remain mandatory.
+
+Planner reasoning metadata is persisted in `ContextJson`, including:
+
+- whether LLM reasoning was used,
+- whether deterministic fallback was used,
+- provider,
+- model,
+- safe fallback reason when applicable.
 
 ## What This Project Is
 
@@ -36,7 +56,8 @@ It demonstrates how to combine:
 
 This project does **not** currently include:
 
-- LLM-powered reasoning,
+- autonomous LLM tool-calling,
+- LLM-controlled workflow transitions,
 - autonomous legal interpretation,
 - natural language report understanding,
 - automatic financial decision-making,
@@ -83,7 +104,7 @@ PostgreSQL
 
 ### PlannerAgent
 
-Current implementation: deterministic .NET workflow coordinator.
+Current implementation: deterministic .NET workflow coordinator with optional controlled LLM reasoning summaries.
 
 Responsibilities:
 
@@ -91,12 +112,15 @@ Responsibilities:
 - delegates anomaly detection to the DataAgent,
 - delegates regulatory evidence retrieval to the LegalAgent,
 - combines agent results,
+- optionally asks Semantic Kernel for an advisory reasoning summary,
 - decides whether human approval is required,
 - updates workflow state.
 
-Future LLM-ready role:
+Current LLM guardrails:
 
-- upgrade to an LLM-backed planner capable of reasoning over financial report content and selecting tools dynamically.
+- the LLM cannot approve, reject, complete, fail, or skip analysis states,
+- the LLM cannot call tools autonomously,
+- deterministic workflow rules still decide whether human approval is required.
 
 ### DataAgent
 
@@ -284,6 +308,27 @@ Aspire starts:
 - optional CNV ingestion executable,
 - React frontend.
 
+### Enabling LLM Reasoning
+
+LLM planner reasoning is disabled by default and does not require an API key.
+
+To enable controlled LLM planner reasoning, set:
+
+```text
+Llm__Enabled=true
+Llm__Provider=OpenAI
+Llm__Model=<model-name>
+Llm__ApiKey=<api-key>
+```
+
+Optional:
+
+```text
+Llm__ServiceId=planner-reasoning
+```
+
+Do not commit API keys. Use environment variables, user secrets, or local-only configuration.
+
 ### CNV Regulation Ingestion
 
 The CNV ingestion task is manual in Aspire.
@@ -324,6 +369,9 @@ Current test coverage includes:
 
 - state machine transitions,
 - PlannerAgent delegation,
+- controlled planner reasoning metadata,
+- deterministic LLM fallback behavior,
+- LLM configuration validation,
 - CSnakes DataAgent integration,
 - Semantic Kernel DataAgent wrapper,
 - Semantic Kernel LegalAgent wrapper,
@@ -352,13 +400,10 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ## Roadmap
 
-### Next: Connect an LLM
-
-The next planned step is to connect an LLM through Semantic Kernel.
+### Next: Controlled Tool Calling
 
 Planned upgrades:
 
-- Add an LLM-backed PlannerAgent.
 - Allow the PlannerAgent to reason over submitted financial report content.
 - Enable controlled tool-calling for DataAgent and LegalAgent.
 - Keep HITL approval gates mandatory.

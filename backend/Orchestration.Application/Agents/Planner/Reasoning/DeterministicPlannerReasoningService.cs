@@ -23,8 +23,14 @@ public sealed class DeterministicPlannerReasoningService : IPlannerReasoningServ
             Limitations:
             [
                 "No LLM reasoning was used.",
-                "This is not legal, financial, or investment advice."
-            ]
+                "This is not legal, financial, or investment advice.",
+                "Human approval is required before completing risky workflows."
+            ],
+            UsedLlm: false,
+            UsedFallback: true,
+            Provider: null,
+            Model: null,
+            FailureReason: null
         );
 
         return Task.FromResult(result);

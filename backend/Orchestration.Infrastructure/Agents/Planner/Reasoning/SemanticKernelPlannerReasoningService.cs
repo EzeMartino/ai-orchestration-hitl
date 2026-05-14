@@ -60,7 +60,7 @@ Return concise structured JSON with:
         PlannerReasoningInput input,
         CancellationToken cancellationToken)
     {
-        var engine = $"Semantic Kernel + {_options.Provider}/{_options.Model}";
+        var engine = $"Semantic Kernel + {ProviderName}/{_options.Model}";
 
         try
         {
@@ -74,22 +74,44 @@ Return concise structured JSON with:
                 cancellationToken: cancellationToken
             );
 
-            return TryParseResponse(response.Content, engine)
-                ?? await _fallback.GenerateReasoningAsync(input, cancellationToken);
+            return TryParseResponse(
+                response.Content,
+                engine,
+                ProviderName,
+                _options.Model
+            ) ?? await CreateFallbackResultAsync(
+                input,
+                "LLM returned invalid JSON.",
+                cancellationToken
+            );
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch
+        catch (OperationCanceledException ex)
         {
-            return await _fallback.GenerateReasoningAsync(input, cancellationToken);
+            return await CreateFallbackResultAsync(
+                input,
+                SanitizeFailure(ex),
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+        {
+            return await CreateFallbackResultAsync(
+                input,
+                SanitizeFailure(ex),
+                cancellationToken
+            );
         }
     }
 
     internal static PlannerReasoningResult? TryParseResponse(
         string? content,
-        string engine)
+        string engine,
+        string provider,
+        string model)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
@@ -115,13 +137,70 @@ Return concise structured JSON with:
                 Summary: parsed.Summary,
                 RecommendedActions: parsed.RecommendedActions.WhereNotBlank(),
                 RiskFactors: parsed.RiskFactors.WhereNotBlank(),
-                Limitations: parsed.Limitations.WhereNotBlank()
+                Limitations: parsed.Limitations.WhereNotBlank(),
+                UsedLlm: true,
+                UsedFallback: false,
+                Provider: provider,
+                Model: model,
+                FailureReason: null
             );
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    internal static string SanitizeFailure(Exception ex)
+    {
+        return ex switch
+        {
+            JsonException => "LLM returned invalid JSON.",
+            OperationCanceledException => "LLM request was canceled.",
+            _ => "LLM reasoning failed and deterministic fallback was used."
+        };
+    }
+
+    private async Task<PlannerReasoningResult> CreateFallbackResultAsync(
+        PlannerReasoningInput input,
+        string failureReason,
+        CancellationToken cancellationToken)
+    {
+        var fallback = await _fallback.GenerateReasoningAsync(
+            input,
+            cancellationToken
+        );
+
+        return ApplyFallbackMetadata(
+            fallback,
+            _options,
+            failureReason
+        );
+    }
+
+    internal static PlannerReasoningResult ApplyFallbackMetadata(
+        PlannerReasoningResult fallback,
+        LlmOptions options,
+        string failureReason)
+    {
+        return fallback with
+        {
+            UsedLlm = false,
+            UsedFallback = true,
+            Provider = NormalizeProvider(options.Provider),
+            Model = options.Model,
+            FailureReason = failureReason
+        };
+    }
+
+    private string ProviderName =>
+        NormalizeProvider(_options.Provider);
+
+    private static string NormalizeProvider(string provider)
+    {
+        return string.Equals(provider, "OpenAI", StringComparison.OrdinalIgnoreCase)
+            ? "OpenAI"
+            : provider;
     }
 
     private static string ExtractJson(string content)

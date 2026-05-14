@@ -57,6 +57,11 @@ type PlannerContext = {
   recommendedActions: string[];
   riskFactors: string[];
   limitations: string[];
+  usedLlm?: boolean;
+  usedFallback?: boolean;
+  provider?: string | null;
+  model?: string | null;
+  failureReason?: string | null;
 };
 
 type AnomalyContext = {
@@ -97,6 +102,12 @@ function PlannerPanel({ planner }: { planner?: PlannerContext }) {
     return null;
   }
 
+  const llmStatus = planner.usedLlm
+    ? "LLM reasoning used"
+    : planner.usedFallback
+      ? "Deterministic fallback"
+      : "Reasoning metadata unavailable";
+
   return (
     <section className="plannerPanel">
       <div className="plannerHeader">
@@ -112,6 +123,30 @@ function PlannerPanel({ planner }: { planner?: PlannerContext }) {
           )}
         </div>
       </div>
+
+      <div className="plannerMetaGrid">
+        <div>
+          <span>LLM status</span>
+          <strong>{llmStatus}</strong>
+        </div>
+
+        <div>
+          <span>Provider</span>
+          <strong>{planner.provider ?? "None"}</strong>
+        </div>
+
+        <div>
+          <span>Model</span>
+          <strong>{planner.model ?? "None"}</strong>
+        </div>
+      </div>
+
+      {planner.failureReason && (
+        <div className="plannerFallbackWarning">
+          <strong>LLM fallback used</strong>
+          <p>{planner.failureReason}</p>
+        </div>
+      )}
 
       <div className="plannerGrid">
         <PlannerList
@@ -257,7 +292,14 @@ function CompliancePanel({
 }
 
 function getEventTone(type: string) {
-  if (type.includes("planner_reasoning") || type.includes("llm_reasoning")) {
+  if (type.includes("planner_reasoning_fallback_used")) {
+    return "event-warning";
+  }
+
+  if (
+    type.includes("planner_reasoning_completed") ||
+    type.includes("llm_reasoning")
+  ) {
     return "event-info";
   }
 

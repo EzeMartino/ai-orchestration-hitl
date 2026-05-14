@@ -5,5 +5,10 @@ public sealed record PlannerReasoningResult(
     string Summary,
     IReadOnlyList<string> RecommendedActions,
     IReadOnlyList<string> RiskFactors,
-    IReadOnlyList<string> Limitations
+    IReadOnlyList<string> Limitations,
+    bool UsedLlm,
+    bool UsedFallback,
+    string? Provider,
+    string? Model,
+    string? FailureReason
 );

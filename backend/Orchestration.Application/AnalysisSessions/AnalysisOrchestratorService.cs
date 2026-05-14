@@ -276,7 +276,12 @@ namespace Orchestration.Application.AnalysisSessions
                     summary = plannerResult.ReasoningResult.Summary,
                     recommendedActions = plannerResult.ReasoningResult.RecommendedActions,
                     riskFactors = plannerResult.ReasoningResult.RiskFactors,
-                    limitations = plannerResult.ReasoningResult.Limitations
+                    limitations = plannerResult.ReasoningResult.Limitations,
+                    usedLlm = plannerResult.ReasoningResult.UsedLlm,
+                    usedFallback = plannerResult.ReasoningResult.UsedFallback,
+                    provider = plannerResult.ReasoningResult.Provider,
+                    model = plannerResult.ReasoningResult.Model,
+                    failureReason = plannerResult.ReasoningResult.FailureReason
                 },
                 anomaly = new
                 {

@@ -36,7 +36,12 @@ public class AnalysisOrchestratorContextTests
                 Summary: "Planner reviewed collected evidence.",
                 RecommendedActions: ["Review evidence."],
                 RiskFactors: ["High data severity."],
-                Limitations: ["No LLM reasoning was used."]
+                Limitations: ["No LLM reasoning was used."],
+                UsedLlm: false,
+                UsedFallback: true,
+                Provider: "OpenAI",
+                Model: "test-model",
+                FailureReason: "LLM returned invalid JSON."
             )
         );
 
@@ -50,5 +55,10 @@ public class AnalysisOrchestratorContextTests
         planner.GetProperty("recommendedActions")[0].GetString().Should().Be("Review evidence.");
         planner.GetProperty("riskFactors")[0].GetString().Should().Be("High data severity.");
         planner.GetProperty("limitations")[0].GetString().Should().Be("No LLM reasoning was used.");
+        planner.GetProperty("usedLlm").GetBoolean().Should().BeFalse();
+        planner.GetProperty("usedFallback").GetBoolean().Should().BeTrue();
+        planner.GetProperty("provider").GetString().Should().Be("OpenAI");
+        planner.GetProperty("model").GetString().Should().Be("test-model");
+        planner.GetProperty("failureReason").GetString().Should().Be("LLM returned invalid JSON.");
     }
 }

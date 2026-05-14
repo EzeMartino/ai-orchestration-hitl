@@ -30,8 +30,14 @@ public class DeterministicPlannerReasoningServiceTests
         );
 
         result.Engine.Should().Be("Deterministic Planner Reasoning");
+        result.UsedLlm.Should().BeFalse();
+        result.UsedFallback.Should().BeTrue();
+        result.Provider.Should().BeNull();
+        result.Model.Should().BeNull();
+        result.FailureReason.Should().BeNull();
         result.Limitations.Should().Contain("No LLM reasoning was used.");
         result.Limitations.Should().Contain("This is not legal, financial, or investment advice.");
+        result.Limitations.Should().Contain("Human approval is required before completing risky workflows.");
         result.RecommendedActions.Should().Contain("Approve or reject the session based on human judgment.");
     }
 }

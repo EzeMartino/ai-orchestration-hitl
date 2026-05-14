@@ -571,6 +571,51 @@ code {
   color: #475569;
 }
 
+.plannerMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.plannerMetaGrid div {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 16px;
+  padding: 0.9rem;
+}
+
+.plannerMetaGrid span {
+  display: block;
+  color: #4338ca;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+}
+
+.plannerMetaGrid strong {
+  color: #111827;
+}
+
+.plannerFallbackWarning {
+  margin-top: 1rem;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 16px;
+  padding: 1rem;
+  color: #78350f;
+}
+
+.plannerFallbackWarning strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.plannerFallbackWarning p {
+  margin: 0;
+}
+
 .plannerGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -758,6 +803,7 @@ code {
   }
 
   .sessionGrid,
+  .plannerMetaGrid,
   .plannerGrid,
   .evidenceGrid {
     grid-template-columns: 1fr;
