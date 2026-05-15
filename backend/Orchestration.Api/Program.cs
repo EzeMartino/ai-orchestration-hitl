@@ -13,6 +13,7 @@ using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Agents.Planner.Reasoning;
+using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Persistence;
 
 
@@ -39,6 +40,7 @@ builder.Services.AddScoped<IToolPlanValidator>(provider =>
         provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
     )
 );
+builder.Services.AddScoped<IControlledToolExecutor, ControlledToolExecutor>();
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration
