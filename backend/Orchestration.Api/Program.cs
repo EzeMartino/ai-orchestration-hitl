@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
+using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
@@ -30,6 +31,14 @@ builder.Services.AddScoped<AnalysisOrchestratorService>();
 
 // Planner agent configuration
 builder.Services.AddPlannerReasoning(builder.Configuration);
+builder.Services.Configure<ToolCallingOptions>(
+    builder.Configuration.GetSection(ToolCallingOptions.SectionName)
+);
+builder.Services.AddScoped<IToolPlanValidator>(provider =>
+    new ToolPlanValidator(
+        provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
+    )
+);
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration
