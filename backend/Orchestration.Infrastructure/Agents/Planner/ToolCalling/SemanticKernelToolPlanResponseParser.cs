@@ -5,7 +5,7 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 public sealed class SemanticKernelToolPlanResponseParser
 {
-    private const string FallbackReason = "LLM proposed this read-only tool call.";
+    private const string FallbackReason = "El LLM propuso esta herramienta de solo lectura.";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {

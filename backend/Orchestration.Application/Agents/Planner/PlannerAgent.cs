@@ -15,6 +15,7 @@ public sealed class PlannerAgent : IPlannerAgent
     private readonly IActivityEventPublisher _activityPublisher;
     private readonly IPlannerReasoningService _reasoningService;
     private readonly IToolPlanProposalService _toolPlanProposalService;
+    private readonly IToolPlanNormalizer _toolPlanNormalizer;
     private readonly IToolPlanValidator _toolPlanValidator;
 
     public PlannerAgent(
@@ -23,6 +24,7 @@ public sealed class PlannerAgent : IPlannerAgent
         IActivityEventPublisher activityPublisher,
         IPlannerReasoningService reasoningService,
         IToolPlanProposalService toolPlanProposalService,
+        IToolPlanNormalizer toolPlanNormalizer,
         IToolPlanValidator toolPlanValidator)
     {
         _dataAgent = dataAgent;
@@ -30,6 +32,7 @@ public sealed class PlannerAgent : IPlannerAgent
         _activityPublisher = activityPublisher;
         _reasoningService = reasoningService;
         _toolPlanProposalService = toolPlanProposalService;
+        _toolPlanNormalizer = toolPlanNormalizer;
         _toolPlanValidator = toolPlanValidator;
     }
 
@@ -123,10 +126,11 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
-        var validationResult = _toolPlanValidator.Validate(proposedPlan);
+        var normalizedPlan = _toolPlanNormalizer.Normalize(proposedPlan);
+        var validationResult = _toolPlanValidator.Validate(normalizedPlan);
 
         var toolPlan = new ToolPlanAuditResult(
-            ProposedCalls: proposedPlan.ProposedCalls,
+            ProposedCalls: normalizedPlan.ProposedCalls,
             ApprovedCalls: validationResult.ApprovedCalls,
             RejectedCalls: validationResult.RejectedCalls,
             ExecutedCalls: []

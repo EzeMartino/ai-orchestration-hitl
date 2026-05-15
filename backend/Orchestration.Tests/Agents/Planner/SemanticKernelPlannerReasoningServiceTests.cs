@@ -150,10 +150,10 @@ No other action was taken.
         var chatCompletionService = new FakeChatCompletionService(
             """
 {
-  "summary": "Human review is required.",
-  "recommendedActions": ["Review anomaly evidence."],
-  "riskFactors": ["High data severity."],
-  "limitations": ["Not legal advice."]
+  "summary": "Se requiere revision humana.",
+  "recommendedActions": ["Revisar evidencia de anomalias."],
+  "riskFactors": ["Severidad alta en DataAgent."],
+  "limitations": ["No es asesoramiento legal."]
 }
 """
         );
@@ -179,12 +179,20 @@ No other action was taken.
         result.UsedLlm.Should().BeTrue();
         result.UsedFallback.Should().BeFalse();
         result.FailureReason.Should().BeNull();
-        result.Summary.Should().Be("Human review is required.");
+        result.Summary.Should().Be("Se requiere revision humana.");
 
         chatCompletionService.LastExecutionSettings
             .Should()
             .BeOfType<OpenAIPromptExecutionSettings>()
             .Which.ResponseFormat.Should().NotBeNull();
+
+        chatCompletionService.LastChatHistory
+            .Should()
+            .NotBeNull();
+        chatCompletionService.LastChatHistory!
+            .Select(message => message.Content)
+            .Should()
+            .Contain(message => message != null && message.Contains("Respond in Spanish."));
     }
 
     private static PlannerReasoningInput CreateInput()
@@ -221,12 +229,15 @@ No other action was taken.
 
         public PromptExecutionSettings? LastExecutionSettings { get; private set; }
 
+        public ChatHistory? LastChatHistory { get; private set; }
+
         public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
             ChatHistory chatHistory,
             PromptExecutionSettings? executionSettings = null,
             Kernel? kernel = null,
             CancellationToken cancellationToken = default)
         {
+            LastChatHistory = chatHistory;
             LastExecutionSettings = executionSettings;
 
             IReadOnlyList<ChatMessageContent> response =

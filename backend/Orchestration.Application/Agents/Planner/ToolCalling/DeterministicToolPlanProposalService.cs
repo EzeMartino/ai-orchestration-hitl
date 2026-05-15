@@ -33,7 +33,7 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                         ["transactionCount"] = input.TransactionCount.ToString(CultureInfo.InvariantCulture),
                         ["submittedAt"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                     },
-                    Reason: "Analyze financial transaction signals for anomaly evidence."
+                    Reason: "Analizar senales cuantitativas del reporte financiero para detectar anomalias."
                 ),
                 new ProposedToolCall(
                     ToolName: "legal.search_cnv_regulation",
@@ -44,7 +44,7 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                         ["limit"] = "5",
                         ["requiresReview"] = "true"
                     },
-                    Reason: "Retrieve cited CNV regulatory evidence related to regulated agents."
+                    Reason: "Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados."
                 )
             ]
         );

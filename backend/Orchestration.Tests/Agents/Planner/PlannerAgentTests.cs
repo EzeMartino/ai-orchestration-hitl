@@ -22,6 +22,7 @@ public class PlannerAgentTests
             new FakeActivityEventPublisher(),
             reasoningService,
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -49,6 +50,7 @@ public class PlannerAgentTests
                     Enabled = false
                 }
             ),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -73,6 +75,7 @@ public class PlannerAgentTests
             publisher,
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -99,6 +102,7 @@ public class PlannerAgentTests
             publisher,
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -132,6 +136,7 @@ public class PlannerAgentTests
             publisher,
             new FakePlannerReasoningService(reasoningResult),
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -161,6 +166,7 @@ public class PlannerAgentTests
             publisher,
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -194,6 +200,7 @@ public class PlannerAgentTests
             new FakeActivityEventPublisher(),
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -221,6 +228,7 @@ public class PlannerAgentTests
                     Enabled = true
                 }
             ),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -250,6 +258,7 @@ public class PlannerAgentTests
                     Enabled = true
                 }
             ),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -285,6 +294,7 @@ public class PlannerAgentTests
             publisher,
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(proposedPlan),
+            new ToolPlanNormalizer(),
             new ToolPlanValidator()
         );
 
@@ -305,6 +315,63 @@ public class PlannerAgentTests
             x.Message == "Rejected tool call 'workflow.complete': Workflow transition tools are not allowed."
         );
         publisher.PublishedEvents.Should().NotContain(x => x.Type == "tool_call_executed");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_validate_normalized_tool_plan()
+    {
+        var proposedPlan = new ToolPlan(
+            [
+                CreateProposedToolCall(
+                    " data.analyze_transactions ",
+                    new Dictionary<string, string>
+                    {
+                        [" sessionId "] = "session-1"
+                    },
+                    " Analyze data. "
+                ),
+                CreateProposedToolCall(
+                    "data.analyze_transactions",
+                    new Dictionary<string, string>
+                    {
+                        ["sessionId"] = "session-1"
+                    },
+                    "Duplicate data call."
+                ),
+                CreateProposedToolCall(
+                    "legal.search_cnv_regulation",
+                    new Dictionary<string, string>
+                    {
+                        ["query"] = "agentes",
+                        ["area"] = "Agentes"
+                    },
+                    "Retrieve legal evidence."
+                )
+            ]
+        );
+
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(proposedPlan),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        result.ToolPlan.ProposedCalls.Should().HaveCount(2);
+        result.ToolPlan.ApprovedCalls.Should().HaveCount(2);
+        result.ToolPlan.RejectedCalls.Should().BeEmpty();
+        result.ToolPlan.ExecutedCalls.Should().BeEmpty();
+        result.ToolPlan.ProposedCalls[0].ToolName.Should().Be("data.analyze_transactions");
+        result.ToolPlan.ProposedCalls[0].Reason.Should().Be("Analyze data.");
+        result.ToolPlan.ApprovedCalls[0].ToolName.Should().Be("data.analyze_transactions");
     }
 
     private static DataAgentResult CreateDataResult(bool hasAnomaly)
@@ -351,15 +418,17 @@ public class PlannerAgentTests
     }
 
     private static ProposedToolCall CreateProposedToolCall(
-        string toolName)
+        string toolName,
+        IReadOnlyDictionary<string, string>? arguments = null,
+        string reason = "Planner proposed read-only evidence collection.")
     {
         return new ProposedToolCall(
             ToolName: toolName,
-            Arguments: new Dictionary<string, string>
+            Arguments: arguments ?? new Dictionary<string, string>
             {
                 ["sessionId"] = Guid.NewGuid().ToString()
             },
-            Reason: "Planner proposed read-only evidence collection."
+            Reason: reason
         );
     }
 

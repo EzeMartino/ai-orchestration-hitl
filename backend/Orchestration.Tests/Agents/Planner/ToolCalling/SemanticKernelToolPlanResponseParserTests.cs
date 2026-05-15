@@ -17,7 +17,7 @@ public class SemanticKernelToolPlanResponseParserTests
         "sessionId": "test-session",
         "reportName": "financial-report"
       },
-      "reason": "Analyze transactions."
+      "reason": "Analizar senales del reporte financiero."
     }
   ]
 }
@@ -31,7 +31,7 @@ public class SemanticKernelToolPlanResponseParserTests
         result.ProposedCalls[0].ToolName.Should().Be("data.analyze_transactions");
         result.ProposedCalls[0].Arguments["sessionId"].Should().Be("test-session");
         result.ProposedCalls[0].Arguments["reportName"].Should().Be("financial-report");
-        result.ProposedCalls[0].Reason.Should().Be("Analyze transactions.");
+        result.ProposedCalls[0].Reason.Should().Be("Analizar senales del reporte financiero.");
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class SemanticKernelToolPlanResponseParserTests
         result.ProposedCalls.Should().ContainSingle();
         result.ProposedCalls[0].ToolName.Should().Be("legal.search_cnv_regulation");
         result.ProposedCalls[0].Arguments.Should().BeEmpty();
-        result.ProposedCalls[0].Reason.Should().Be("LLM proposed this read-only tool call.");
+        result.ProposedCalls[0].Reason.Should().Be("El LLM propuso esta herramienta de solo lectura.");
     }
 
     [Fact]

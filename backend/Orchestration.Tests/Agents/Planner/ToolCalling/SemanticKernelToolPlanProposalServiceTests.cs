@@ -55,9 +55,8 @@ public class SemanticKernelToolPlanProposalServiceTests
     [Fact]
     public async Task ProposeAsync_Should_return_llm_plan_when_output_is_valid()
     {
-        var service = CreateService(
-            toolCallingEnabled: true,
-            chatContent: """
+        var chatCompletionService = new FakeChatCompletionService(
+            """
 {
   "proposedCalls": [
     {
@@ -66,11 +65,15 @@ public class SemanticKernelToolPlanProposalServiceTests
         "query": "agentes",
         "limit": "5"
       },
-      "reason": "Retrieve CNV evidence."
+      "reason": "Recuperar evidencia CNV citada."
     }
   ]
 }
 """
+        );
+        var service = CreateService(
+            toolCallingEnabled: true,
+            chatCompletionService
         );
 
         var result = await service.ProposeAsync(
@@ -82,12 +85,31 @@ public class SemanticKernelToolPlanProposalServiceTests
         result.ProposedCalls[0].ToolName.Should().Be("legal.search_cnv_regulation");
         result.ProposedCalls[0].Arguments["query"].Should().Be("agentes");
         result.ProposedCalls[0].Arguments["limit"].Should().Be("5");
-        result.ProposedCalls[0].Reason.Should().Be("Retrieve CNV evidence.");
+        result.ProposedCalls[0].Reason.Should().Be("Recuperar evidencia CNV citada.");
+        chatCompletionService.LastChatHistory
+            .Should()
+            .NotBeNull();
+        chatCompletionService.LastChatHistory!
+            .Select(message => message.Content)
+            .Should()
+            .Contain(message => message != null && message.Contains("Write the reason field in Spanish."))
+            .And
+            .Contain(message => message != null && message.Contains("Propose at most 2 tool calls."));
     }
 
     private static SemanticKernelToolPlanProposalService CreateService(
         bool toolCallingEnabled,
         string chatContent)
+    {
+        return CreateService(
+            toolCallingEnabled,
+            new FakeChatCompletionService(chatContent)
+        );
+    }
+
+    private static SemanticKernelToolPlanProposalService CreateService(
+        bool toolCallingEnabled,
+        FakeChatCompletionService chatCompletionService)
     {
         var toolCallingOptions = new ToolCallingOptions
         {
@@ -98,7 +120,7 @@ public class SemanticKernelToolPlanProposalServiceTests
             toolCallingOptions,
             new DeterministicToolPlanProposalService(toolCallingOptions),
             new SemanticKernelToolPlanResponseParser(),
-            new FakeChatCompletionService(chatContent)
+            chatCompletionService
         );
     }
 
@@ -128,12 +150,16 @@ public class SemanticKernelToolPlanProposalServiceTests
         public IReadOnlyDictionary<string, object?> Attributes { get; } =
             new Dictionary<string, object?>();
 
+        public ChatHistory? LastChatHistory { get; private set; }
+
         public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
             ChatHistory chatHistory,
             PromptExecutionSettings? executionSettings = null,
             Kernel? kernel = null,
             CancellationToken cancellationToken = default)
         {
+            LastChatHistory = chatHistory;
+
             IReadOnlyList<ChatMessageContent> response =
             [
                 new ChatMessageContent(

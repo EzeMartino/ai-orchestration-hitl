@@ -48,7 +48,7 @@ public class DeterministicToolPlanProposalServiceTests
         dataCall.Arguments["totalAmount"].Should().Be("125000.50");
         dataCall.Arguments["transactionCount"].Should().Be("42");
         dataCall.Arguments["submittedAt"].Should().NotBeNullOrWhiteSpace();
-        dataCall.Reason.Should().Be("Analyze financial transaction signals for anomaly evidence.");
+        dataCall.Reason.Should().Be("Analizar senales cuantitativas del reporte financiero para detectar anomalias.");
 
         var legalCall = result.ProposedCalls[1];
         legalCall.ToolName.Should().Be("legal.search_cnv_regulation");
@@ -56,7 +56,7 @@ public class DeterministicToolPlanProposalServiceTests
         legalCall.Arguments["area"].Should().Be("Agentes");
         legalCall.Arguments["limit"].Should().Be("5");
         legalCall.Arguments["requiresReview"].Should().Be("true");
-        legalCall.Reason.Should().Be("Retrieve cited CNV regulatory evidence related to regulated agents.");
+        legalCall.Reason.Should().Be("Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados.");
     }
 
     private static ToolPlanProposalInput CreateInput(

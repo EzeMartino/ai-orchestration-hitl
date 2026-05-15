@@ -38,6 +38,7 @@ builder.Services.AddScoped<IToolPlanValidator>(provider =>
         provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
     )
 );
+builder.Services.AddScoped<IToolPlanNormalizer, ToolPlanNormalizer>();
 builder.Services.AddScoped<IControlledToolExecutor, ControlledToolExecutor>();
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 

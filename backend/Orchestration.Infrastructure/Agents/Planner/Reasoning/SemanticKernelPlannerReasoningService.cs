@@ -24,6 +24,10 @@ You must not provide legal, financial, or investment advice.
 You must not claim that a regulation was violated.
 You may only say that evidence suggests human review is required.
 
+Respond in Spanish.
+Use clear, professional Spanish suitable for a financial auditor.
+Do not translate technical names such as DataAgent, LegalAgent, PlannerAgent, Semantic Kernel, CSnakes, or MCP.
+
 Return valid JSON only.
 Do not include markdown.
 Do not include code fences.

@@ -21,6 +21,13 @@ Allowed tools:
 - data.analyze_transactions
 - legal.search_cnv_regulation
 
+Propose at most 2 tool calls.
+Prefer:
+1. data.analyze_transactions
+2. legal.search_cnv_regulation
+
+Do not propose multiple legal.search_cnv_regulation calls unless there is a clearly different regulatory search intent.
+
 Forbidden tools include:
 - workflow.complete
 - workflow.fail
@@ -35,7 +42,13 @@ Forbidden tools include:
 - system.execute_command
 - database.raw_query
 
-For legal.search_cnv_regulation, prefer short Spanish CNV search queries such as "agentes", "fondos comunes", "custodia", "registro" or "régimen informativo". Do not generate long multi-term legal queries.
+For legal.search_cnv_regulation, prefer short Spanish CNV search queries such as "agentes", "fondos comunes", "custodia", "registro" or "regimen informativo". Do not generate long multi-term legal queries.
+
+Write the reason field in Spanish.
+Use concise Spanish suitable for an audit trail.
+Return JSON only.
+Do not include markdown.
+Do not include code fences.
 
 Return JSON only with this shape:
 {
