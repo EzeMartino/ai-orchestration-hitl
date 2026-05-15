@@ -283,6 +283,34 @@ namespace Orchestration.Application.AnalysisSessions
                     model = plannerResult.ReasoningResult.Model,
                     failureReason = plannerResult.ReasoningResult.FailureReason
                 },
+                toolPlan = new
+                {
+                    proposedCalls = plannerResult.ToolPlan.ProposedCalls.Select(call => new
+                    {
+                        toolName = call.ToolName,
+                        arguments = call.Arguments,
+                        reason = call.Reason
+                    }),
+                    approvedCalls = plannerResult.ToolPlan.ApprovedCalls.Select(call => new
+                    {
+                        toolName = call.ToolName,
+                        arguments = call.Arguments,
+                        reason = call.Reason
+                    }),
+                    rejectedCalls = plannerResult.ToolPlan.RejectedCalls.Select(call => new
+                    {
+                        toolName = call.ToolName,
+                        reason = call.Reason
+                    }),
+                    executedCalls = plannerResult.ToolPlan.ExecutedCalls.Select(call => new
+                    {
+                        toolName = call.ToolName,
+                        succeeded = call.Succeeded,
+                        summary = call.Summary,
+                        engine = call.Engine,
+                        error = call.Error
+                    })
+                },
                 anomaly = new
                 {
                     detected = plannerResult.DataResult.HasAnomaly,

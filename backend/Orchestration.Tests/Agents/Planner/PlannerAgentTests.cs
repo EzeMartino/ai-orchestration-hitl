@@ -33,6 +33,51 @@ public class PlannerAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_carry_empty_tool_plan_audit_result()
+    {
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        result.ToolPlan.ProposedCalls.Should().BeEmpty();
+        result.ToolPlan.ApprovedCalls.Should().BeEmpty();
+        result.ToolPlan.RejectedCalls.Should().BeEmpty();
+        result.ToolPlan.ExecutedCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_not_publish_tool_plan_events_when_tool_plan_is_empty()
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            publisher,
+            new FakePlannerReasoningService()
+        );
+
+        await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        publisher.PublishedEvents.Should().NotContain(x =>
+            x.Type == "tool_plan_proposed" ||
+            x.Type == "tool_plan_validated" ||
+            x.Type == "tool_call_rejected" ||
+            x.Type == "tool_call_executed"
+        );
+    }
+
+    [Fact]
     public async Task RunAsync_Should_publish_planner_reasoning_completed_event()
     {
         var publisher = new FakeActivityEventPublisher();

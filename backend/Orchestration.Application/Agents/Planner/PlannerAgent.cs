@@ -2,6 +2,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.Reasoning;
+using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 
@@ -111,6 +112,14 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
+        var toolPlan = ToolPlanAuditResult.Empty;
+
+        await PublishToolPlanAuditEventsAsync(
+            session.Id,
+            toolPlan,
+            cancellationToken
+        );
+
         var requiresHumanApproval =
             dataResult.HasAnomaly ||
             legalResult.HasComplianceRisk;
@@ -132,8 +141,67 @@ public sealed class PlannerAgent : IPlannerAgent
             Summary: summary,
             DataResult: dataResult,
             LegalResult: legalResult,
-            ReasoningResult: reasoningResult
+            ReasoningResult: reasoningResult,
+            ToolPlan: toolPlan
         );
+    }
+
+    private async Task PublishToolPlanAuditEventsAsync(
+        Guid sessionId,
+        ToolPlanAuditResult toolPlan,
+        CancellationToken cancellationToken)
+    {
+        if (toolPlan.ProposedCalls.Count == 0 &&
+            toolPlan.ApprovedCalls.Count == 0 &&
+            toolPlan.RejectedCalls.Count == 0 &&
+            toolPlan.ExecutedCalls.Count == 0)
+        {
+            return;
+        }
+
+        if (toolPlan.ProposedCalls.Count > 0)
+        {
+            await PublishAsync(
+                sessionId,
+                "tool_plan_proposed",
+                "PlannerAgent",
+                $"PlannerAgent proposed {toolPlan.ProposedCalls.Count} tool calls.",
+                cancellationToken
+            );
+        }
+
+        if (toolPlan.ApprovedCalls.Count > 0 || toolPlan.RejectedCalls.Count > 0)
+        {
+            await PublishAsync(
+                sessionId,
+                "tool_plan_validated",
+                "PlannerAgent",
+                $"Tool plan validated: {toolPlan.ApprovedCalls.Count} approved, {toolPlan.RejectedCalls.Count} rejected.",
+                cancellationToken
+            );
+        }
+
+        foreach (var rejectedCall in toolPlan.RejectedCalls)
+        {
+            await PublishAsync(
+                sessionId,
+                "tool_call_rejected",
+                "PlannerAgent",
+                $"Rejected unsafe tool call: {rejectedCall.ToolName}.",
+                cancellationToken
+            );
+        }
+
+        foreach (var executedCall in toolPlan.ExecutedCalls)
+        {
+            await PublishAsync(
+                sessionId,
+                "tool_call_executed",
+                "PlannerAgent",
+                $"Executed approved tool: {executedCall.ToolName}.",
+                cancellationToken
+            );
+        }
     }
 
     private static string GetReasoningEventType(

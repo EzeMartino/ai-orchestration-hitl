@@ -64,9 +64,44 @@ type PlannerContext = {
   failureReason?: string | null;
 };
 
-type AnomalyContext = {
+type ToolCallArguments = Record<string, string>;
+
+type ProposedToolCallContext = {
+  toolName: string;
+  arguments: ToolCallArguments;
+  reason: string;
+};
+
+type ApprovedToolCallContext = {
+  toolName: string;
+  arguments: ToolCallArguments;
+  reason: string;
+};
+
+type RejectedToolCallContext = {
+  toolName: string;
+  reason: string;
+};
+
+type ExecutedToolCallContext = {
+  toolName: string;
+  succeeded: boolean;
+  summary: string;
+  engine: string;
+  error?: string | null;
+};
+
+type ToolPlanContext = {
+  proposedCalls: ProposedToolCallContext[];
+  approvedCalls: ApprovedToolCallContext[];
+  rejectedCalls: RejectedToolCallContext[];
+  executedCalls: ExecutedToolCallContext[];
+};
+
+type AnalysisContext = {
   summary?: string;
   planner?: PlannerContext;
+  toolPlan?: ToolPlanContext;
   anomaly?: {
     detected: boolean;
     severity: string;
@@ -81,13 +116,13 @@ type AnomalyContext = {
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
 
-function parseAnomalyContext(contextJson?: string): AnomalyContext | null {
+function parseAnomalyContext(contextJson?: string): AnalysisContext | null {
   if (!contextJson) {
     return null;
   }
 
   try {
-    return JSON.parse(contextJson) as AnomalyContext;
+    return JSON.parse(contextJson) as AnalysisContext;
   } catch {
     return null;
   }
@@ -177,7 +212,98 @@ function PlannerList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function EvidencePanel({ anomaly }: { anomaly: AnomalyContext["anomaly"] }) {
+function ToolPlanAuditPanel({ toolPlan }: { toolPlan?: ToolPlanContext }) {
+  const hasToolPlan =
+    toolPlan &&
+    (toolPlan.proposedCalls.length > 0 ||
+      toolPlan.approvedCalls.length > 0 ||
+      toolPlan.rejectedCalls.length > 0 ||
+      toolPlan.executedCalls.length > 0);
+
+  if (!hasToolPlan) {
+    return null;
+  }
+
+  return (
+    <section className="toolPlanPanel">
+      <div className="toolPlanHeader">
+        <div>
+          <p className="toolPlanEyebrow">Tool plan audit</p>
+          <h2>Controlled tool calling trail</h2>
+          <p>Proposed, validated, rejected, and executed tool calls.</p>
+        </div>
+      </div>
+
+      <div className="toolPlanGrid">
+        <ToolCallGroup
+          title="Proposed"
+          tone="neutral"
+          calls={toolPlan.proposedCalls.map((call) => ({
+            toolName: call.toolName,
+            detail: call.reason,
+          }))}
+        />
+        <ToolCallGroup
+          title="Approved"
+          tone="success"
+          calls={toolPlan.approvedCalls.map((call) => ({
+            toolName: call.toolName,
+            detail: call.reason,
+          }))}
+        />
+        <ToolCallGroup
+          title="Rejected"
+          tone="warning"
+          calls={toolPlan.rejectedCalls.map((call) => ({
+            toolName: call.toolName,
+            detail: call.reason,
+          }))}
+        />
+        <ToolCallGroup
+          title="Executed"
+          tone="success"
+          calls={toolPlan.executedCalls.map((call) => ({
+            toolName: call.toolName,
+            detail: call.error ?? call.summary,
+            meta: `${call.succeeded ? "Succeeded" : "Failed"} - ${call.engine}`,
+          }))}
+        />
+      </div>
+    </section>
+  );
+}
+
+function ToolCallGroup({
+  title,
+  tone,
+  calls,
+}: {
+  title: string;
+  tone: "neutral" | "success" | "warning";
+  calls: { toolName: string; detail: string; meta?: string }[];
+}) {
+  if (calls.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`toolCallGroup toolCallGroup-${tone}`}>
+      <strong>{title}</strong>
+
+      <div className="toolCallList">
+        {calls.map((call, index) => (
+          <article className="toolCallCard" key={`${call.toolName}-${index}`}>
+            <span>{call.toolName}</span>
+            {call.meta && <small>{call.meta}</small>}
+            <p>{call.detail}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EvidencePanel({ anomaly }: { anomaly: AnalysisContext["anomaly"] }) {
   if (!anomaly) {
     return null;
   }
@@ -292,6 +418,21 @@ function CompliancePanel({
 }
 
 function getEventTone(type: string) {
+  if (type.includes("tool_call_rejected")) {
+    return "event-warning";
+  }
+
+  if (type.includes("tool_call_executed")) {
+    return "event-success";
+  }
+
+  if (
+    type.includes("tool_plan_proposed") ||
+    type.includes("tool_plan_validated")
+  ) {
+    return "event-info";
+  }
+
   if (type.includes("planner_reasoning_fallback_used")) {
     return "event-warning";
   }
@@ -593,10 +734,11 @@ function App() {
   }
 
   const latestEvent = events[0];
-  const anomalyContext = parseAnomalyContext(session?.contextJson);
-  const planner = anomalyContext?.planner;
-  const anomaly = anomalyContext?.anomaly;
-  const compliance = anomalyContext?.compliance;
+  const analysisContext = parseAnomalyContext(session?.contextJson);
+  const planner = analysisContext?.planner;
+  const toolPlan = analysisContext?.toolPlan;
+  const anomaly = analysisContext?.anomaly;
+  const compliance = analysisContext?.compliance;
 
   return (
     <main className="page">
@@ -699,6 +841,7 @@ function App() {
           )}
 
           <PlannerPanel planner={planner} />
+          <ToolPlanAuditPanel toolPlan={toolPlan} />
           <EvidencePanel anomaly={anomaly} />
           <CompliancePanel compliance={compliance} />
 
