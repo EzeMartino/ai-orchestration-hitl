@@ -2,6 +2,8 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
+using OpenAI.Chat;
 using Orchestration.Application.Agents.Planner.Reasoning;
 
 namespace Orchestration.Infrastructure.Agents.Planner.Reasoning;
@@ -22,18 +24,25 @@ You must not provide legal, financial, or investment advice.
 You must not claim that a regulation was violated.
 You may only say that evidence suggests human review is required.
 
-Return concise structured JSON with:
-- summary
-- recommendedActions
-- riskFactors
-- limitations
+Return valid JSON only.
+Do not include markdown.
+Do not include code fences.
+Do not include explanatory text outside JSON.
+
+Return this JSON shape:
+{
+  "summary": "string",
+  "recommendedActions": ["string"],
+  "riskFactors": ["string"],
+  "limitations": ["string"]
+}
 """;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly LlmOptions _options;
     private readonly DeterministicPlannerReasoningService _fallback;
-    private readonly Kernel _kernel;
+    private readonly Kernel? _kernel;
     private readonly IChatCompletionService _chatCompletionService;
 
     public SemanticKernelPlannerReasoningService(
@@ -56,6 +65,16 @@ Return concise structured JSON with:
         );
     }
 
+    internal SemanticKernelPlannerReasoningService(
+        LlmOptions options,
+        DeterministicPlannerReasoningService fallback,
+        IChatCompletionService chatCompletionService)
+    {
+        _options = options;
+        _fallback = fallback;
+        _chatCompletionService = chatCompletionService;
+    }
+
     public async Task<PlannerReasoningResult> GenerateReasoningAsync(
         PlannerReasoningInput input,
         CancellationToken cancellationToken)
@@ -68,8 +87,14 @@ Return concise structured JSON with:
             history.AddSystemMessage(SystemPrompt);
             history.AddUserMessage(BuildUserPrompt(input));
 
+            var executionSettings = new OpenAIPromptExecutionSettings
+            {
+                ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat()
+            };
+
             var response = await _chatCompletionService.GetChatMessageContentAsync(
                 history,
+                executionSettings,
                 kernel: _kernel,
                 cancellationToken: cancellationToken
             );
@@ -207,20 +232,31 @@ Return concise structured JSON with:
     {
         var trimmed = content.Trim();
 
-        if (!trimmed.StartsWith("```", StringComparison.Ordinal))
+        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstLineEnd = trimmed.IndexOf('\n');
+            var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+
+            if (firstLineEnd >= 0 && lastFence > firstLineEnd)
+            {
+                trimmed = trimmed[(firstLineEnd + 1)..lastFence].Trim();
+            }
+        }
+
+        if (trimmed.StartsWith('{') && trimmed.EndsWith('}'))
         {
             return trimmed;
         }
 
-        var firstLineEnd = trimmed.IndexOf('\n');
-        var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+        var firstBrace = trimmed.IndexOf('{');
+        var lastBrace = trimmed.LastIndexOf('}');
 
-        if (firstLineEnd < 0 || lastFence <= firstLineEnd)
+        if (firstBrace >= 0 && lastBrace > firstBrace)
         {
-            return trimmed;
+            return trimmed[firstBrace..(lastBrace + 1)].Trim();
         }
 
-        return trimmed[(firstLineEnd + 1)..lastFence].Trim();
+        return trimmed;
     }
 
     private static string BuildUserPrompt(PlannerReasoningInput input)

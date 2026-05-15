@@ -1,4 +1,7 @@
 using FluentAssertions;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Infrastructure.Agents.Planner.Reasoning;
 
@@ -36,6 +39,60 @@ public class SemanticKernelPlannerReasoningServiceTests
         result.RecommendedActions.Should().Contain("Review anomaly evidence.");
         result.RiskFactors.Should().Contain("High data severity.");
         result.Limitations.Should().Contain("Not legal advice.");
+    }
+
+    [Fact]
+    public void TryParseResponse_Should_parse_json_inside_code_fence()
+    {
+        const string content = """
+```json
+{
+  "summary": "Human review is required.",
+  "recommendedActions": ["Review anomaly evidence."],
+  "riskFactors": ["High data severity."],
+  "limitations": ["Not legal advice."]
+}
+```
+""";
+
+        var result = SemanticKernelPlannerReasoningService.TryParseResponse(
+            content,
+            "Semantic Kernel + OpenAI/test-model",
+            "OpenAI",
+            "test-model"
+        );
+
+        result.Should().NotBeNull();
+        result!.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.Summary.Should().Be("Human review is required.");
+    }
+
+    [Fact]
+    public void TryParseResponse_Should_parse_embedded_json()
+    {
+        const string content = """
+Here is the structured response:
+{
+  "summary": "Human review is required.",
+  "recommendedActions": ["Review anomaly evidence."],
+  "riskFactors": ["High data severity."],
+  "limitations": ["Not legal advice."]
+}
+No other action was taken.
+""";
+
+        var result = SemanticKernelPlannerReasoningService.TryParseResponse(
+            content,
+            "Semantic Kernel + OpenAI/test-model",
+            "OpenAI",
+            "test-model"
+        );
+
+        result.Should().NotBeNull();
+        result!.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.Summary.Should().Be("Human review is required.");
     }
 
     [Fact]
@@ -85,5 +142,112 @@ public class SemanticKernelPlannerReasoningServiceTests
         result.Model.Should().Be("test-model");
         result.FailureReason.Should().Be("LLM returned invalid JSON.");
         result.FailureReason.Should().NotContain("System.Text.Json");
+    }
+
+    [Fact]
+    public async Task GenerateReasoningAsync_Should_not_fallback_when_llm_returns_valid_json()
+    {
+        var chatCompletionService = new FakeChatCompletionService(
+            """
+{
+  "summary": "Human review is required.",
+  "recommendedActions": ["Review anomaly evidence."],
+  "riskFactors": ["High data severity."],
+  "limitations": ["Not legal advice."]
+}
+"""
+        );
+
+        var service = new SemanticKernelPlannerReasoningService(
+            new LlmOptions
+            {
+                Enabled = true,
+                Provider = "OpenAI",
+                Model = "test-model",
+                ApiKey = "not-used"
+            },
+            new DeterministicPlannerReasoningService(),
+            chatCompletionService
+        );
+
+        var result = await service.GenerateReasoningAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        result.Engine.Should().Be("Semantic Kernel + OpenAI/test-model");
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.FailureReason.Should().BeNull();
+        result.Summary.Should().Be("Human review is required.");
+
+        chatCompletionService.LastExecutionSettings
+            .Should()
+            .BeOfType<OpenAIPromptExecutionSettings>()
+            .Which.ResponseFormat.Should().NotBeNull();
+    }
+
+    private static PlannerReasoningInput CreateInput()
+    {
+        return new PlannerReasoningInput(
+            SessionId: Guid.NewGuid(),
+            ReportName: "financial-report",
+            TotalAmount: 125000m,
+            TransactionCount: 42,
+            DataSummary: "Anomaly detected.",
+            DataSeverity: "High",
+            DataEngine: "TestDataEngine",
+            DataEvidence: ["Z-score above threshold."],
+            LegalSummary: "Compliance review required.",
+            LegalRiskLevel: "Medium",
+            LegalEngine: "TestLegalEngine",
+            LegalEvidence: ["Cited CNV evidence."],
+            LegalWarnings: ["Human legal review required."]
+        );
+    }
+
+    private sealed class FakeChatCompletionService : IChatCompletionService
+    {
+        private readonly string _content;
+
+        public FakeChatCompletionService(
+            string content)
+        {
+            _content = content;
+        }
+
+        public IReadOnlyDictionary<string, object?> Attributes { get; } =
+            new Dictionary<string, object?>();
+
+        public PromptExecutionSettings? LastExecutionSettings { get; private set; }
+
+        public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
+            ChatHistory chatHistory,
+            PromptExecutionSettings? executionSettings = null,
+            Kernel? kernel = null,
+            CancellationToken cancellationToken = default)
+        {
+            LastExecutionSettings = executionSettings;
+
+            IReadOnlyList<ChatMessageContent> response =
+            [
+                new ChatMessageContent(
+                    AuthorRole.Assistant,
+                    _content
+                )
+            ];
+
+            return Task.FromResult(response);
+        }
+
+        public async IAsyncEnumerable<StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(
+            ChatHistory chatHistory,
+            PromptExecutionSettings? executionSettings = null,
+            Kernel? kernel = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
     }
 }
