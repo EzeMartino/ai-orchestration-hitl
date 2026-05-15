@@ -14,17 +14,23 @@ public sealed class PlannerAgent : IPlannerAgent
     private readonly ILegalAgent _legalAgent;
     private readonly IActivityEventPublisher _activityPublisher;
     private readonly IPlannerReasoningService _reasoningService;
+    private readonly IToolPlanProposalService _toolPlanProposalService;
+    private readonly IToolPlanValidator _toolPlanValidator;
 
     public PlannerAgent(
         IDataAgent dataAgent,
         ILegalAgent legalAgent,
         IActivityEventPublisher activityPublisher,
-        IPlannerReasoningService reasoningService)
+        IPlannerReasoningService reasoningService,
+        IToolPlanProposalService toolPlanProposalService,
+        IToolPlanValidator toolPlanValidator)
     {
         _dataAgent = dataAgent;
         _legalAgent = legalAgent;
         _activityPublisher = activityPublisher;
         _reasoningService = reasoningService;
+        _toolPlanProposalService = toolPlanProposalService;
+        _toolPlanValidator = toolPlanValidator;
     }
 
     public async Task<PlannerAgentResult> RunAsync(
@@ -112,7 +118,19 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
-        var toolPlan = ToolPlanAuditResult.Empty;
+        var proposedPlan = await _toolPlanProposalService.ProposeAsync(
+            BuildToolPlanProposalInput(report, reasoningResult),
+            cancellationToken
+        );
+
+        var validationResult = _toolPlanValidator.Validate(proposedPlan);
+
+        var toolPlan = new ToolPlanAuditResult(
+            ProposedCalls: proposedPlan.ProposedCalls,
+            ApprovedCalls: validationResult.ApprovedCalls,
+            RejectedCalls: validationResult.RejectedCalls,
+            ExecutedCalls: []
+        );
 
         await PublishToolPlanAuditEventsAsync(
             session.Id,
@@ -187,7 +205,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 sessionId,
                 "tool_call_rejected",
                 "PlannerAgent",
-                $"Rejected unsafe tool call: {rejectedCall.ToolName}.",
+                $"Rejected tool call '{rejectedCall.ToolName}': {rejectedCall.Reason}",
                 cancellationToken
             );
         }
@@ -263,6 +281,21 @@ public sealed class PlannerAgent : IPlannerAgent
                 .Select(evidence => $"{evidence.Regulation} {evidence.Section}: {evidence.Finding} Source: {evidence.Source}")
                 .ToList(),
             LegalWarnings: legalResult.Warnings
+        );
+    }
+
+    private static ToolPlanProposalInput BuildToolPlanProposalInput(
+        FinancialReportContext report,
+        PlannerReasoningResult reasoningResult)
+    {
+        return new ToolPlanProposalInput(
+            SessionId: report.SessionId,
+            ReportName: report.ReportName,
+            TotalAmount: report.TotalAmount,
+            TransactionCount: report.TransactionCount,
+            PlannerSummary: reasoningResult.Summary,
+            RiskFactors: reasoningResult.RiskFactors,
+            Limitations: reasoningResult.Limitations
         );
     }
 
