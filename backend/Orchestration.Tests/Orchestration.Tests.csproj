@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Orchestration.Api\Orchestration.Api.csproj" />
     <ProjectReference Include="..\Orchestration.Application\Orchestration.Application.csproj" />
     <ProjectReference Include="..\Orchestration.Domain\Orchestration.Domain.csproj" />
     <ProjectReference Include="..\Orchestration.Infrastructure\Orchestration.Infrastructure.csproj" />

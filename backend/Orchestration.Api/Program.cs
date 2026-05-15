@@ -40,6 +40,7 @@ builder.Services.AddScoped<IToolPlanValidator>(provider =>
 );
 builder.Services.AddScoped<IToolPlanNormalizer, ToolPlanNormalizer>();
 builder.Services.AddScoped<IToolExecutionPolicy, ToolExecutionPolicy>();
+builder.Services.AddScoped<IToolCallingDiagnosticService, ToolCallingDiagnosticService>();
 builder.Services.AddScoped<IControlledToolExecutor, ControlledToolExecutor>();
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
