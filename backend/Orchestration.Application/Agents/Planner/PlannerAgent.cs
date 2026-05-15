@@ -17,6 +17,7 @@ public sealed class PlannerAgent : IPlannerAgent
     private readonly IToolPlanProposalService _toolPlanProposalService;
     private readonly IToolPlanNormalizer _toolPlanNormalizer;
     private readonly IToolPlanValidator _toolPlanValidator;
+    private readonly IToolExecutionPolicy _toolExecutionPolicy;
 
     public PlannerAgent(
         IDataAgent dataAgent,
@@ -25,7 +26,8 @@ public sealed class PlannerAgent : IPlannerAgent
         IPlannerReasoningService reasoningService,
         IToolPlanProposalService toolPlanProposalService,
         IToolPlanNormalizer toolPlanNormalizer,
-        IToolPlanValidator toolPlanValidator)
+        IToolPlanValidator toolPlanValidator,
+        IToolExecutionPolicy toolExecutionPolicy)
     {
         _dataAgent = dataAgent;
         _legalAgent = legalAgent;
@@ -34,6 +36,7 @@ public sealed class PlannerAgent : IPlannerAgent
         _toolPlanProposalService = toolPlanProposalService;
         _toolPlanNormalizer = toolPlanNormalizer;
         _toolPlanValidator = toolPlanValidator;
+        _toolExecutionPolicy = toolExecutionPolicy;
     }
 
     public async Task<PlannerAgentResult> RunAsync(
@@ -128,12 +131,23 @@ public sealed class PlannerAgent : IPlannerAgent
 
         var normalizedPlan = _toolPlanNormalizer.Normalize(proposedPlan);
         var validationResult = _toolPlanValidator.Validate(normalizedPlan);
+        var policyDecisions = _toolExecutionPolicy.Decide(
+            validationResult.ApprovedCalls,
+            new ToolExecutionPolicyContext(
+                DataAnalysisAlreadyCompleted: true,
+                LegalReviewAlreadyCompleted: true,
+                DynamicExecutionEnabled: false
+            )
+        );
+        var executionAudit = policyDecisions
+            .Select(CreatePolicyAuditResult)
+            .ToList();
 
         var toolPlan = new ToolPlanAuditResult(
             ProposedCalls: normalizedPlan.ProposedCalls,
             ApprovedCalls: validationResult.ApprovedCalls,
             RejectedCalls: validationResult.RejectedCalls,
-            ExecutedCalls: []
+            ExecutedCalls: executionAudit
         );
 
         await PublishToolPlanAuditEventsAsync(
@@ -214,16 +228,35 @@ public sealed class PlannerAgent : IPlannerAgent
             );
         }
 
-        foreach (var executedCall in toolPlan.ExecutedCalls)
+        foreach (var executionAudit in toolPlan.ExecutedCalls)
         {
-            await PublishAsync(
-                sessionId,
-                "tool_call_executed",
-                "PlannerAgent",
-                $"Executed approved tool: {executedCall.ToolName}.",
-                cancellationToken
-            );
+            if (executionAudit.Status is ToolExecutionStatus.SkippedAlreadySatisfied or ToolExecutionStatus.SkippedDisabled)
+            {
+                await PublishAsync(
+                    sessionId,
+                    "tool_call_skipped",
+                    "PlannerAgent",
+                    $"Skipped approved tool call '{executionAudit.ToolName}': {executionAudit.Summary}",
+                    cancellationToken
+                );
+            }
         }
+    }
+
+    private static ToolExecutionResult CreatePolicyAuditResult(
+        ToolExecutionPolicyDecision decision)
+    {
+        var failed = decision.Status == ToolExecutionStatus.Failed;
+
+        return new ToolExecutionResult(
+            ToolName: decision.Call.ToolName,
+            Status: decision.Status,
+            Succeeded: !failed,
+            Summary: decision.Reason,
+            Engine: "Tool Execution Policy",
+            OutputJson: "{}",
+            Error: failed ? decision.Reason : null
+        );
     }
 
     private static string GetReasoningEventType(

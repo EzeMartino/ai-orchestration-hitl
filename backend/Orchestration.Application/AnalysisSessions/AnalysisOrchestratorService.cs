@@ -305,6 +305,7 @@ namespace Orchestration.Application.AnalysisSessions
                     executedCalls = plannerResult.ToolPlan.ExecutedCalls.Select(call => new
                     {
                         toolName = call.ToolName,
+                        status = call.Status.ToString(),
                         succeeded = call.Succeeded,
                         summary = call.Summary,
                         engine = call.Engine,

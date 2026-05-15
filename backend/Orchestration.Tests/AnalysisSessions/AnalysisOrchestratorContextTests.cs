@@ -117,9 +117,10 @@ public class AnalysisOrchestratorContextTests
             [
                 new ToolExecutionResult(
                     ToolName: "legal.search_cnv_regulation",
+                    Status: ToolExecutionStatus.SkippedAlreadySatisfied,
                     Succeeded: true,
-                    Summary: "CNV search returned 1 results.",
-                    Engine: "MCP CNV Regulation Server",
+                    Summary: "LegalAgent already executed during the deterministic workflow.",
+                    Engine: "Tool Execution Policy",
                     OutputJson: "{\"large\":\"payload\"}",
                     Error: null
                 )
@@ -149,9 +150,10 @@ public class AnalysisOrchestratorContextTests
 
         var executedCall = toolPlanElement.GetProperty("executedCalls")[0];
         executedCall.GetProperty("toolName").GetString().Should().Be("legal.search_cnv_regulation");
+        executedCall.GetProperty("status").GetString().Should().Be("SkippedAlreadySatisfied");
         executedCall.GetProperty("succeeded").GetBoolean().Should().BeTrue();
-        executedCall.GetProperty("summary").GetString().Should().Be("CNV search returned 1 results.");
-        executedCall.GetProperty("engine").GetString().Should().Be("MCP CNV Regulation Server");
+        executedCall.GetProperty("summary").GetString().Should().Be("LegalAgent already executed during the deterministic workflow.");
+        executedCall.GetProperty("engine").GetString().Should().Be("Tool Execution Policy");
         executedCall.GetProperty("error").ValueKind.Should().Be(JsonValueKind.Null);
         executedCall.TryGetProperty("outputJson", out _).Should().BeFalse();
     }

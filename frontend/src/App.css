@@ -703,6 +703,11 @@ code {
   background: #fffbeb;
 }
 
+.toolCallGroup-danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .toolCallList {
   display: grid;
   gap: 0.65rem;
@@ -728,6 +733,37 @@ code {
   margin-top: 0.35rem;
   color: #64748b;
   font-weight: 800;
+}
+
+.toolCallStatus {
+  display: inline-flex;
+  margin-top: 0.45rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+}
+
+.toolCallStatus-success {
+  border-color: #bbf7d0;
+  color: #047857;
+  background: #ecfdf5;
+}
+
+.toolCallStatus-warning {
+  border-color: #fcd34d;
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.toolCallStatus-danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fef2f2;
 }
 
 .toolCallCard p {

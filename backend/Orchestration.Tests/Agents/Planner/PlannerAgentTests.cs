@@ -23,7 +23,8 @@ public class PlannerAgentTests
             reasoningService,
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -51,7 +52,8 @@ public class PlannerAgentTests
                 }
             ),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -76,7 +78,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         await plannerAgent.RunAsync(
@@ -88,6 +91,7 @@ public class PlannerAgentTests
             x.Type == "tool_plan_proposed" ||
             x.Type == "tool_plan_validated" ||
             x.Type == "tool_call_rejected" ||
+            x.Type == "tool_call_skipped" ||
             x.Type == "tool_call_executed"
         );
     }
@@ -103,7 +107,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         await plannerAgent.RunAsync(
@@ -137,7 +142,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(reasoningResult),
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         await plannerAgent.RunAsync(
@@ -167,7 +173,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -201,7 +208,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -229,7 +237,8 @@ public class PlannerAgentTests
                 }
             ),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -240,7 +249,18 @@ public class PlannerAgentTests
         result.ToolPlan.ProposedCalls.Should().HaveCount(2);
         result.ToolPlan.ApprovedCalls.Should().HaveCount(2);
         result.ToolPlan.RejectedCalls.Should().BeEmpty();
-        result.ToolPlan.ExecutedCalls.Should().BeEmpty();
+        result.ToolPlan.ExecutedCalls.Should().HaveCount(2);
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.SkippedAlreadySatisfied);
+        result.ToolPlan.ExecutedCalls.Should().Contain(call =>
+            call.ToolName == "data.analyze_transactions" &&
+            call.Summary == "DataAgent already executed during the deterministic workflow."
+        );
+        result.ToolPlan.ExecutedCalls.Should().Contain(call =>
+            call.ToolName == "legal.search_cnv_regulation" &&
+            call.Summary == "LegalAgent already executed during the deterministic workflow."
+        );
     }
 
     [Fact]
@@ -259,7 +279,8 @@ public class PlannerAgentTests
                 }
             ),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         await plannerAgent.RunAsync(
@@ -274,6 +295,14 @@ public class PlannerAgentTests
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_plan_validated" &&
             x.Message == "Tool plan validated: 2 approved, 0 rejected."
+        );
+        publisher.PublishedEvents.Should().Contain(x =>
+            x.Type == "tool_call_skipped" &&
+            x.Message == "Skipped approved tool call 'data.analyze_transactions': DataAgent already executed during the deterministic workflow."
+        );
+        publisher.PublishedEvents.Should().Contain(x =>
+            x.Type == "tool_call_skipped" &&
+            x.Message == "Skipped approved tool call 'legal.search_cnv_regulation': LegalAgent already executed during the deterministic workflow."
         );
         publisher.PublishedEvents.Should().NotContain(x => x.Type == "tool_call_executed");
     }
@@ -295,7 +324,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(proposedPlan),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -357,7 +387,8 @@ public class PlannerAgentTests
             new FakePlannerReasoningService(),
             new FakeToolPlanProposalService(proposedPlan),
             new ToolPlanNormalizer(),
-            new ToolPlanValidator()
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -368,7 +399,10 @@ public class PlannerAgentTests
         result.ToolPlan.ProposedCalls.Should().HaveCount(2);
         result.ToolPlan.ApprovedCalls.Should().HaveCount(2);
         result.ToolPlan.RejectedCalls.Should().BeEmpty();
-        result.ToolPlan.ExecutedCalls.Should().BeEmpty();
+        result.ToolPlan.ExecutedCalls.Should().HaveCount(2);
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.SkippedAlreadySatisfied);
         result.ToolPlan.ProposedCalls[0].ToolName.Should().Be("data.analyze_transactions");
         result.ToolPlan.ProposedCalls[0].Reason.Should().Be("Analyze data.");
         result.ToolPlan.ApprovedCalls[0].ToolName.Should().Be("data.analyze_transactions");

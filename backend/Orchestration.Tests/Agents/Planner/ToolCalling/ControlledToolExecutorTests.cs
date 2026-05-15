@@ -41,6 +41,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.ToolName.Should().Be("data.analyze_transactions");
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
         result.Succeeded.Should().BeTrue();
         result.Summary.Should().Be("Data analysis completed.");
         result.Engine.Should().Be("Fake DataAgent");
@@ -92,6 +93,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.Succeeded.Should().BeFalse();
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Error.Should().Be("Missing required argument: reportName.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();
@@ -123,6 +125,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.Succeeded.Should().BeFalse();
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Error.Should().Be("Invalid decimal argument: totalAmount.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();
@@ -153,6 +156,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.ToolName.Should().Be("legal.search_cnv_regulation");
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
         result.Succeeded.Should().BeTrue();
         result.Summary.Should().Be("CNV search returned 1 results.");
         result.Engine.Should().Be("MCP CNV Regulation Server");
@@ -189,6 +193,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.Succeeded.Should().BeFalse();
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Error.Should().Be("Missing required argument: query.");
         result.OutputJson.Should().Be("{}");
         mcpClient.WasCalled.Should().BeFalse();
@@ -214,6 +219,7 @@ public class ControlledToolExecutorTests
         var result = results.Should().ContainSingle().Subject;
 
         result.Succeeded.Should().BeFalse();
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Error.Should().Be("Tool is not executable.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();

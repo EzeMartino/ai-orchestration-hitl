@@ -85,6 +85,7 @@ type RejectedToolCallContext = {
 
 type ExecutedToolCallContext = {
   toolName: string;
+  status?: string;
   succeeded: boolean;
   summary: string;
   engine: string;
@@ -230,7 +231,7 @@ function ToolPlanAuditPanel({ toolPlan }: { toolPlan?: ToolPlanContext }) {
         <div>
           <p className="toolPlanEyebrow">Tool plan audit</p>
           <h2>Controlled tool calling trail</h2>
-          <p>Proposed, validated, rejected, and executed tool calls.</p>
+          <p>Proposed, validated, rejected, and execution-policy decisions.</p>
         </div>
       </div>
 
@@ -260,12 +261,14 @@ function ToolPlanAuditPanel({ toolPlan }: { toolPlan?: ToolPlanContext }) {
           }))}
         />
         <ToolCallGroup
-          title="Executed"
-          tone="success"
+          title="Execution audit"
+          tone="neutral"
           calls={toolPlan.executedCalls.map((call) => ({
             toolName: call.toolName,
             detail: call.error ?? call.summary,
-            meta: `${call.succeeded ? "Succeeded" : "Failed"} - ${call.engine}`,
+            meta: `${call.status ?? (call.succeeded ? "Executed" : "Failed")} - ${call.engine}`,
+            status: call.status ?? (call.succeeded ? "Executed" : "Failed"),
+            statusTone: getToolExecutionTone(call.status, call.succeeded),
           }))}
         />
       </div>
@@ -279,8 +282,14 @@ function ToolCallGroup({
   calls,
 }: {
   title: string;
-  tone: "neutral" | "success" | "warning";
-  calls: { toolName: string; detail: string; meta?: string }[];
+  tone: "neutral" | "success" | "warning" | "danger";
+  calls: {
+    toolName: string;
+    detail: string;
+    meta?: string;
+    status?: string;
+    statusTone?: "neutral" | "success" | "warning" | "danger";
+  }[];
 }) {
   if (calls.length === 0) {
     return null;
@@ -294,6 +303,11 @@ function ToolCallGroup({
         {calls.map((call, index) => (
           <article className="toolCallCard" key={`${call.toolName}-${index}`}>
             <span>{call.toolName}</span>
+            {call.status && (
+              <em className={`toolCallStatus toolCallStatus-${call.statusTone ?? "neutral"}`}>
+                {call.status}
+              </em>
+            )}
             {call.meta && <small>{call.meta}</small>}
             <p>{call.detail}</p>
           </article>
@@ -301,6 +315,25 @@ function ToolCallGroup({
       </div>
     </div>
   );
+}
+
+function getToolExecutionTone(
+  status?: string,
+  succeeded?: boolean
+): "neutral" | "success" | "warning" | "danger" {
+  if (status === "Failed" || succeeded === false) {
+    return "danger";
+  }
+
+  if (status === "Executed") {
+    return "success";
+  }
+
+  if (status === "SkippedDisabled") {
+    return "warning";
+  }
+
+  return "neutral";
 }
 
 function EvidencePanel({ anomaly }: { anomaly: AnalysisContext["anomaly"] }) {
@@ -420,6 +453,10 @@ function CompliancePanel({
 function getEventTone(type: string) {
   if (type.includes("tool_call_rejected")) {
     return "event-warning";
+  }
+
+  if (type.includes("tool_call_skipped")) {
+    return "event-info";
   }
 
   if (type.includes("tool_call_executed")) {

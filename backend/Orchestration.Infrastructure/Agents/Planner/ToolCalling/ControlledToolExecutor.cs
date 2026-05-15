@@ -166,6 +166,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     {
         return new ToolExecutionResult(
             ToolName: toolName,
+            Status: ToolExecutionStatus.Executed,
             Succeeded: true,
             Summary: summary,
             Engine: engine,
@@ -180,6 +181,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     {
         return new ToolExecutionResult(
             ToolName: toolName,
+            Status: ToolExecutionStatus.Failed,
             Succeeded: false,
             Summary: error,
             Engine: EngineName,
