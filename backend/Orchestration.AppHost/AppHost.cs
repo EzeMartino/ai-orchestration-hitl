@@ -1,5 +1,13 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+var llmEnabled = builder.Configuration["Llm:Enabled"];
+var llmProvider = builder.Configuration["Llm:Provider"];
+var llmModel = builder.Configuration["Llm:Model"];
+var llmApiKey = builder.Configuration["Llm:ApiKey"];
+var llmServiceId = builder.Configuration["Llm:ServiceId"];
+
+var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
+
 var postgres = builder
     .AddPostgres("postgres")
     .WithImage("pgvector/pgvector", "pg17")
@@ -66,6 +74,12 @@ var api = builder
     .AddProject<Projects.Orchestration_Api>("orchestration-api")
     .WithEnvironment("Python__Home", pythonHome)
     .WithEnvironment("CNV_REGULATION_DB_CONNECTION_STRING", cnvRegulationDb)
+    .WithEnvironment("Llm__Enabled", llmEnabled ?? "false")
+    .WithEnvironment("Llm__Provider", llmProvider ?? "OpenAI")
+    .WithEnvironment("Llm__Model", llmModel ?? "")
+    .WithEnvironment("Llm__ApiKey", llmApiKey ?? "")
+    .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
+    .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)
