@@ -1,0 +1,349 @@
+{
+  "company": "Vista Energy",
+  "source": "Vista Energy sample structured metrics fixture",
+  "currency": "USD",
+  "unit": "USD millions",
+  "periods": [
+    "2024A",
+    "2025E",
+    "2026E"
+  ],
+  "metrics": [
+    {
+      "name": "revenue",
+      "period": "2024A",
+      "value": 1650.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "gross_profit",
+      "period": "2024A",
+      "value": 925.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebitda",
+      "period": "2024A",
+      "value": 760.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebit",
+      "period": "2024A",
+      "value": 590.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_income",
+      "period": "2024A",
+      "value": 390.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_assets",
+      "period": "2024A",
+      "value": 820.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_liabilities",
+      "period": "2024A",
+      "value": 540.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "cash",
+      "period": "2024A",
+      "value": 210.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "total_debt",
+      "period": "2024A",
+      "value": 1240.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_debt",
+      "period": "2024A",
+      "value": 1030.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "equity",
+      "period": "2024A",
+      "value": 1750.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "free_cash_flow",
+      "period": "2024A",
+      "value": 185.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "capex",
+      "period": "2024A",
+      "value": 575.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "interest_expense",
+      "period": "2024A",
+      "value": 95.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "revenue",
+      "period": "2025E",
+      "value": 1950.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "gross_profit",
+      "period": "2025E",
+      "value": 1120.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebitda",
+      "period": "2025E",
+      "value": 930.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebit",
+      "period": "2025E",
+      "value": 735.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_income",
+      "period": "2025E",
+      "value": 505.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_assets",
+      "period": "2025E",
+      "value": 900.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_liabilities",
+      "period": "2025E",
+      "value": 610.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "cash",
+      "period": "2025E",
+      "value": 240.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "total_debt",
+      "period": "2025E",
+      "value": 1320.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_debt",
+      "period": "2025E",
+      "value": 1080.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "equity",
+      "period": "2025E",
+      "value": 2100.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "free_cash_flow",
+      "period": "2025E",
+      "value": 265.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "capex",
+      "period": "2025E",
+      "value": 665.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "interest_expense",
+      "period": "2025E",
+      "value": 105.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "revenue",
+      "period": "2026E",
+      "value": 2260.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "gross_profit",
+      "period": "2026E",
+      "value": 1325.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebitda",
+      "period": "2026E",
+      "value": 1110.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "ebit",
+      "period": "2026E",
+      "value": 895.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_income",
+      "period": "2026E",
+      "value": 635.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_assets",
+      "period": "2026E",
+      "value": 1015.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "current_liabilities",
+      "period": "2026E",
+      "value": 690.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "cash",
+      "period": "2026E",
+      "value": 280.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "total_debt",
+      "period": "2026E",
+      "value": 1380.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "net_debt",
+      "period": "2026E",
+      "value": 1100.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "equity",
+      "period": "2026E",
+      "value": 2525.0,
+      "unit": "USD millions",
+      "statement": "balance_sheet",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "free_cash_flow",
+      "period": "2026E",
+      "value": 365.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "capex",
+      "period": "2026E",
+      "value": 745.0,
+      "unit": "USD millions",
+      "statement": "cash_flow",
+      "source": "sample_structured_fixture"
+    },
+    {
+      "name": "interest_expense",
+      "period": "2026E",
+      "value": 112.0,
+      "unit": "USD millions",
+      "statement": "income_statement",
+      "source": "sample_structured_fixture"
+    }
+  ]
+}

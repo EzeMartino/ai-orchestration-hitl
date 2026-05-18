@@ -29,4 +29,8 @@
     <ProjectReference Include="..\Orchestration.Infrastructure\Orchestration.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
