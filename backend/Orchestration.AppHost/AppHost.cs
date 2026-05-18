@@ -7,6 +7,7 @@ var llmApiKey = builder.Configuration["Llm:ApiKey"];
 var llmServiceId = builder.Configuration["Llm:ServiceId"];
 
 var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
+var toolCallingExecutionMode = builder.Configuration["ToolCalling:ExecutionMode"];
 
 var postgres = builder
     .AddPostgres("postgres")
@@ -80,6 +81,7 @@ var api = builder
     .WithEnvironment("Llm__ApiKey", llmApiKey ?? "")
     .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
     .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
+    .WithEnvironment("ToolCalling__ExecutionMode", toolCallingExecutionMode ?? "Shadow")
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)
