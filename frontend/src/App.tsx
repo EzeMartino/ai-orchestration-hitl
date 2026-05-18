@@ -470,7 +470,10 @@ function getEventTone(type: string) {
     return "event-info";
   }
 
-  if (type.includes("planner_reasoning_fallback_used")) {
+  if (
+    type.includes("planner_reasoning_fallback_used") ||
+    type.includes("tool_execution_fallback_used")
+  ) {
     return "event-warning";
   }
 

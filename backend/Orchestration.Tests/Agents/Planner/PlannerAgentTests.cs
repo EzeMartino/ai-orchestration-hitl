@@ -4,6 +4,7 @@ using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Tests.Agents;
@@ -24,7 +25,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -53,7 +57,10 @@ public class PlannerAgentTests
             ),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -79,7 +86,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         await plannerAgent.RunAsync(
@@ -108,7 +118,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         await plannerAgent.RunAsync(
@@ -143,7 +156,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         await plannerAgent.RunAsync(
@@ -174,7 +190,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -209,7 +228,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -238,7 +260,10 @@ public class PlannerAgentTests
             ),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -280,7 +305,10 @@ public class PlannerAgentTests
             ),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         await plannerAgent.RunAsync(
@@ -325,7 +353,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(proposedPlan),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -388,7 +419,10 @@ public class PlannerAgentTests
             new FakeToolPlanProposalService(proposedPlan),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(),
-            new ToolExecutionPolicy()
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
         );
 
         var result = await plannerAgent.RunAsync(
@@ -406,6 +440,94 @@ public class PlannerAgentTests
         result.ToolPlan.ProposedCalls[0].ToolName.Should().Be("data.analyze_transactions");
         result.ToolPlan.ProposedCalls[0].Reason.Should().Be("Analyze data.");
         result.ToolPlan.ApprovedCalls[0].ToolName.Should().Be("data.analyze_transactions");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_execute_approved_calls_in_plan_driven_mode()
+    {
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var executor = new FakeControlledToolExecutor();
+        var publisher = new FakeActivityEventPublisher();
+        var mappedDataResult = CreateDataResult(hasAnomaly: true);
+        var mappedLegalResult = CreateLegalResult(hasComplianceRisk: false);
+
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            publisher,
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(CreateExecutableToolPlan()),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            executor,
+            new FakeToolExecutionResultMapper(mappedDataResult, mappedLegalResult),
+            CreatePlanDrivenOptions()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        executor.WasCalled.Should().BeTrue();
+        executor.ReceivedCalls.Should().HaveCount(2);
+        dataAgent.WasCalled.Should().BeFalse();
+        legalAgent.WasCalled.Should().BeFalse();
+        result.DataResult.Should().Be(mappedDataResult);
+        result.LegalResult.Should().Be(mappedLegalResult);
+        result.RequiresHumanApproval.Should().BeTrue();
+        result.ToolPlan.ExecutedCalls.Should().HaveCount(2);
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.Executed);
+        publisher.PublishedEvents.Should().Contain(x =>
+            x.Type == "tool_call_executed" &&
+            x.Message == "Executed approved tool call 'data.analyze_transactions' using Fake Controlled Tool Executor."
+        );
+        publisher.PublishedEvents.Should().Contain(x =>
+            x.Type == "tool_call_executed" &&
+            x.Message == "Executed approved tool call 'legal.search_cnv_regulation' using Fake Controlled Tool Executor."
+        );
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_fallback_to_deterministic_agents_when_plan_driven_mapping_fails()
+    {
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: true));
+        var executor = new FakeControlledToolExecutor();
+        var publisher = new FakeActivityEventPublisher();
+
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            publisher,
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(CreateExecutableToolPlan()),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            executor,
+            new FakeToolExecutionResultMapper(dataResult: null, legalResult: null),
+            CreatePlanDrivenOptions()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        executor.WasCalled.Should().BeTrue();
+        dataAgent.WasCalled.Should().BeTrue();
+        legalAgent.WasCalled.Should().BeTrue();
+        result.RequiresHumanApproval.Should().BeTrue();
+        result.LegalResult.HasComplianceRisk.Should().BeTrue();
+        publisher.PublishedEvents.Should().Contain(x =>
+            x.Type == "tool_execution_fallback_used" &&
+            x.Message == "Plan-driven execution failed; deterministic agent path was used."
+        );
     }
 
     private static DataAgentResult CreateDataResult(bool hasAnomaly)
@@ -464,6 +586,44 @@ public class PlannerAgentTests
             },
             Reason: reason
         );
+    }
+
+    private static ToolPlan CreateExecutableToolPlan()
+    {
+        return new ToolPlan(
+            [
+                CreateProposedToolCall(
+                    "data.analyze_transactions",
+                    new Dictionary<string, string>
+                    {
+                        ["sessionId"] = Guid.Empty.ToString(),
+                        ["reportName"] = "test-report",
+                        ["totalAmount"] = "125000",
+                        ["transactionCount"] = "42",
+                        ["submittedAt"] = "2026-05-06T14:00:00Z"
+                    }
+                ),
+                CreateProposedToolCall(
+                    "legal.search_cnv_regulation",
+                    new Dictionary<string, string>
+                    {
+                        ["query"] = "agentes",
+                        ["area"] = "Agentes",
+                        ["limit"] = "5",
+                        ["requiresReview"] = "true"
+                    }
+                )
+            ]
+        );
+    }
+
+    private static ToolCallingOptions CreatePlanDrivenOptions()
+    {
+        return new ToolCallingOptions
+        {
+            Enabled = true,
+            ExecutionMode = ToolCallingExecutionMode.PlanDriven
+        };
     }
 
     private sealed class FakeDataAgent : IDataAgent
@@ -548,6 +708,59 @@ public class PlannerAgentTests
             CancellationToken cancellationToken)
         {
             return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class FakeControlledToolExecutor : IControlledToolExecutor
+    {
+        public bool WasCalled { get; private set; }
+
+        public IReadOnlyList<ApprovedToolCall> ReceivedCalls { get; private set; } = [];
+
+        public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
+            IReadOnlyList<ApprovedToolCall> calls,
+            CancellationToken cancellationToken)
+        {
+            WasCalled = true;
+            ReceivedCalls = calls;
+
+            return Task.FromResult<IReadOnlyList<ToolExecutionResult>>(
+                calls.Select(call => new ToolExecutionResult(
+                    ToolName: call.ToolName,
+                    Status: ToolExecutionStatus.Executed,
+                    Succeeded: true,
+                    Summary: $"Executed {call.ToolName}.",
+                    Engine: "Fake Controlled Tool Executor",
+                    OutputJson: "{}",
+                    Error: null
+                )).ToList()
+            );
+        }
+    }
+
+    private sealed class FakeToolExecutionResultMapper : IToolExecutionResultMapper
+    {
+        private readonly DataAgentResult? _dataResult;
+        private readonly LegalAgentResult? _legalResult;
+
+        public FakeToolExecutionResultMapper(
+            DataAgentResult? dataResult = null,
+            LegalAgentResult? legalResult = null)
+        {
+            _dataResult = dataResult;
+            _legalResult = legalResult;
+        }
+
+        public DataAgentResult? TryMapDataResult(
+            IReadOnlyList<ToolExecutionResult> executedCalls)
+        {
+            return _dataResult;
+        }
+
+        public LegalAgentResult? TryMapLegalResult(
+            IReadOnlyList<ToolExecutionResult> executedCalls)
+        {
+            return _legalResult;
         }
     }
 

@@ -6,6 +6,9 @@ public sealed class ToolCallingOptions
 
     public bool Enabled { get; init; }
 
+    public ToolCallingExecutionMode ExecutionMode { get; init; } =
+        ToolCallingExecutionMode.Shadow;
+
     public int MaxToolCalls { get; init; } = 3;
 
     public string[] AllowedTools { get; init; } =

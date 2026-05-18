@@ -6,6 +6,7 @@ using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
@@ -38,10 +39,14 @@ builder.Services.AddScoped<IToolPlanValidator>(provider =>
         provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
     )
 );
+builder.Services.AddScoped(provider =>
+    provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
+);
 builder.Services.AddScoped<IToolPlanNormalizer, ToolPlanNormalizer>();
 builder.Services.AddScoped<IToolExecutionPolicy, ToolExecutionPolicy>();
 builder.Services.AddScoped<IToolCallingDiagnosticService, ToolCallingDiagnosticService>();
 builder.Services.AddScoped<IControlledToolExecutor, ControlledToolExecutor>();
+builder.Services.AddScoped<IToolExecutionResultMapper, ToolExecutionResultMapper>();
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration

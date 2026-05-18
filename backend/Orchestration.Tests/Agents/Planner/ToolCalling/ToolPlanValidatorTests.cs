@@ -5,6 +5,14 @@ namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
 public class ToolPlanValidatorTests
 {
+    [Fact]
+    public void ToolCallingOptions_Should_default_to_shadow_execution_mode()
+    {
+        var options = new ToolCallingOptions();
+
+        options.ExecutionMode.Should().Be(ToolCallingExecutionMode.Shadow);
+    }
+
     [Theory]
     [InlineData("data.analyze_transactions")]
     [InlineData("legal.search_cnv_regulation")]
