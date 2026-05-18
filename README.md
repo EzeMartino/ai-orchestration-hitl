@@ -1,26 +1,30 @@
 # Financial Analysis Control Room
 
-Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
+Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, controlled tool calling, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
 
 This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
 
 ## Current AI Status
 
-This project now supports **optional controlled LLM-assisted planner reasoning**.
+This project now supports **optional controlled LLM-assisted planner reasoning** and **controlled tool calling**.
 
-The LLM is used only to generate structured reasoning summaries for the `PlannerAgent`. It does not control workflow transitions, approve or reject sessions, execute tools autonomously, or make legal/financial decisions.
+The LLM is used to generate structured reasoning summaries and, when enabled, propose tool calls for the `PlannerAgent`. It does not control workflow transitions, approve or reject sessions, execute tools autonomously, or make legal/financial decisions.
 
 Current implementation:
 
 - `PlannerAgent` coordinates the workflow in .NET.
 - `PlannerAgent` can optionally use Semantic Kernel + OpenAI for advisory reasoning summaries.
+- `PlannerAgent` can optionally ask the LLM to propose read-only tool calls.
+- Proposed tool calls are normalized, validated against an allowlist, and audited.
+- In `Shadow` mode, tool calls are not dynamically executed by the workflow.
+- In `PlanDriven` mode, approved read-only tool calls can execute through a controlled executor.
 - If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning.
 - `DataAgent` runs Python-based anomaly detection through Semantic Kernel + CSnakes.
 - `LegalAgent` retrieves cited CNV regulatory evidence through Semantic Kernel + MCP.
 - The workflow pauses for human approval when risk is detected.
 - All activity is streamed in real time and persisted for audit review.
 
-The architecture is intentionally designed so LLM-backed reasoning can assist the workflow without bypassing the state machine, HITL controls, MCP evidence retrieval, Python analytics, or audit trail.
+The architecture is intentionally designed so LLM-backed reasoning and tool proposals can assist the workflow without bypassing the state machine, HITL controls, MCP evidence retrieval, Python analytics, or audit trail.
 
 ## Controlled LLM Planner Reasoning
 
@@ -35,7 +39,7 @@ The LLM cannot:
 - complete a workflow,
 - fail a workflow,
 - bypass human approval,
-- directly execute tools,
+- directly or autonomously execute tools,
 - override the state machine.
 
 If LLM reasoning is disabled or fails, the system uses deterministic planner reasoning. The state machine and HITL approval gates remain mandatory.
@@ -54,6 +58,121 @@ Planner reasoning metadata is persisted in `ContextJson`, including:
 - safe fallback reason when applicable.
 
 No API keys, stack traces, or secrets are persisted.
+
+## Controlled Tool Calling
+
+The LLM can now propose tool calls, but every proposed call is normalized, validated against an allowlist, optionally executed through a controlled executor, audited, and still constrained by deterministic workflow state and mandatory human approval.
+
+Controlled tool calling has two execution modes:
+
+- `Shadow`: proposed calls are normalized, validated, and audited, but the existing deterministic `DataAgent` and `LegalAgent` path remains the source of workflow evidence.
+- `PlanDriven`: proposed and approved calls are executed through `ControlledToolExecutor`; execution outputs are mapped back into `DataAgentResult` and `LegalAgentResult`.
+
+`Shadow` is the default mode.
+
+Current allowlist:
+
+- `data.analyze_transactions`: read-only statistical anomaly analysis owned by `DataAgent`.
+- `legal.search_cnv_regulation`: read-only CNV regulatory retrieval owned by `LegalAgent` / MCP.
+
+Tool-calling pipeline:
+
+```text
+PlannerAgent
+  -> IToolPlanProposalService
+      -> DeterministicToolPlanProposalService
+      OR
+      -> SemanticKernelToolPlanProposalService
+          -> Semantic Kernel
+          -> OpenAI chat completion
+          -> defensive JSON parsing
+          -> deterministic fallback on failure
+  -> ToolPlanNormalizer
+  -> ToolPlanValidator
+  -> ToolExecutionPolicy
+  -> ControlledToolExecutor optional, PlanDriven only
+  -> ToolExecutionResultMapper
+  -> PlannerReasoningService
+  -> deterministic HITL decision
+```
+
+Guardrails:
+
+- unknown tools are rejected,
+- workflow transition tools are rejected,
+- approval/rejection tools are rejected,
+- operational financial tools are rejected,
+- legal conclusion tools are rejected,
+- duplicate calls are normalized before validation,
+- max tool-call count is capped,
+- `OutputJson` is not persisted in `ContextJson`,
+- failed or unmappable executions fall back to the deterministic agent path.
+
+Rejected examples:
+
+- `workflow.complete`
+- `workflow.fail`
+- `approval.approve_session`
+- `approval.reject_session`
+- `money.move`
+- `account.freeze`
+- `transaction.block`
+- `legal.determine_violation`
+- `legal.issue_advice`
+- `system.execute_command`
+- `database.raw_query`
+
+### Shadow Mode
+
+In `Shadow` mode, the workflow still runs:
+
+```text
+PlannerAgent
+  -> DataAgent
+  -> LegalAgent
+  -> PlannerReasoning
+  -> Tool plan proposal / validation / audit
+  -> HITL decision
+```
+
+Approved tool calls are marked as execution-policy decisions such as `SkippedAlreadySatisfied` when the deterministic agent path already produced the evidence.
+
+### PlanDriven Mode
+
+In `PlanDriven` mode, the workflow runs:
+
+```text
+PlannerAgent
+  -> Tool plan proposal
+  -> Normalization
+  -> Validation
+  -> Controlled execution of approved read-only tools
+  -> Map execution outputs to DataAgentResult / LegalAgentResult
+  -> PlannerReasoning
+  -> deterministic HITL decision
+```
+
+Only allowlisted tools can execute. The LLM never receives authority to transition workflow state or make approval decisions.
+
+Legal mapping keeps the regulatory retrieval boundary intact:
+
+- uncited MCP results do not become `LegalEvidence`,
+- MCP warnings are propagated,
+- review disclaimers are preserved,
+- evidence is described as regulatory retrieval evidence,
+- the system does not claim a legal violation.
+
+### Development Diagnostics
+
+Development-only endpoint:
+
+```text
+POST /api/diagnostics/tool-calling/execute
+```
+
+It validates a proposed plan, applies execution policy, optionally executes approved calls when `dynamicExecutionEnabled=true`, and returns proposed, approved, rejected, and executed calls.
+
+It does not create or mutate `AnalysisSession` records and does not touch the state machine.
 
 ## What This Project Is
 
@@ -74,11 +193,14 @@ It demonstrates how to combine:
 This project does **not** currently include:
 
 - autonomous LLM tool-calling,
+- unrestricted tool execution,
 - LLM-controlled workflow transitions,
 - autonomous legal interpretation,
 - natural language report understanding,
 - automatic financial decision-making,
 - production-grade regulatory advice.
+
+The PlannerAgent may use an LLM for advisory reasoning summaries and controlled tool proposals only.
 
 The LegalAgent retrieves regulatory evidence. It does not provide legal conclusions.
 The DataAgent detects statistical anomalies. It does not make operational decisions.
@@ -102,6 +224,14 @@ ASP.NET Core API
         |-- Planner Reasoning
         |     |-- Deterministic fallback
         |     |-- Semantic Kernel + OpenAI optional
+        |
+        |-- Controlled Tool Calling
+        |     |-- Tool plan proposal
+        |     |-- ToolPlanNormalizer
+        |     |-- ToolPlanValidator allowlist
+        |     |-- ToolExecutionPolicy
+        |     |-- ControlledToolExecutor PlanDriven optional
+        |     |-- ToolExecutionResultMapper
         |
         |-- DataAgent
         |     |-- Semantic Kernel
@@ -134,6 +264,8 @@ Responsibilities:
 - delegates regulatory evidence retrieval to the LegalAgent,
 - combines agent results,
 - generates a planner reasoning summary,
+- proposes, normalizes, validates, and audits controlled tool calls when enabled,
+- executes approved read-only tools only in `PlanDriven` mode,
 - decides whether human approval is required through deterministic rules,
 - updates workflow state.
 
@@ -152,6 +284,25 @@ PlannerAgent
 ```
 
 The `PlannerAgent` does not allow the LLM to approve, reject, complete, fail, or transition a workflow state.
+
+Current tool-calling behavior:
+
+```text
+PlannerAgent
+  -> IToolPlanProposalService
+  -> ToolPlanNormalizer
+  -> ToolPlanValidator
+  -> ToolExecutionPolicy
+  -> ControlledToolExecutor only when ExecutionMode=PlanDriven
+```
+
+The final HITL decision remains deterministic:
+
+```text
+requiresHumanApproval =
+  dataResult.HasAnomaly ||
+  legalResult.HasComplianceRisk
+```
 
 ### DataAgent
 
@@ -236,6 +387,7 @@ The platform persists:
 - current workflow state,
 - planner reasoning summaries,
 - LLM/fallback metadata,
+- proposed, approved, rejected, and execution-audited tool calls,
 - agent evidence,
 - legal/regulatory findings,
 - warnings and disclaimers,
@@ -250,6 +402,17 @@ Planner reasoning events include:
 - `planner_reasoning_fallback_used`
 
 These events make it clear whether reasoning came from deterministic fallback or an LLM-assisted path.
+
+Tool-calling events include:
+
+- `tool_plan_proposed`
+- `tool_plan_validated`
+- `tool_call_rejected`
+- `tool_call_skipped`
+- `tool_call_executed`
+- `tool_execution_fallback_used`
+
+These events make it clear whether tool calls were proposed, rejected, skipped by policy, executed by the controlled executor, or safely routed back to deterministic agents.
 
 ## MCP Regulatory Retrieval
 
@@ -372,6 +535,82 @@ When `Llm__Enabled=false`, no API key or model is required.
 
 When `Llm__Enabled=true`, missing model or API key fails early with a clear configuration error.
 
+### Enabling Controlled Tool Calling
+
+Tool calling is disabled by default.
+
+To enable audit-only shadow mode:
+
+```text
+ToolCalling__Enabled=true
+ToolCalling__ExecutionMode=Shadow
+```
+
+In `Shadow` mode, the LLM can propose tool calls and the system validates/audits them, but the workflow evidence still comes from the deterministic `DataAgent` and `LegalAgent` path.
+
+To enable plan-driven controlled execution:
+
+```text
+ToolCalling__Enabled=true
+ToolCalling__ExecutionMode=PlanDriven
+```
+
+In `PlanDriven` mode, approved allowlisted calls execute through `ControlledToolExecutor`.
+
+Use with LLM planner/tool proposal:
+
+```text
+Llm__Enabled=true
+Llm__Provider=OpenAI
+Llm__Model=<model-name>
+Llm__ApiKey=<api-key>
+ToolCalling__Enabled=true
+ToolCalling__ExecutionMode=PlanDriven
+```
+
+`Shadow` remains the safe default.
+
+### Tool Calling Diagnostics
+
+In `Development`, use:
+
+```text
+POST /api/diagnostics/tool-calling/execute
+```
+
+Example:
+
+```json
+{
+  "dynamicExecutionEnabled": true,
+  "proposedCalls": [
+    {
+      "toolName": "data.analyze_transactions",
+      "arguments": {
+        "sessionId": "00000000-0000-0000-0000-000000000000",
+        "reportName": "manual-diagnostic-report",
+        "totalAmount": "125000",
+        "transactionCount": "42",
+        "submittedAt": "2026-05-06T14:00:00Z"
+      },
+      "reason": "Validate controlled DataAgent execution."
+    },
+    {
+      "toolName": "legal.search_cnv_regulation",
+      "arguments": {
+        "query": "agentes",
+        "area": "Agentes",
+        "limit": "5",
+        "requiresReview": "true"
+      },
+      "reason": "Validate CNV retrieval through MCP."
+    }
+  ]
+}
+```
+
+The diagnostic endpoint is for development validation. It does not create sessions, transition workflow state, approve, or reject anything.
+
 ### CNV Regulation Ingestion
 
 The CNV ingestion task is manual in Aspire.
@@ -418,6 +657,14 @@ Current test coverage includes:
 - LLM disabled configuration path,
 - controlled planner reasoning metadata,
 - LLM configuration validation,
+- controlled tool-calling contracts,
+- tool plan normalization,
+- tool allowlist validation,
+- controlled tool executor,
+- execution policy decisions,
+- plan-driven execution mode,
+- tool execution result mapping,
+- development diagnostics endpoint,
 - planner `ContextJson` metadata,
 - CSnakes DataAgent integration,
 - Semantic Kernel DataAgent wrapper,
@@ -443,7 +690,11 @@ The DataAgent detects statistical anomalies. It does not block transactions, mov
 
 The LLM does not make financial, legal, or operational decisions.
 
-The LLM may generate reasoning summaries, but workflow transitions remain controlled by deterministic application logic.
+The LLM may generate reasoning summaries and propose read-only tool calls, but workflow transitions remain controlled by deterministic application logic.
+
+The LLM cannot call approval, rejection, workflow-transition, legal-conclusion, financial-operation, system-command, or raw-database tools.
+
+Plan-driven tool execution is limited to approved allowlisted tools and remains auditable.
 
 Human approval is required before completing risky workflows.
 
@@ -451,18 +702,19 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ## Roadmap
 
-### Next: Controlled Tool Calling
+### Next: Production Hardening for Controlled Tools
 
-The next planned step is to allow the LLM to propose a tool execution plan while keeping workflow control deterministic.
+Controlled tool calling is now available behind configuration. The next planned work is hardening the operational boundary around it.
 
 Planned upgrades:
 
-- allow the `PlannerAgent` LLM reasoning layer to propose tool usage,
-- validate proposed tools against an allowlist,
-- execute only approved deterministic tools,
-- persist proposed vs executed tool calls,
-- reject unsafe or unknown tool requests,
-- keep HITL approval gates mandatory,
-- preserve deterministic state transitions.
+- stronger per-tool argument schemas,
+- richer tool execution telemetry,
+- clearer proposed-vs-executed diffs,
+- additional red-team tests for unsafe tool proposals,
+- stricter diagnostics access controls,
+- more complete UI affordances for rejected calls,
+- model/provider metadata on tool proposal events,
+- larger regression suite for PlanDriven fallback paths.
 
 The LLM must not bypass the state machine or human approval flow.
