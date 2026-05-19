@@ -574,6 +574,10 @@ The financial analysis pipeline currently uses structured financial metrics, inc
 
 ![Risk Evidence](docs/screenshots/data-agent-evidence.png)
 
+### Financial Risk Evidence
+
+![Financial Risk Evidence](docs/screenshots/financial-risk-evidence.png)
+
 ### Compliance Evidence
 
 ![Compliance Evidence](docs/screenshots/legal-agent-mcp-evidence.png)
