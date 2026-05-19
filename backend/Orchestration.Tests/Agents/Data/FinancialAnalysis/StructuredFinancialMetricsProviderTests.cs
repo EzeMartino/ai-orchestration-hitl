@@ -33,6 +33,9 @@ public sealed class StructuredFinancialMetricsProviderTests
 
         document.Should().NotBeNull();
         document!.DocumentId.Should().Be("vista-energy-structured-input");
+        document.Company.Should().Be("Vista Energy");
+        document.Currency.Should().Be("USD");
+        document.Unit.Should().Be("USD_thousand");
         document.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
     }
 
@@ -45,6 +48,25 @@ public sealed class StructuredFinancialMetricsProviderTests
 
         var document = await provider.GetMetricsAsync(
             CreateReport(Guid.NewGuid()),
+            CancellationToken.None
+        );
+
+        document.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Session_provider_Should_handle_malformed_context_safely()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create();
+        session.SetContext("{\"structuredFinancialMetrics\":\"not-an-object\"}");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext);
+        var provider = new SessionStructuredFinancialMetricsProvider(service);
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(session.Id),
             CancellationToken.None
         );
 
@@ -75,6 +97,36 @@ public sealed class StructuredFinancialMetricsProviderTests
 
         document.Should().NotBeNull();
         document!.DocumentId.Should().Be("session-document");
+        document.Company.Should().Be("Vista Energy");
+        document.Currency.Should().Be("USD");
+        document.Unit.Should().Be("USD_thousand");
+    }
+
+    [Fact]
+    public async Task Composite_provider_Should_not_call_fixture_when_session_metrics_exist()
+    {
+        var sessionDocument = CreateDocument(
+            documentId: "session-document",
+            company: "Manual Test Co",
+            currency: "ARS",
+            unit: "ARS_thousand"
+        );
+        var sessionProvider = new FakeStructuredFinancialMetricsProvider(sessionDocument);
+        var fixtureProvider = new FakeStructuredFinancialMetricsProvider(CreateDocument("fixture-document"));
+        var provider = CreateCompositeProvider(
+            sessionProvider,
+            fixtureProvider,
+            useFixtureFallback: true
+        );
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(Guid.NewGuid()),
+            CancellationToken.None
+        );
+
+        document.Should().BeSameAs(sessionDocument);
+        sessionProvider.CallCount.Should().Be(1);
+        fixtureProvider.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -94,6 +146,23 @@ public sealed class StructuredFinancialMetricsProviderTests
         document.DocumentId.Should().Be("vista_energy_sample_metrics");
     }
 
+    [Fact]
+    public async Task Composite_provider_Should_return_null_when_metrics_are_missing_and_fixture_fallback_is_disabled()
+    {
+        var provider = CreateCompositeProvider(
+            new FakeStructuredFinancialMetricsProvider(null),
+            new FakeStructuredFinancialMetricsProvider(CreateDocument("fixture-document")),
+            useFixtureFallback: false
+        );
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(Guid.NewGuid()),
+            CancellationToken.None
+        );
+
+        document.Should().BeNull();
+    }
+
     private static CompositeStructuredFinancialMetricsProvider CreateCompositeProvider(
         IStructuredFinancialMetricsSessionService service,
         bool useFixtureFallback)
@@ -109,7 +178,52 @@ public sealed class StructuredFinancialMetricsProviderTests
                 options,
                 NullLogger<FixtureStructuredFinancialMetricsProvider>.Instance
             ),
-            options
+            options,
+            NullLogger<CompositeStructuredFinancialMetricsProvider>.Instance
+        );
+    }
+
+    private static CompositeStructuredFinancialMetricsProvider CreateCompositeProvider(
+        IStructuredFinancialMetricsProvider sessionProvider,
+        IStructuredFinancialMetricsProvider fixtureProvider,
+        bool useFixtureFallback)
+    {
+        return new CompositeStructuredFinancialMetricsProvider(
+            sessionProvider,
+            fixtureProvider,
+            Options.Create(new DataAgentOptions
+            {
+                UseFixtureMetricsFallback = useFixtureFallback
+            }),
+            NullLogger<CompositeStructuredFinancialMetricsProvider>.Instance
+        );
+    }
+
+    private static StructuredFinancialMetricsDocument CreateDocument(
+        string documentId,
+        string company = "Vista Energy",
+        string currency = "USD",
+        string unit = "USD_thousand")
+    {
+        return new StructuredFinancialMetricsDocument(
+            DocumentId: documentId,
+            Company: company,
+            Currency: currency,
+            Unit: unit,
+            Metrics:
+            [
+                new FinancialMetric(
+                    Name: "revenue",
+                    Period: "2024A",
+                    Value: 100m,
+                    Unit: unit,
+                    Statement: "unit_test",
+                    Source: "unit_test",
+                    Currency: currency,
+                    SourcePage: 18,
+                    Confidence: 0.9m
+                )
+            ]
         );
     }
 
@@ -123,5 +237,28 @@ public sealed class StructuredFinancialMetricsProviderTests
             TransactionCount: 42,
             SubmittedAt: DateTimeOffset.UtcNow
         );
+    }
+
+    private sealed class FakeStructuredFinancialMetricsProvider
+        : IStructuredFinancialMetricsProvider
+    {
+        private readonly StructuredFinancialMetricsDocument? _document;
+
+        public FakeStructuredFinancialMetricsProvider(
+            StructuredFinancialMetricsDocument? document)
+        {
+            _document = document;
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<StructuredFinancialMetricsDocument?> GetMetricsAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+
+            return Task.FromResult(_document);
+        }
     }
 }

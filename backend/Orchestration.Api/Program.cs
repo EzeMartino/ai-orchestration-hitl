@@ -65,7 +65,14 @@ builder.Services.AddScoped<IFinancialMetricInputMapper, FinancialMetricInputMapp
 builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
 builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();
-builder.Services.AddScoped<IStructuredFinancialMetricsProvider, CompositeStructuredFinancialMetricsProvider>();
+builder.Services.AddScoped<IStructuredFinancialMetricsProvider>(provider =>
+    new CompositeStructuredFinancialMetricsProvider(
+        provider.GetRequiredService<SessionStructuredFinancialMetricsProvider>(),
+        provider.GetRequiredService<FixtureStructuredFinancialMetricsProvider>(),
+        provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<DataAgentOptions>>(),
+        provider.GetRequiredService<ILogger<CompositeStructuredFinancialMetricsProvider>>()
+    )
+);
 builder.Services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
 builder.Services.AddScoped<IDataAgent, ConfigurableDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();

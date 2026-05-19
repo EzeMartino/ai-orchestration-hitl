@@ -79,6 +79,36 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         service.ComputeCalls.Should().Be(0);
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_Should_use_metrics_returned_by_provider()
+    {
+        var provider = new FakeStructuredFinancialMetricsProvider(
+            CreateMetricsDocument(
+                documentId: "manual-structured-metrics-test",
+                company: "Manual Test Co",
+                currency: "ARS",
+                unit: "ARS_thousand"
+            )
+        );
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(provider, service);
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.DocumentId.Should().Be("manual-structured-metrics-test");
+        result.FinancialAnalysis.Company.Should().Be("Manual Test Co");
+        service.ComputeRequest.Should().NotBeNull();
+        service.ComputeRequest!.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Unit == "ARS_thousand" &&
+            metric.Currency == "ARS"
+        );
+    }
+
     private static DataAgentFinancialAnalysisWorkflow CreateWorkflow(
         FakeStructuredFinancialMetricsProvider provider,
         FakePythonFinancialAnalysisService service)
@@ -102,19 +132,23 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         );
     }
 
-    private static StructuredFinancialMetricsDocument CreateMetricsDocument()
+    private static StructuredFinancialMetricsDocument CreateMetricsDocument(
+        string documentId = "vista-energy-fixture",
+        string company = "Vista Energy",
+        string currency = "USD",
+        string unit = "USD millions")
     {
         return new StructuredFinancialMetricsDocument(
-            DocumentId: "vista-energy-fixture",
-            Company: "Vista Energy",
-            Currency: "USD",
-            Unit: "USD millions",
+            DocumentId: documentId,
+            Company: company,
+            Currency: currency,
+            Unit: unit,
             Metrics:
             [
-                CreateMetric("revenue", "2024A", 100m),
-                CreateMetric("revenue", "2025E", 80m),
-                CreateMetric("ebitda", "2025E", 12m),
-                CreateMetric("net_debt", "2025E", 45m)
+                CreateMetric("revenue", "2024A", 100m, unit, currency),
+                CreateMetric("revenue", "2025E", 80m, unit, currency),
+                CreateMetric("ebitda", "2025E", 12m, unit, currency),
+                CreateMetric("net_debt", "2025E", 45m, unit, currency)
             ]
         );
     }
@@ -122,15 +156,20 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     private static FinancialMetric CreateMetric(
         string name,
         string period,
-        decimal value)
+        decimal value,
+        string unit = "USD millions",
+        string currency = "USD")
     {
         return new FinancialMetric(
             Name: name,
             Period: period,
             Value: value,
-            Unit: "USD millions",
+            Unit: unit,
             Statement: "unit_test",
-            Source: "unit_test"
+            Source: "unit_test",
+            Currency: currency,
+            SourcePage: 18,
+            Confidence: 0.9m
         );
     }
 
@@ -156,6 +195,8 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     {
         public int ComputeCalls { get; private set; }
 
+        public ComputeFinancialRatiosRequest? ComputeRequest { get; private set; }
+
         public IReadOnlyList<string> RatioWarnings { get; init; } = [];
 
         public IReadOnlyList<string> SignalWarnings { get; init; } = [];
@@ -165,6 +206,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             CancellationToken cancellationToken)
         {
             ComputeCalls++;
+            ComputeRequest = request;
 
             return Task.FromResult(new ComputeFinancialRatiosResponse(
                 Engine: "Fake Financial Analysis",
