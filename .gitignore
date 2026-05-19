@@ -115,3 +115,8 @@ skills-lock.json
 *.temp
 *.sw?
 ~$*
+
+# CNV MCP generated artifacts
+tools/CnvRegulation.McpServer/data/embedding-reports/
+tools/CnvRegulation.McpServer/data/search-quality/reports/
+tools/CnvRegulation.McpServer/data/source-manifest/*.discovered.manifest.json
