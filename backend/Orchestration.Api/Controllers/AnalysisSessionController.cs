@@ -14,15 +14,18 @@ public class AnalysisSessionsController : ControllerBase
     private readonly OrchestrationDbContext _dbContext;
     private readonly AnalysisOrchestratorService _orchestrator;
     private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService;
+    private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser;
 
     public AnalysisSessionsController(
         OrchestrationDbContext dbContext,
         AnalysisOrchestratorService orchestrator,
-        IStructuredFinancialMetricsSessionService financialMetricsSessionService)
+        IStructuredFinancialMetricsSessionService financialMetricsSessionService,
+        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser)
     {
         _dbContext = dbContext;
         _orchestrator = orchestrator;
         _financialMetricsSessionService = financialMetricsSessionService;
+        _financialMetricsCsvParser = financialMetricsCsvParser;
     }
 
     [HttpGet]
@@ -231,11 +234,63 @@ public class AnalysisSessionsController : ControllerBase
         }
 
         return Ok(new SaveFinancialMetricsResponse(
-            SessionId: result.SessionId,
-            IsValid: result.IsValid,
-            Context: result.Context,
-            Errors: result.Errors,
-            Warnings: result.Warnings
+            result.SessionId,
+            result.IsValid,
+            result.Context,
+            result.Errors,
+            result.Warnings
+        ));
+    }
+
+    [HttpPost("{id:guid}/financial-metrics/csv")]
+    public async Task<IActionResult> SaveFinancialMetricsCsv(
+        Guid id,
+        [FromBody] StructuredFinancialMetricsCsvInput input,
+        CancellationToken cancellationToken)
+    {
+        if (input is null)
+        {
+            return BadRequest();
+        }
+
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
+        }
+
+        var parseResult = _financialMetricsCsvParser.Parse(input);
+
+        if (!parseResult.IsValid || parseResult.Input is null)
+        {
+            return Ok(new SaveFinancialMetricsResponse(
+                id,
+                false,
+                null,
+                parseResult.Errors,
+                parseResult.Warnings
+            ));
+        }
+
+        var result = await _financialMetricsSessionService.SaveAsync(
+            id,
+            parseResult.Input,
+            cancellationToken
+        );
+
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new SaveFinancialMetricsResponse(
+            result.SessionId,
+            result.IsValid,
+            result.Context,
+            result.Errors,
+            result.Warnings
         ));
     }
 

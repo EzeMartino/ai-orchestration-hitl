@@ -62,6 +62,7 @@ builder.Services.AddScoped<ILegacyDataAgent>(provider =>
     provider.GetRequiredService<SemanticKernelDataAgent>());
 builder.Services.AddScoped<IStructuredFinancialMetricsValidator, StructuredFinancialMetricsValidator>();
 builder.Services.AddScoped<IFinancialMetricInputMapper, FinancialMetricInputMapper>();
+builder.Services.AddScoped<IStructuredFinancialMetricsCsvParser, StructuredFinancialMetricsCsvParser>();
 builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
 builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();
