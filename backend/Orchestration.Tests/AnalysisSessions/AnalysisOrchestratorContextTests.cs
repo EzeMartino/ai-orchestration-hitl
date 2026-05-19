@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
@@ -158,8 +159,121 @@ public class AnalysisOrchestratorContextTests
         executedCall.TryGetProperty("outputJson", out _).Should().BeFalse();
     }
 
+    [Fact]
+    public void BuildAnalysisContext_Should_include_financial_analysis_when_available()
+    {
+        var financialContext = new FinancialAnalysisContext(
+            Engine: "Semantic Kernel + CSnakes + Python/Pandas",
+            DocumentId: "vista-energy-report-sample",
+            Company: "Vista Energy",
+            Ratios:
+            [
+                new FinancialRatio(
+                    Name: "current_ratio",
+                    Period: "2025E",
+                    Value: 0.67m,
+                    Unit: "x",
+                    Formula: "current_assets / current_liabilities",
+                    Inputs: ["current_assets", "current_liabilities"],
+                    Interpretation: "Current ratio computed."
+                )
+            ],
+            Comparisons:
+            [
+                new FinancialPeriodComparison(
+                    MetricName: "revenue",
+                    FromPeriod: "2024A",
+                    ToPeriod: "2025E",
+                    FromValue: 100m,
+                    ToValue: 80m,
+                    AbsoluteChange: -20m,
+                    PercentageChange: -0.2m,
+                    Unit: "USD millions",
+                    Interpretation: "Revenue declined."
+                )
+            ],
+            RiskSignals:
+            [
+                new FinancialRiskSignal(
+                    Name: "LOW_CURRENT_RATIO",
+                    Severity: "High",
+                    Period: "2025E",
+                    Summary: "Current ratio below threshold. Human review recommended.",
+                    Evidence:
+                    [
+                        new RiskEvidenceItem(
+                            MetricName: "current_ratio",
+                            Period: "2025E",
+                            Value: 0.67m,
+                            Threshold: 1.0m,
+                            Unit: "x",
+                            Interpretation: "Current ratio below 1.0 may indicate liquidity pressure."
+                        )
+                    ]
+                )
+            ],
+            RiskEvidence:
+            [
+                new RiskEvidenceItem(
+                    MetricName: "current_ratio",
+                    Period: "2025E",
+                    Value: 0.67m,
+                    Threshold: 1.0m,
+                    Unit: "x",
+                    Interpretation: "Current ratio below 1.0 may indicate liquidity pressure."
+                )
+            ],
+            Warnings: ["Structured metrics only."],
+            Limitations: ["No PDF parsing or OCR was performed."]
+        );
+        var plannerResult = CreatePlannerResult(
+            ToolPlanAuditResult.Empty,
+            financialContext
+        );
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        var root = document.RootElement;
+        var financialAnalysis = root.GetProperty("financialAnalysis");
+
+        financialAnalysis.GetProperty("engine").GetString().Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
+        financialAnalysis.GetProperty("documentId").GetString().Should().Be("vista-energy-report-sample");
+        financialAnalysis.GetProperty("company").GetString().Should().Be("Vista Energy");
+        financialAnalysis.GetProperty("ratios")[0].GetProperty("name").GetString().Should().Be("current_ratio");
+        financialAnalysis.GetProperty("ratios")[0].GetProperty("source").GetString().Should().Be("computed");
+        financialAnalysis.GetProperty("ratios")[0].GetProperty("inputMetrics")[0].GetString().Should().Be("current_assets");
+        financialAnalysis.GetProperty("comparisons")[0].GetProperty("metricName").GetString().Should().Be("revenue");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("code").GetString().Should().Be("LOW_CURRENT_RATIO");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("severity").GetString().Should().Be("High");
+        financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("severity").GetString().Should().Be("High");
+        financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("engine").GetString().Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
+        financialAnalysis.GetProperty("warnings")[0].GetString().Should().Be("Structured metrics only.");
+        financialAnalysis.GetProperty("limitations")[0].GetString().Should().Be("No PDF parsing or OCR was performed.");
+
+        root.GetProperty("anomaly").GetProperty("summary").GetString().Should().Be("Anomaly detected.");
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_remain_compatible_when_financial_analysis_is_null()
+    {
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(
+            CreatePlannerResult(ToolPlanAuditResult.Empty)
+        );
+
+        using var document = JsonDocument.Parse(contextJson);
+
+        document.RootElement.GetProperty("financialAnalysis").ValueKind
+            .Should()
+            .Be(JsonValueKind.Null);
+        document.RootElement.GetProperty("anomaly").GetProperty("summary").GetString()
+            .Should()
+            .Be("Anomaly detected.");
+    }
+
     private static PlannerAgentResult CreatePlannerResult(
-        ToolPlanAuditResult toolPlan)
+        ToolPlanAuditResult toolPlan,
+        FinancialAnalysisContext? financialAnalysisContext = null)
     {
         return new PlannerAgentResult(
             RequiresHumanApproval: true,
@@ -169,7 +283,8 @@ public class AnalysisOrchestratorContextTests
                 Severity: "High",
                 Summary: "Anomaly detected.",
                 Engine: "TestDataEngine",
-                Evidence: []
+                Evidence: [],
+                FinancialAnalysis: financialAnalysisContext
             ),
             LegalResult: new LegalAgentResult(
                 HasComplianceRisk: true,

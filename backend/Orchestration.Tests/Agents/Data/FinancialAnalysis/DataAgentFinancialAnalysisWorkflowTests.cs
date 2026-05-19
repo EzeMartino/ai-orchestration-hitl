@@ -40,6 +40,19 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             evidence.Metric == "FinancialAnalysisWarning" &&
             evidence.Interpretation.Contains("Human review recommended.", StringComparison.Ordinal)
         );
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.DocumentId.Should().Be("vista-energy-fixture");
+        result.FinancialAnalysis.Company.Should().Be("Vista Energy");
+        result.FinancialAnalysis.Ratios.Should().ContainSingle();
+        result.FinancialAnalysis.Comparisons.Should().ContainSingle();
+        result.FinancialAnalysis.RiskSignals.Should().HaveCount(2);
+        result.FinancialAnalysis.RiskEvidence.Should().Contain(evidence =>
+            evidence.MetricName == "net_debt_to_ebitda"
+        );
+        result.FinancialAnalysis.Warnings.Should().Contain("Structured metrics only.");
+        result.FinancialAnalysis.Limitations.Should().Contain(limitation =>
+            limitation.Contains("structured metrics only", StringComparison.OrdinalIgnoreCase)
+        );
     }
 
     [Fact]
@@ -60,6 +73,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.Summary.Should().Be("Structured financial metrics were not available. Human review recommended.");
         result.Evidence.Should().ContainSingle()
             .Which.Metric.Should().Be("StructuredFinancialMetrics");
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.Warnings.Should().Contain("Structured financial metrics were not available.");
+        result.FinancialAnalysis.Limitations.Should().NotBeEmpty();
         service.ComputeCalls.Should().Be(0);
     }
 

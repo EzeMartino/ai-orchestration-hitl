@@ -1,9 +1,12 @@
-﻿namespace Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
+
+namespace Orchestration.Application.Agents.Data;
 
 public sealed record DataAgentResult(
     bool HasAnomaly,
     string Severity,
     string Summary,
     string Engine,
-    IReadOnlyList<AnomalyEvidence> Evidence
+    IReadOnlyList<AnomalyEvidence> Evidence,
+    FinancialAnalysisContext? FinancialAnalysis = null
 );

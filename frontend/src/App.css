@@ -536,6 +536,226 @@ code {
   color: #334155;
 }
 
+.financialRiskPanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #bfdbfe;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.financialRiskHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.financialRiskEyebrow {
+  margin: 0 0 0.4rem;
+  color: #0369a1;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.financialRiskHeader h2 {
+  margin: 0;
+  color: #0f2747;
+}
+
+.financialRiskHeader p {
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+
+.documentBadge {
+  min-width: 180px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  padding: 0.9rem;
+}
+
+.documentBadge span {
+  display: block;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 800;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+}
+
+.documentBadge strong {
+  color: #0f2747;
+  word-break: break-word;
+}
+
+.financialEvidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.financialEvidenceCard {
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-left: 5px solid #2563eb;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.financialEvidenceTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.financialEvidenceTop strong {
+  color: #0f2747;
+}
+
+.financialEvidenceCard p {
+  margin: 0.75rem 0;
+  color: #334155;
+}
+
+.financialEvidenceMeta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.financialEvidenceMeta div {
+  min-width: 0;
+}
+
+.financialEvidenceMeta dt {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.financialEvidenceMeta dd {
+  margin: 0.25rem 0 0;
+  color: #0f172a;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.financialSection {
+  margin-top: 1rem;
+}
+
+.financialSection > strong {
+  color: #0f2747;
+}
+
+.financialSignalList {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.financialSignalCard {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.financialSignalCard strong {
+  color: #0f2747;
+}
+
+.financialSignalCard p {
+  margin: 0.35rem 0;
+  color: #334155;
+}
+
+.financialSignalCard small {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.severityPill {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.ratioStrip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.ratioTile {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 0.9rem;
+}
+
+.ratioTile span {
+  display: block;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.ratioTile strong {
+  display: block;
+  margin-top: 0.45rem;
+  color: #0f2747;
+  font-size: 1.45rem;
+}
+
+.ratioTile small {
+  color: #64748b;
+  font-weight: 800;
+}
+
+.financialReviewNotes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.financialReviewNotes div {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 16px;
+  padding: 1rem;
+  color: #78350f;
+}
+
+.financialReviewNotes strong {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.financialReviewNotes ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
 .plannerPanel {
   margin-bottom: 1rem;
   background: white;
@@ -930,6 +1150,7 @@ code {
   .plannerHeader,
   .toolPlanHeader,
   .evidenceHeader,
+  .financialRiskHeader,
   .complianceHeader {
     flex-direction: column;
   }
@@ -938,7 +1159,15 @@ code {
   .plannerMetaGrid,
   .plannerGrid,
   .toolPlanGrid,
-  .evidenceGrid {
+  .evidenceGrid,
+  .financialEvidenceGrid,
+  .financialEvidenceMeta,
+  .financialReviewNotes,
+  .ratioStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .financialSignalCard {
     grid-template-columns: 1fr;
   }
 

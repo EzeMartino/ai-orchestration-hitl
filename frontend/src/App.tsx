@@ -99,6 +99,71 @@ type ToolPlanContext = {
   executedCalls: ExecutedToolCallContext[];
 };
 
+type FinancialRatioContext = {
+  name: string;
+  period: string;
+  value: number;
+  unit?: string;
+  formula?: string;
+  source?: string;
+  inputMetrics?: string[];
+  sourcePage?: number | null;
+  confidence?: number;
+  interpretation?: string;
+};
+
+type FinancialComparisonContext = {
+  metricName: string;
+  fromPeriod: string;
+  toPeriod: string;
+  fromValue: number;
+  toValue: number;
+  absoluteChange: number;
+  percentageChange?: number | null;
+  unit?: string;
+  interpretation: string;
+};
+
+type FinancialRiskSignalContext = {
+  code: string;
+  category: string;
+  severity: string;
+  metric: string;
+  period: string;
+  value?: number | null;
+  threshold?: number | null;
+  explanation: string;
+  sourcePage?: number | null;
+  confidence?: number;
+};
+
+type FinancialRiskEvidenceContext = {
+  code: string;
+  title: string;
+  severity: string;
+  message: string;
+  metric?: string | null;
+  period?: string | null;
+  value?: number | null;
+  threshold?: number | null;
+  engine: string;
+  sourceDocumentId?: string | null;
+  sourcePage?: number | null;
+  confidence?: number;
+};
+
+type FinancialAnalysisContext = {
+  engine: string;
+  documentId: string;
+  company?: string | null;
+  ratios: FinancialRatioContext[];
+  comparisons: FinancialComparisonContext[];
+  riskSignals: FinancialRiskSignalContext[];
+  riskEvidence: FinancialRiskEvidenceContext[];
+  warnings: string[];
+  limitations: string[];
+};
+
 type AnalysisContext = {
   summary?: string;
   planner?: PlannerContext;
@@ -112,6 +177,7 @@ type AnalysisContext = {
     evidence: AnomalyEvidenceItem[];
     recommendation: string;
   };
+  financialAnalysis?: FinancialAnalysisContext | null;
   compliance?: ComplianceContext;
 };
 
@@ -382,6 +448,184 @@ function EvidencePanel({ anomaly }: { anomaly: AnalysisContext["anomaly"] }) {
       </div>
     </section>
   );
+}
+
+function FinancialRiskEvidencePanel({
+  financialAnalysis,
+}: {
+  financialAnalysis?: FinancialAnalysisContext | null;
+}) {
+  if (!financialAnalysis) {
+    return null;
+  }
+
+  const visibleEvidence = financialAnalysis.riskEvidence.slice(0, 6);
+  const visibleSignals = financialAnalysis.riskSignals.slice(0, 6);
+  const visibleRatios = financialAnalysis.ratios.slice(0, 6);
+
+  return (
+    <section className="financialRiskPanel">
+      <div className="financialRiskHeader">
+        <div>
+          <p className="financialRiskEyebrow">Financial risk evidence</p>
+          <h2>{financialAnalysis.company ?? "Structured financial metrics"}</h2>
+          <p>
+            Quantitative evidence generated from structured financial metrics.
+          </p>
+
+          <div className="engineBadge">
+            Financial engine: <strong>{financialAnalysis.engine}</strong>
+          </div>
+        </div>
+
+        <div className="documentBadge">
+          <span>Document</span>
+          <strong>{financialAnalysis.documentId}</strong>
+        </div>
+      </div>
+
+      {visibleEvidence.length > 0 && (
+        <div className="financialEvidenceGrid">
+          {visibleEvidence.map((item, index) => (
+            <article
+              className="financialEvidenceCard"
+              key={`${item.code}-${item.period ?? "period"}-${index}`}
+            >
+              <div className="financialEvidenceTop">
+                <span className={`severityBadge severity-${item.severity}`}>
+                  {item.severity}
+                </span>
+                <strong>{formatSignalTitle(item.title)}</strong>
+              </div>
+
+              <p>{item.message}</p>
+
+              <dl className="financialEvidenceMeta">
+                <div>
+                  <dt>Metric</dt>
+                  <dd>{item.metric ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>Period</dt>
+                  <dd>{item.period ?? "-"}</dd>
+                </div>
+                <div>
+                  <dt>Value</dt>
+                  <dd>{formatNumber(item.value)}</dd>
+                </div>
+                <div>
+                  <dt>Threshold</dt>
+                  <dd>{formatNumber(item.threshold)}</dd>
+                </div>
+                <div>
+                  <dt>Confidence</dt>
+                  <dd>{formatPercent(item.confidence)}</dd>
+                </div>
+                <div>
+                  <dt>Source page</dt>
+                  <dd>{item.sourcePage ?? "-"}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {visibleSignals.length > 0 && (
+        <div className="financialSection">
+          <strong>Risk signals</strong>
+          <div className="financialSignalList">
+            {visibleSignals.map((signal) => (
+              <article className="financialSignalCard" key={signal.code}>
+                <span className={`severityPill severity-${signal.severity}`}>
+                  {signal.severity}
+                </span>
+                <div>
+                  <strong>{formatSignalTitle(signal.code)}</strong>
+                  <p>{signal.explanation}</p>
+                  <small>
+                    {signal.metric} · {signal.period} · Value{" "}
+                    {formatNumber(signal.value)} · Threshold{" "}
+                    {formatNumber(signal.threshold)}
+                  </small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {visibleRatios.length > 0 && (
+        <div className="financialSection">
+          <strong>Key ratios</strong>
+          <div className="ratioStrip">
+            {visibleRatios.map((ratio) => (
+              <article className="ratioTile" key={`${ratio.name}-${ratio.period}`}>
+                <span>{formatSignalTitle(ratio.name)}</span>
+                <strong>{formatNumber(ratio.value)}</strong>
+                <small>
+                  {ratio.period}
+                  {ratio.unit ? ` · ${ratio.unit}` : ""}
+                </small>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(financialAnalysis.warnings.length > 0 ||
+        financialAnalysis.limitations.length > 0) && (
+        <div className="financialReviewNotes">
+          {financialAnalysis.warnings.length > 0 && (
+            <div>
+              <strong>Warnings</strong>
+              <ul>
+                {financialAnalysis.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {financialAnalysis.limitations.length > 0 && (
+            <div>
+              <strong>Limitations</strong>
+              <ul>
+                {financialAnalysis.limitations.map((limitation) => (
+                  <li key={limitation}>{limitation}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatSignalTitle(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll(".", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatNumber(value?: number | null) {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 3,
+  }).format(value);
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  return `${Math.round(value * 100)}%`;
 }
 
 function CompliancePanel({
@@ -778,6 +1022,7 @@ function App() {
   const planner = analysisContext?.planner;
   const toolPlan = analysisContext?.toolPlan;
   const anomaly = analysisContext?.anomaly;
+  const financialAnalysis = analysisContext?.financialAnalysis;
   const compliance = analysisContext?.compliance;
 
   return (
@@ -883,6 +1128,7 @@ function App() {
           <PlannerPanel planner={planner} />
           <ToolPlanAuditPanel toolPlan={toolPlan} />
           <EvidencePanel anomaly={anomaly} />
+          <FinancialRiskEvidencePanel financialAnalysis={financialAnalysis} />
           <CompliancePanel compliance={compliance} />
 
           {session?.status === "Completed" && (

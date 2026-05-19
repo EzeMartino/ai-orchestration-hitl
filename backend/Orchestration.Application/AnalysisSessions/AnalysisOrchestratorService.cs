@@ -5,6 +5,7 @@ using Orchestration.Domain.AnalysisSessions;
 using System.Text.Json;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 
 namespace Orchestration.Application.AnalysisSessions
@@ -330,6 +331,77 @@ namespace Orchestration.Application.AnalysisSessions
                         ? "Human approval is required before continuing the analysis."
                         : "No human approval is required based on the current data analysis."
                 },
+                financialAnalysis = plannerResult.DataResult.FinancialAnalysis is null
+                    ? null
+                    : new
+                    {
+                        engine = plannerResult.DataResult.FinancialAnalysis.Engine,
+                        documentId = plannerResult.DataResult.FinancialAnalysis.DocumentId,
+                        company = plannerResult.DataResult.FinancialAnalysis.Company,
+                        ratios = plannerResult.DataResult.FinancialAnalysis.Ratios.Select(ratio => new
+                        {
+                            name = ratio.Name,
+                            period = ratio.Period,
+                            value = ratio.Value,
+                            unit = ratio.Unit,
+                            formula = ratio.Formula,
+                            source = "computed",
+                            inputMetrics = ratio.Inputs,
+                            sourcePage = (int?)null,
+                            confidence = 0.75m,
+                            interpretation = ratio.Interpretation
+                        }),
+                        comparisons = plannerResult.DataResult.FinancialAnalysis.Comparisons.Select(comparison => new
+                        {
+                            metricName = comparison.MetricName,
+                            fromPeriod = comparison.FromPeriod,
+                            toPeriod = comparison.ToPeriod,
+                            fromValue = comparison.FromValue,
+                            toValue = comparison.ToValue,
+                            absoluteChange = comparison.AbsoluteChange,
+                            percentageChange = comparison.PercentageChange,
+                            unit = comparison.Unit,
+                            interpretation = comparison.Interpretation
+                        }),
+                        riskSignals = plannerResult.DataResult.FinancialAnalysis.RiskSignals.Select(signal =>
+                        {
+                            var primaryEvidence = signal.Evidence.FirstOrDefault();
+
+                            return new
+                            {
+                                code = signal.Name,
+                                category = "FinancialRiskSignal",
+                                severity = signal.Severity,
+                                metric = primaryEvidence?.MetricName ?? signal.Name,
+                                period = signal.Period,
+                                value = primaryEvidence?.Value,
+                                threshold = primaryEvidence?.Threshold,
+                                explanation = signal.Summary,
+                                sourcePage = (int?)null,
+                                confidence = 0.75m
+                            };
+                        }),
+                        riskEvidence = plannerResult.DataResult.FinancialAnalysis.RiskEvidence.Select(evidence => new
+                        {
+                            code = evidence.MetricName,
+                            title = evidence.MetricName,
+                            severity = ResolveFinancialEvidenceSeverity(
+                                evidence,
+                                plannerResult.DataResult.FinancialAnalysis.RiskSignals
+                            ),
+                            message = evidence.Interpretation,
+                            metric = evidence.MetricName,
+                            period = evidence.Period,
+                            value = evidence.Value,
+                            threshold = evidence.Threshold,
+                            engine = plannerResult.DataResult.FinancialAnalysis.Engine,
+                            sourceDocumentId = plannerResult.DataResult.FinancialAnalysis.DocumentId,
+                            sourcePage = (int?)null,
+                            confidence = 0.75m
+                        }),
+                        warnings = plannerResult.DataResult.FinancialAnalysis.Warnings,
+                        limitations = plannerResult.DataResult.FinancialAnalysis.Limitations
+                    },
                 compliance = new
                 {
                     riskDetected = plannerResult.LegalResult.HasComplianceRisk,
@@ -348,6 +420,19 @@ namespace Orchestration.Application.AnalysisSessions
             };
 
             return JsonSerializer.Serialize(context);
+        }
+
+        private static string ResolveFinancialEvidenceSeverity(
+            RiskEvidenceItem evidence,
+            IReadOnlyList<FinancialRiskSignal> signals)
+        {
+            return signals
+                .FirstOrDefault(signal =>
+                    signal.Evidence.Any(item =>
+                        item.MetricName == evidence.MetricName &&
+                        item.Period == evidence.Period
+                    )
+                )?.Severity ?? "Info";
         }
     }
 }

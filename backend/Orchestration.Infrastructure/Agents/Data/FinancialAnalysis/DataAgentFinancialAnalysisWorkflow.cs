@@ -11,6 +11,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private const string Engine = "Semantic Kernel + CSnakes + Python/Pandas";
     private const string BasePeriod = "2024A";
     private const string ComparisonPeriod = "2025E";
+    private const string StructuredMetricsOnlyLimitation =
+        "Financial analysis uses structured metrics only. It does not parse PDFs, perform OCR, or make operational decisions.";
 
     private static readonly string[] RequestedRatios =
     [
@@ -73,7 +75,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
 
         if (metricsDocument is null || metricsDocument.Metrics.Count == 0)
         {
-            return NoMetricsResult();
+            return NoMetricsResult(report);
         }
 
         var ratios = await _financialAnalysisService.ComputeFinancialRatiosAsync(
@@ -136,11 +138,23 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
             Severity: severity,
             Summary: BuildSummary(summary.Narrative, warnings),
             Engine: Engine,
-            Evidence: evidence
+            Evidence: evidence,
+            FinancialAnalysis: new FinancialAnalysisContext(
+                Engine: Engine,
+                DocumentId: metricsDocument.DocumentId,
+                Company: metricsDocument.Company,
+                Ratios: ratios.Ratios,
+                Comparisons: comparisons.Comparisons,
+                RiskSignals: signals.Signals,
+                RiskEvidence: summary.Result.Evidence,
+                Warnings: warnings,
+                Limitations: [StructuredMetricsOnlyLimitation]
+            )
         );
     }
 
-    private static DataAgentResult NoMetricsResult()
+    private static DataAgentResult NoMetricsResult(
+        FinancialReportContext report)
     {
         return new DataAgentResult(
             HasAnomaly: true,
@@ -155,7 +169,18 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                     Threshold: 0,
                     Interpretation: "No structured financial metrics were available for quantitative analysis."
                 )
-            ]
+            ],
+            FinancialAnalysis: new FinancialAnalysisContext(
+                Engine: Engine,
+                DocumentId: report.ReportName,
+                Company: null,
+                Ratios: [],
+                Comparisons: [],
+                RiskSignals: [],
+                RiskEvidence: [],
+                Warnings: ["Structured financial metrics were not available."],
+                Limitations: [StructuredMetricsOnlyLimitation]
+            )
         );
     }
 
