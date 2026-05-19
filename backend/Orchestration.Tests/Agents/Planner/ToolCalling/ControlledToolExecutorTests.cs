@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -172,6 +173,178 @@ public class ControlledToolExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Should_execute_compute_financial_ratios()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateFinancialCall(
+                    "data.compute_financial_ratios",
+                    new ComputeFinancialRatiosRequest(
+                        Metrics: [CreateMetric("revenue", "2025E", 100m)],
+                        RequestedRatios: ["gross_margin"]
+                    )
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.ToolName.Should().Be("data.compute_financial_ratios");
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
+        result.Succeeded.Should().BeTrue();
+        result.Summary.Should().Be("Computed 1 financial ratio(s).");
+        result.Engine.Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
+        result.Error.Should().BeNull();
+        result.OutputJson.Should().NotBe("{}");
+        financialAnalysisService.ComputeRequest.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_execute_compare_periods()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateFinancialCall(
+                    "data.compare_periods",
+                    new ComparePeriodsRequest(
+                        Metrics:
+                        [
+                            CreateMetric("revenue", "2024A", 100m),
+                            CreateMetric("revenue", "2025E", 120m)
+                        ],
+                        FromPeriod: "2024A",
+                        ToPeriod: "2025E",
+                        MetricNames: ["revenue"]
+                    )
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
+        result.Summary.Should().Be("Computed 1 period comparison(s).");
+        financialAnalysisService.CompareRequest.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_execute_detect_financial_risk_signals()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateFinancialCall(
+                    "data.detect_financial_risk_signals",
+                    new DetectFinancialRiskSignalsRequest(
+                        Metrics: [CreateMetric("current_assets", "2025E", 40m)],
+                        Ratios: [],
+                        Comparisons: []
+                    )
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
+        result.Summary.Should().Be("Detected 1 financial risk signal(s).");
+        financialAnalysisService.SignalsRequest.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_execute_summarize_quantitative_evidence()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateFinancialCall(
+                    "data.summarize_quantitative_evidence",
+                    new SummarizeQuantitativeEvidenceRequest(
+                        Metrics: [],
+                        Ratios: [],
+                        Comparisons: [],
+                        Signals: [],
+                        MaxItems: 1
+                    )
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.Status.Should().Be(ToolExecutionStatus.Executed);
+        result.Summary.Should().Be("Quantitative evidence summarized.");
+        financialAnalysisService.SummaryRequest.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_return_failure_when_financial_request_json_is_invalid()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateCall(
+                    "data.compute_financial_ratios",
+                    new Dictionary<string, string>
+                    {
+                        ["requestJson"] = "{not-json"
+                    }
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Invalid JSON argument: requestJson.");
+        result.OutputJson.Should().Be("{}");
+        financialAnalysisService.ComputeRequest.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Should_return_failure_when_financial_request_json_is_missing()
+    {
+        var financialAnalysisService = new FakeFinancialAnalysisService();
+        var executor = CreateExecutor(financialAnalysisService: financialAnalysisService);
+
+        var results = await executor.ExecuteAsync(
+            [
+                CreateCall(
+                    "data.compute_financial_ratios",
+                    new Dictionary<string, string>()
+                )
+            ],
+            CancellationToken.None
+        );
+
+        var result = results.Should().ContainSingle().Subject;
+
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Missing required argument: requestJson.");
+        result.OutputJson.Should().Be("{}");
+        financialAnalysisService.ComputeRequest.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_return_failure_when_legal_query_is_missing()
     {
         var mcpClient = new FakeCnvRegulationMcpClient();
@@ -263,10 +436,12 @@ public class ControlledToolExecutorTests
 
     private static ControlledToolExecutor CreateExecutor(
         FakeDataAgent? dataAgent = null,
-        FakeCnvRegulationMcpClient? mcpClient = null)
+        FakeCnvRegulationMcpClient? mcpClient = null,
+        FakeFinancialAnalysisService? financialAnalysisService = null)
     {
         return new ControlledToolExecutor(
             dataAgent ?? new FakeDataAgent(),
+            financialAnalysisService ?? new FakeFinancialAnalysisService(),
             mcpClient ?? new FakeCnvRegulationMcpClient(),
             NullLogger<ControlledToolExecutor>.Instance
         );
@@ -295,6 +470,34 @@ public class ControlledToolExecutorTests
             ToolName: toolName,
             Arguments: arguments,
             Reason: "Approved read-only tool call."
+        );
+    }
+
+    private static ApprovedToolCall CreateFinancialCall<TRequest>(
+        string toolName,
+        TRequest request)
+    {
+        return CreateCall(
+            toolName,
+            new Dictionary<string, string>
+            {
+                ["requestJson"] = JsonSerializer.Serialize(request, JsonOptions)
+            }
+        );
+    }
+
+    private static FinancialMetric CreateMetric(
+        string name,
+        string period,
+        decimal value)
+    {
+        return new FinancialMetric(
+            Name: name,
+            Period: period,
+            Value: value,
+            Unit: "USD millions",
+            Statement: "unit_test",
+            Source: "unit_test"
         );
     }
 
@@ -379,6 +582,129 @@ public class ControlledToolExecutorTests
                     Warnings: ["requires review"]
                 )
             );
+        }
+    }
+
+    private sealed class FakeFinancialAnalysisService : IPythonFinancialAnalysisService
+    {
+        public ComputeFinancialRatiosRequest? ComputeRequest { get; private set; }
+        public ComparePeriodsRequest? CompareRequest { get; private set; }
+        public DetectFinancialRiskSignalsRequest? SignalsRequest { get; private set; }
+        public SummarizeQuantitativeEvidenceRequest? SummaryRequest { get; private set; }
+
+        public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
+            ComputeFinancialRatiosRequest request,
+            CancellationToken cancellationToken)
+        {
+            ComputeRequest = request;
+
+            return Task.FromResult(new ComputeFinancialRatiosResponse(
+                Engine: "Fake Financial Analysis",
+                Ratios:
+                [
+                    new FinancialRatio(
+                        Name: "gross_margin",
+                        Period: "2025E",
+                        Value: 0.42m,
+                        Unit: "ratio",
+                        Formula: "gross_profit / revenue",
+                        Inputs: ["gross_profit", "revenue"],
+                        Interpretation: "Gross margin computed."
+                    )
+                ],
+                Warnings: []
+            ));
+        }
+
+        public Task<ComparePeriodsResponse> ComparePeriodsAsync(
+            ComparePeriodsRequest request,
+            CancellationToken cancellationToken)
+        {
+            CompareRequest = request;
+
+            return Task.FromResult(new ComparePeriodsResponse(
+                Engine: "Fake Financial Analysis",
+                Comparisons:
+                [
+                    new FinancialPeriodComparison(
+                        MetricName: "revenue",
+                        FromPeriod: "2024A",
+                        ToPeriod: "2025E",
+                        FromValue: 100m,
+                        ToValue: 120m,
+                        AbsoluteChange: 20m,
+                        PercentageChange: 0.2m,
+                        Unit: "USD millions",
+                        Interpretation: "Revenue increased."
+                    )
+                ],
+                Warnings: []
+            ));
+        }
+
+        public Task<DetectFinancialRiskSignalsResponse> DetectFinancialRiskSignalsAsync(
+            DetectFinancialRiskSignalsRequest request,
+            CancellationToken cancellationToken)
+        {
+            SignalsRequest = request;
+            var evidence = new RiskEvidenceItem(
+                MetricName: "current_ratio",
+                Period: "2025E",
+                Value: 0.8m,
+                Threshold: 1.0m,
+                Unit: "x",
+                Interpretation: "Current ratio requires review."
+            );
+
+            return Task.FromResult(new DetectFinancialRiskSignalsResponse(
+                Engine: "Fake Financial Analysis",
+                Signals:
+                [
+                    new FinancialRiskSignal(
+                        Name: "LOW_CURRENT_RATIO",
+                        Severity: "Medium",
+                        Period: "2025E",
+                        Summary: "Liquidity should be reviewed.",
+                        Evidence: [evidence]
+                    )
+                ],
+                Result: new FinancialAnalysisToolResult(
+                    HasRiskSignals: true,
+                    RiskLevel: "Medium",
+                    Summary: "Liquidity should be reviewed.",
+                    Engine: "Fake Financial Analysis",
+                    Evidence: [evidence],
+                    Warnings: []
+                )
+            ));
+        }
+
+        public Task<SummarizeQuantitativeEvidenceResponse> SummarizeQuantitativeEvidenceAsync(
+            SummarizeQuantitativeEvidenceRequest request,
+            CancellationToken cancellationToken)
+        {
+            SummaryRequest = request;
+            var evidence = new RiskEvidenceItem(
+                MetricName: "net_debt_to_ebitda",
+                Period: "2025E",
+                Value: 3.5m,
+                Threshold: 3.0m,
+                Unit: "x",
+                Interpretation: "Leverage should be reviewed."
+            );
+
+            return Task.FromResult(new SummarizeQuantitativeEvidenceResponse(
+                Engine: "Fake Financial Analysis",
+                Narrative: "Quantitative evidence summarized.",
+                Result: new FinancialAnalysisToolResult(
+                    HasRiskSignals: true,
+                    RiskLevel: "High",
+                    Summary: "Quantitative evidence summarized.",
+                    Engine: "Fake Financial Analysis",
+                    Evidence: [evidence],
+                    Warnings: []
+                )
+            ));
         }
     }
 }

@@ -8,9 +8,23 @@ public sealed class ToolPlanValidator : IToolPlanValidator
     private const string OperationalReason = "Operational financial tools are not allowed.";
     private const string LegalConclusionReason = "Legal conclusion tools are not allowed.";
     private const string MaxToolCallsReason = "Maximum tool call count exceeded.";
+    private const string FinancialToolsDisabledReason = "Financial analysis tools are disabled.";
+    private const string MissingRequestJsonReason = "Missing required argument: requestJson.";
+    private const string EmptyRequestJsonReason = "Empty required argument: requestJson.";
 
     private readonly HashSet<string> _allowedTools;
     private readonly int _maxToolCalls;
+    private readonly bool _financialAnalysisToolsEnabled;
+
+    private static readonly HashSet<string> FinancialAnalysisTools = new(
+        [
+            "data.compute_financial_ratios",
+            "data.compare_periods",
+            "data.detect_financial_risk_signals",
+            "data.summarize_quantitative_evidence"
+        ],
+        StringComparer.OrdinalIgnoreCase
+    );
 
     public ToolPlanValidator(
         ToolCallingOptions? options = null)
@@ -24,6 +38,7 @@ public sealed class ToolPlanValidator : IToolPlanValidator
         );
 
         _maxToolCalls = Math.Max(0, resolvedOptions.MaxToolCalls);
+        _financialAnalysisToolsEnabled = resolvedOptions.FinancialAnalysisToolsEnabled;
     }
 
     public ToolValidationResult Validate(
@@ -45,7 +60,7 @@ public sealed class ToolPlanValidator : IToolPlanValidator
                 continue;
             }
 
-            var rejectionReason = GetRejectionReason(toolName);
+            var rejectionReason = GetRejectionReason(proposedCall);
 
             if (rejectionReason is not null)
             {
@@ -68,8 +83,10 @@ public sealed class ToolPlanValidator : IToolPlanValidator
     }
 
     private string? GetRejectionReason(
-        string toolName)
+        ProposedToolCall proposedCall)
     {
+        var toolName = proposedCall.ToolName;
+
         if (string.IsNullOrWhiteSpace(toolName))
         {
             return NotAllowlistedReason;
@@ -98,8 +115,45 @@ public sealed class ToolPlanValidator : IToolPlanValidator
             return LegalConclusionReason;
         }
 
+        if (FinancialAnalysisTools.Contains(toolName))
+        {
+            if (!_financialAnalysisToolsEnabled)
+            {
+                return FinancialToolsDisabledReason;
+            }
+
+            if (!TryFindArgument(proposedCall.Arguments, "requestJson", out var requestJson))
+            {
+                return MissingRequestJsonReason;
+            }
+
+            return string.IsNullOrWhiteSpace(requestJson)
+                ? EmptyRequestJsonReason
+                : null;
+        }
+
         return _allowedTools.Contains(toolName)
             ? null
             : NotAllowlistedReason;
+    }
+
+    private static bool TryFindArgument(
+        IReadOnlyDictionary<string, string> arguments,
+        string key,
+        out string value)
+    {
+        foreach (var argument in arguments)
+        {
+            if (string.Equals(argument.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = argument.Value;
+
+                return true;
+            }
+        }
+
+        value = "";
+
+        return false;
     }
 }

@@ -11,6 +11,7 @@ public class ToolPlanValidatorTests
         var options = new ToolCallingOptions();
 
         options.ExecutionMode.Should().Be(ToolCallingExecutionMode.Shadow);
+        options.FinancialAnalysisToolsEnabled.Should().BeFalse();
     }
 
     [Theory]
@@ -70,6 +71,112 @@ public class ToolPlanValidatorTests
             new RejectedToolCall(
                 "legal.search_cnv_regulation",
                 "Tool is not allowlisted."
+            )
+        );
+    }
+
+    [Theory]
+    [InlineData("data.compute_financial_ratios")]
+    [InlineData("data.compare_periods")]
+    [InlineData("data.detect_financial_risk_signals")]
+    [InlineData("data.summarize_quantitative_evidence")]
+    public void Validate_Should_reject_financial_tools_when_disabled(
+        string toolName)
+    {
+        var validator = new ToolPlanValidator();
+
+        var result = validator.Validate(
+            CreatePlan(CreateFinancialCall(toolName))
+        );
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                toolName,
+                "Financial analysis tools are disabled."
+            )
+        );
+    }
+
+    [Theory]
+    [InlineData("data.compute_financial_ratios")]
+    [InlineData("data.compare_periods")]
+    [InlineData("data.detect_financial_risk_signals")]
+    [InlineData("data.summarize_quantitative_evidence")]
+    public void Validate_Should_allow_financial_tools_when_enabled_and_request_json_exists(
+        string toolName)
+    {
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                FinancialAnalysisToolsEnabled = true
+            }
+        );
+
+        var result = validator.Validate(
+            CreatePlan(CreateFinancialCall(toolName))
+        );
+
+        result.IsValid.Should().BeTrue();
+        result.ApprovedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(toolName);
+        result.RejectedCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_Should_reject_financial_tool_with_missing_request_json()
+    {
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                FinancialAnalysisToolsEnabled = true
+            }
+        );
+
+        var result = validator.Validate(
+            CreatePlan(CreateCall("data.compute_financial_ratios"))
+        );
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                "data.compute_financial_ratios",
+                "Missing required argument: requestJson."
+            )
+        );
+    }
+
+    [Fact]
+    public void Validate_Should_reject_financial_tool_with_empty_request_json()
+    {
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                FinancialAnalysisToolsEnabled = true
+            }
+        );
+
+        var result = validator.Validate(
+            CreatePlan(
+                new ProposedToolCall(
+                    ToolName: "data.compute_financial_ratios",
+                    Arguments: new Dictionary<string, string>
+                    {
+                        ["requestJson"] = "   "
+                    },
+                    Reason: "Planner requested financial analysis."
+                )
+            )
+        );
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                "data.compute_financial_ratios",
+                "Empty required argument: requestJson."
             )
         );
     }
@@ -195,6 +302,19 @@ public class ToolPlanValidatorTests
                 ["sessionId"] = Guid.NewGuid().ToString()
             },
             Reason: "Planner requested read-only analysis."
+        );
+    }
+
+    private static ProposedToolCall CreateFinancialCall(
+        string toolName)
+    {
+        return new ProposedToolCall(
+            ToolName: toolName,
+            Arguments: new Dictionary<string, string>
+            {
+                ["requestJson"] = "{\"metrics\":[]}"
+            },
+            Reason: "Planner requested read-only financial analysis."
         );
     }
 }
