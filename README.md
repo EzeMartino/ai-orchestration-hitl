@@ -1,6 +1,6 @@
 # Financial Analysis Control Room
 
-Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, controlled tool calling, Python-based anomaly detection, MCP regulatory retrieval, real-time telemetry, and human approval gates.
+Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, controlled tool calling, Python-based anomaly detection, structured financial analysis, MCP regulatory retrieval, real-time telemetry, and human approval gates.
 
 This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
 
@@ -20,6 +20,7 @@ Current implementation:
 - In `PlanDriven` mode, approved read-only tool calls can execute through a controlled executor.
 - If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning.
 - `DataAgent` runs Python-based anomaly detection through Semantic Kernel + CSnakes.
+- `DataAgent` can optionally run structured financial analysis with Python/Pandas through CSnakes.
 - `LegalAgent` retrieves cited CNV regulatory evidence through Semantic Kernel + MCP.
 - The workflow pauses for human approval when risk is detected.
 - All activity is streamed in real time and persisted for audit review.
@@ -70,10 +71,19 @@ Controlled tool calling has two execution modes:
 
 `Shadow` is the default mode.
 
-Current allowlist:
+Current core allowlist:
 
 - `data.analyze_transactions`: read-only statistical anomaly analysis owned by `DataAgent`.
 - `legal.search_cnv_regulation`: read-only CNV regulatory retrieval owned by `LegalAgent` / MCP.
+
+Optional financial-analysis tools are available for controlled execution when `ToolCalling__FinancialAnalysisToolsEnabled=true`:
+
+- `data.compute_financial_ratios`
+- `data.compare_periods`
+- `data.detect_financial_risk_signals`
+- `data.summarize_quantitative_evidence`
+
+These tools are read-only, auditable, and cannot modify workflow state, approve sessions, reject sessions, move money, or block accounts.
 
 Tool-calling pipeline:
 
@@ -196,6 +206,8 @@ This project does **not** currently include:
 - unrestricted tool execution,
 - LLM-controlled workflow transitions,
 - autonomous legal interpretation,
+- universal PDF extraction, OCR, or visual table parsing,
+- LLM-based financial metric extraction,
 - natural language report understanding,
 - automatic financial decision-making,
 - production-grade regulatory advice.
@@ -203,7 +215,7 @@ This project does **not** currently include:
 The PlannerAgent may use an LLM for advisory reasoning summaries and controlled tool proposals only.
 
 The LegalAgent retrieves regulatory evidence. It does not provide legal conclusions.
-The DataAgent detects statistical anomalies. It does not make operational decisions.
+The DataAgent detects statistical anomalies and optional financial risk signals from structured metrics. It does not make operational decisions.
 The human auditor remains responsible for approval or rejection.
 
 ## Architecture Overview
@@ -234,10 +246,20 @@ ASP.NET Core API
         |     |-- ToolExecutionResultMapper
         |
         |-- DataAgent
-        |     |-- Semantic Kernel
-        |     |-- PythonAnomalyDetectionPlugin
-        |     |-- CSnakes
-        |     |-- Python anomaly_detection.py
+        |     |-- ConfigurableDataAgent
+        |     |     |-- legacy SemanticKernelDataAgent
+        |     |     |     |-- PythonAnomalyDetectionPlugin
+        |     |     |     |-- CSnakesDataAgent
+        |     |     |     |-- Python anomaly_detection.py
+        |     |     |
+        |     |     |-- DataAgentFinancialAnalysisWorkflow optional
+        |     |           |-- StructuredFinancialMetricsProvider
+        |     |           |-- IPythonFinancialAnalysisService
+        |     |           |-- CSnakesFinancialAnalysisService
+        |     |           |-- Python financial_analysis.py
+        |     |           |-- Pandas / NumPy
+        |     |           |-- FinancialAnalysisContext
+        |     |           |-- DataAgentResult
         |
         |-- LegalAgent
               |-- Semantic Kernel
@@ -306,19 +328,30 @@ requiresHumanApproval =
 
 ### DataAgent
 
-Current implementation: Semantic Kernel plugin layer over Python analytics.
+Current implementation: configurable Python analytics path.
+
+By default, the DataAgent uses the legacy Semantic Kernel anomaly-detection path.
+
+When `DataAgent__FinancialAnalysisToolsEnabled=true`, it can run the structured financial-analysis workflow.
 
 Pipeline:
 
 ```text
 DataAgent
-  -> Semantic Kernel
-  -> PythonAnomalyDetectionPlugin
-  -> CSnakesDataAgent
-  -> Python anomaly_detection.py
+  -> ConfigurableDataAgent
+      -> legacy SemanticKernelDataAgent
+      OR
+      -> DataAgentFinancialAnalysisWorkflow
+          -> StructuredFinancialMetricsProvider
+          -> IPythonFinancialAnalysisService
+          -> CSnakesFinancialAnalysisService
+          -> financial_analysis.py
+          -> Pandas / NumPy
+          -> FinancialAnalysisContext
+          -> DataAgentResult
 ```
 
-The DataAgent currently returns structured anomaly evidence, including metrics, thresholds, severity, and explanation.
+The DataAgent returns backward-compatible anomaly evidence, including metrics, thresholds, severity, and explanation. When structured financial analysis is enabled, it also exposes richer `financialAnalysis` context with ratios, period comparisons, risk signals, risk evidence, warnings, and limitations.
 
 ### LegalAgent
 
@@ -389,6 +422,8 @@ The platform persists:
 - LLM/fallback metadata,
 - proposed, approved, rejected, and execution-audited tool calls,
 - agent evidence,
+- structured financial-analysis context,
+- financial risk signals and quantitative evidence,
 - legal/regulatory findings,
 - warnings and disclaimers,
 - real-time activity events,
@@ -465,6 +500,65 @@ The Python analyzer returns structured anomaly evidence:
 - interpretation.
 
 The current implementation is deterministic and testable. It does not require an LLM.
+
+## DataAgent Financial Analysis Tools
+
+The DataAgent can optionally run structured financial analysis using Python/Pandas through CSnakes.
+
+This feature is disabled by default and can be enabled with:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+```
+
+Current capabilities:
+
+- compute financial ratios,
+- compare financial periods,
+- detect financial risk signals,
+- summarize quantitative evidence,
+- expose financial risk evidence in the dashboard.
+
+The current implementation expects structured financial metrics. It does not perform universal PDF extraction, OCR, visual table extraction, or LLM-based financial data extraction yet.
+
+Financial-analysis architecture:
+
+```text
+DataAgent
+  -> ConfigurableDataAgent
+      -> legacy SemanticKernelDataAgent
+      OR
+      -> DataAgentFinancialAnalysisWorkflow
+          -> StructuredFinancialMetricsProvider
+          -> IPythonFinancialAnalysisService
+          -> CSnakesFinancialAnalysisService
+          -> financial_analysis.py
+          -> Pandas / NumPy
+          -> FinancialAnalysisContext
+          -> DataAgentResult
+```
+
+### Financial Analysis Tools
+
+- `data.compute_financial_ratios`
+- `data.compare_periods`
+- `data.detect_financial_risk_signals`
+- `data.summarize_quantitative_evidence`
+
+These tools are read-only, auditable, and cannot modify workflow state, approve sessions, reject sessions, move money, block accounts, or make legal conclusions.
+
+### Current Limitations
+
+This phase does not include:
+
+- OCR,
+- visual PDF parsing,
+- table extraction from PDFs,
+- LLM-based metric extraction,
+- production-grade accounting validation,
+- legal or investment advice.
+
+The financial analysis pipeline currently uses structured financial metrics, including a sample fixture inspired by an equity research report.
 
 ## Screenshots
 
@@ -570,6 +664,26 @@ ToolCalling__ExecutionMode=PlanDriven
 
 `Shadow` remains the safe default.
 
+### DataAgent Configuration
+
+Defaults are safe. When financial analysis is disabled, the DataAgent uses the legacy anomaly-detection path.
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=false
+DataAgent__UsePythonFinancialAnalysis=true
+DataAgent__UseLegacyAnomalyDetectionFallback=true
+DataAgent__RiskThresholdProfile=default_oil_and_gas_equity_research
+DataAgent__StructuredMetricsFixturePath=<optional>
+```
+
+To enable structured financial analysis:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+```
+
+The current provider expects structured financial metrics. `DataAgent__StructuredMetricsFixturePath` can point to a local structured metrics fixture for development validation.
+
 ### Tool Calling Diagnostics
 
 In `Development`, use:
@@ -611,6 +725,8 @@ Example:
 
 The diagnostic endpoint is for development validation. It does not create sessions, transition workflow state, approve, or reject anything.
 
+Financial analysis tools can also be validated through this endpoint when `ToolCalling__FinancialAnalysisToolsEnabled=true`. They still require validated `requestJson` payloads and remain read-only.
+
 ### CNV Regulation Ingestion
 
 The CNV ingestion task is manual in Aspire.
@@ -647,6 +763,9 @@ cd backend
 dotnet test
 ```
 
+Latest validated backend suite: 142 tests.
+Latest validated Python financial-analysis suite: 11 tests.
+
 Current test coverage includes:
 
 - state machine transitions,
@@ -666,6 +785,13 @@ Current test coverage includes:
 - tool execution result mapping,
 - development diagnostics endpoint,
 - planner `ContextJson` metadata,
+- Python financial analysis calculations,
+- .NET to CSnakes to Python financial-analysis mapping,
+- Semantic Kernel financial-analysis plugin,
+- ControlledToolExecutor financial-tool execution,
+- DataAgent financial workflow fallback behavior,
+- `financialAnalysis` context mapping,
+- frontend build compatibility,
 - CSnakes DataAgent integration,
 - Semantic Kernel DataAgent wrapper,
 - Semantic Kernel LegalAgent wrapper,
@@ -688,6 +814,10 @@ The LegalAgent retrieves regulatory evidence from CNV-related sources. It does n
 
 The DataAgent detects statistical anomalies. It does not block transactions, move money, freeze accounts, or make operational decisions.
 
+Financial risk signals are advisory. The DataAgent does not determine fraud, legal violations, credit decisions, or operational actions.
+
+Medium/high risk signals trigger human review through the existing HITL workflow.
+
 The LLM does not make financial, legal, or operational decisions.
 
 The LLM may generate reasoning summaries and propose read-only tool calls, but workflow transitions remain controlled by deterministic application logic.
@@ -702,19 +832,16 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ## Roadmap
 
-### Next: Production Hardening for Controlled Tools
+### Next: Structured Financial Input and Extraction
 
-Controlled tool calling is now available behind configuration. The next planned work is hardening the operational boundary around it.
+The structured financial-analysis workflow is available behind configuration. The next planned work is replacing the sample fixture with safer input paths and richer validation.
 
 Planned upgrades:
 
-- stronger per-tool argument schemas,
-- richer tool execution telemetry,
-- clearer proposed-vs-executed diffs,
-- additional red-team tests for unsafe tool proposals,
-- stricter diagnostics access controls,
-- more complete UI affordances for rejected calls,
-- model/provider metadata on tool proposal events,
-- larger regression suite for PlanDriven fallback paths.
+- replace the fixture provider with uploaded structured inputs,
+- add CSV/JSON financial metrics ingestion,
+- add validation for financial consistency,
+- later evaluate PDF table extraction or OCR,
+- later evaluate LLM-assisted metric extraction with human review.
 
 The LLM must not bypass the state machine or human approval flow.
