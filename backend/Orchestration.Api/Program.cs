@@ -60,9 +60,12 @@ builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnal
 builder.Services.AddScoped<SemanticKernelDataAgent>();
 builder.Services.AddScoped<ILegacyDataAgent>(provider =>
     provider.GetRequiredService<SemanticKernelDataAgent>());
-builder.Services.AddScoped<IStructuredFinancialMetricsProvider, FixtureStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<IStructuredFinancialMetricsValidator, StructuredFinancialMetricsValidator>();
 builder.Services.AddScoped<IFinancialMetricInputMapper, FinancialMetricInputMapper>();
+builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
+builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
+builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();
+builder.Services.AddScoped<IStructuredFinancialMetricsProvider, CompositeStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
 builder.Services.AddScoped<IDataAgent, ConfigurableDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();

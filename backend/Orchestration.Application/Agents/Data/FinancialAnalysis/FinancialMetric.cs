@@ -6,5 +6,8 @@ public sealed record FinancialMetric(
     decimal Value,
     string Unit,
     string Statement,
-    string? Source
+    string? Source,
+    string? Currency = null,
+    int? SourcePage = null,
+    decimal? Confidence = null
 );

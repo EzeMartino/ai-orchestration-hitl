@@ -19,7 +19,10 @@ public sealed class FinancialMetricInputMapper : IFinancialMetricInputMapper
                 Value: metric.Value,
                 Unit: metric.Unit,
                 Statement: StructuredInputStatement,
-                Source: metric.Source
+                Source: metric.Source,
+                Currency: metric.Currency,
+                SourcePage: metric.SourcePage,
+                Confidence: metric.Confidence
             ))
             .ToArray();
     }

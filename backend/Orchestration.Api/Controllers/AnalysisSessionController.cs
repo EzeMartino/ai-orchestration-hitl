@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Application.AnalysisSessions;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Api.Controllers;
 
@@ -12,12 +13,16 @@ public class AnalysisSessionsController : ControllerBase
 {
     private readonly OrchestrationDbContext _dbContext;
     private readonly AnalysisOrchestratorService _orchestrator;
+    private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService;
+
     public AnalysisSessionsController(
         OrchestrationDbContext dbContext,
-        AnalysisOrchestratorService orchestrator)
+        AnalysisOrchestratorService orchestrator,
+        IStructuredFinancialMetricsSessionService financialMetricsSessionService)
     {
         _dbContext = dbContext;
         _orchestrator = orchestrator;
+        _financialMetricsSessionService = financialMetricsSessionService;
     }
 
     [HttpGet]
@@ -202,4 +207,72 @@ public class AnalysisSessionsController : ControllerBase
 
         return Ok(events);
     }
+
+    [HttpPost("{id:guid}/financial-metrics")]
+    public async Task<IActionResult> SaveFinancialMetrics(
+        Guid id,
+        [FromBody] StructuredFinancialMetricsInput input,
+        CancellationToken cancellationToken)
+    {
+        if (input is null)
+        {
+            return BadRequest();
+        }
+
+        var result = await _financialMetricsSessionService.SaveAsync(
+            id,
+            input,
+            cancellationToken
+        );
+
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new SaveFinancialMetricsResponse(
+            SessionId: result.SessionId,
+            IsValid: result.IsValid,
+            Context: result.Context,
+            Errors: result.Errors,
+            Warnings: result.Warnings
+        ));
+    }
+
+    [HttpGet("{id:guid}/financial-metrics")]
+    public async Task<IActionResult> GetFinancialMetrics(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
+        }
+
+        var context = await _financialMetricsSessionService.GetAsync(
+            id,
+            cancellationToken
+        );
+
+        return Ok(new GetFinancialMetricsResponse(
+            SessionId: id,
+            Context: context
+        ));
+    }
 }
+
+public sealed record SaveFinancialMetricsResponse(
+    Guid SessionId,
+    bool IsValid,
+    StructuredFinancialMetricsContext? Context,
+    IReadOnlyList<FinancialMetricsValidationIssue> Errors,
+    IReadOnlyList<FinancialMetricsValidationIssue> Warnings
+);
+
+public sealed record GetFinancialMetricsResponse(
+    Guid SessionId,
+    StructuredFinancialMetricsContext? Context
+);

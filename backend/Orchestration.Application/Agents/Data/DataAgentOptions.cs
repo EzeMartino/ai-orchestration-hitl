@@ -10,6 +10,8 @@ public sealed class DataAgentOptions
 
     public bool UseLegacyAnomalyDetectionFallback { get; init; } = true;
 
+    public bool UseFixtureMetricsFallback { get; init; } = true;
+
     public string RiskThresholdProfile { get; init; } =
         "default_oil_and_gas_equity_research";
 

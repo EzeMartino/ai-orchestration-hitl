@@ -207,7 +207,10 @@ public sealed class StructuredFinancialMetricsValidatorTests
                 Value: 924000m,
                 Unit: "USD_thousand",
                 Statement: "structured_input",
-                Source: "manual_upload"
+                Source: "manual_upload",
+                Currency: "USD",
+                SourcePage: 18,
+                Confidence: 0.9m
             ));
     }
 
