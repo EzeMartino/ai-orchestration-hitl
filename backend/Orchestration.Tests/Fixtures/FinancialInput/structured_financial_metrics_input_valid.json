@@ -1,0 +1,22 @@
+{
+  "documentId": "vista-energy-structured-input",
+  "company": "Vista Energy",
+  "currency": "USD",
+  "unit": "USD_thousand",
+  "metrics": [
+    {
+      "name": "Revenue",
+      "period": "2024A",
+      "value": 1647768,
+      "source": "manual_upload",
+      "sourcePage": 18,
+      "confidence": 0.9
+    },
+    {
+      "name": "Gross Profit",
+      "period": "2024A",
+      "value": 924000,
+      "confidence": 0.85
+    }
+  ]
+}
