@@ -56,6 +56,7 @@ builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
 builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
+builder.Services.AddScoped<FinancialAnalysisPlugin>();
 
 // Python environment configuration for CSnakes
 var defaultPythonHome = Path.GetFullPath(
