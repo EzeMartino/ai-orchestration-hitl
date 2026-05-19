@@ -1,7 +1,9 @@
 using CSnakes.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Data;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Tests.Agents.Data;
 
@@ -25,6 +27,7 @@ public sealed class PythonAgentTestFixture : IDisposable
             .FromRedistributable();
 
         services.AddScoped<CSnakesDataAgent>();
+        services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
         services.AddScoped<PythonAnomalyDetectionPlugin>();
         services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
 

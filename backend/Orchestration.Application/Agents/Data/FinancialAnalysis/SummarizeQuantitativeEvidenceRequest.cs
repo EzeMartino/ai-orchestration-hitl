@@ -4,5 +4,6 @@ public sealed record SummarizeQuantitativeEvidenceRequest(
     IReadOnlyList<FinancialMetric> Metrics,
     IReadOnlyList<FinancialRatio> Ratios,
     IReadOnlyList<FinancialPeriodComparison> Comparisons,
-    IReadOnlyList<FinancialRiskSignal> Signals
+    IReadOnlyList<FinancialRiskSignal> Signals,
+    int MaxItems = 5
 );

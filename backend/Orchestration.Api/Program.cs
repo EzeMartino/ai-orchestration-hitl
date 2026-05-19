@@ -2,6 +2,7 @@ using CSnakes.Runtime;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
@@ -10,6 +11,7 @@ using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -51,6 +53,7 @@ builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration
 builder.Services.AddScoped<CSnakesDataAgent>();
+builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
 builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
 
