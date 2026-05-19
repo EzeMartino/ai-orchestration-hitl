@@ -536,6 +536,182 @@ code {
   color: #334155;
 }
 
+.structuredMetricsPanel {
+  margin-bottom: 1rem;
+  background: white;
+  border: 1px solid #99f6e4;
+  border-radius: 20px;
+  padding: 1.2rem;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.structuredMetricsHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.structuredMetricsEyebrow {
+  margin: 0 0 0.4rem;
+  color: #0f766e;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.structuredMetricsHeader h2 {
+  margin: 0;
+  color: #0f2747;
+}
+
+.structuredMetricsHeader p {
+  max-width: 660px;
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+
+.structuredMetricsState {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 240px;
+  max-width: 320px;
+  background: #f0fdfa;
+  border: 1px solid #99f6e4;
+  border-radius: 16px;
+  padding: 0.9rem;
+  color: #115e59;
+  font-weight: 700;
+}
+
+.structuredMetricsState strong {
+  color: #134e4a;
+}
+
+.structuredMetricsState span {
+  overflow-wrap: anywhere;
+}
+
+.metricsModeToggle {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 0.25rem;
+}
+
+.metricsModeToggle button {
+  border-radius: 10px;
+  background: transparent;
+  color: #475569;
+  padding: 0.55rem 0.85rem;
+}
+
+.metricsModeToggle button.active {
+  background: #0f766e;
+  color: white;
+}
+
+.metricsEditor {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.metricsEditor label,
+.csvMetaGrid label {
+  display: grid;
+  gap: 0.45rem;
+  color: #334155;
+  font-weight: 800;
+}
+
+.metricsEditor textarea,
+.csvMetaGrid input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 0.8rem;
+  font: inherit;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.metricsEditor textarea {
+  min-height: 260px;
+  resize: vertical;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.metricsEditor textarea:focus,
+.csvMetaGrid input:focus {
+  outline: 2px solid #14b8a6;
+  border-color: #14b8a6;
+}
+
+.csvMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.metricsEditor button {
+  justify-self: flex-start;
+  background: #0f766e;
+}
+
+.metricsResult {
+  margin-top: 1rem;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.metricsResult strong {
+  display: block;
+}
+
+.metricsResult-success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #047857;
+}
+
+.metricsResult-danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.issueList {
+  margin-top: 0.75rem;
+}
+
+.issueList span {
+  display: block;
+  font-weight: 900;
+}
+
+.issueList ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.issueList li + li {
+  margin-top: 0.35rem;
+}
+
+.issueList em {
+  display: block;
+  margin-top: 0.2rem;
+  font-style: normal;
+  opacity: 0.85;
+}
+
 .financialRiskPanel {
   margin-bottom: 1rem;
   background: white;
@@ -1150,6 +1326,7 @@ code {
   .plannerHeader,
   .toolPlanHeader,
   .evidenceHeader,
+  .structuredMetricsHeader,
   .financialRiskHeader,
   .complianceHeader {
     flex-direction: column;
@@ -1163,6 +1340,7 @@ code {
   .financialEvidenceGrid,
   .financialEvidenceMeta,
   .financialReviewNotes,
+  .csvMetaGrid,
   .ratioStrip {
     grid-template-columns: 1fr;
   }

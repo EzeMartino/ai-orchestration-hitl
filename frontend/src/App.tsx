@@ -164,6 +164,76 @@ type FinancialAnalysisContext = {
   limitations: string[];
 };
 
+type StructuredFinancialMetricInput = {
+  name: string;
+  period: string;
+  value: number | null;
+  unit?: string | null;
+  currency?: string | null;
+  source?: string | null;
+  sourcePage?: number | null;
+  confidence?: number | null;
+};
+
+type StructuredFinancialMetricsInput = {
+  documentId: string;
+  company?: string | null;
+  currency?: string | null;
+  unit?: string | null;
+  metrics: StructuredFinancialMetricInput[];
+};
+
+type StructuredFinancialMetricsCsvInput = {
+  documentId: string;
+  company?: string | null;
+  currency?: string | null;
+  unit?: string | null;
+  csv: string;
+};
+
+type FinancialMetricsValidationIssue = {
+  code: string;
+  message: string;
+  metricName?: string | null;
+  period?: string | null;
+  severity: string;
+};
+
+type StructuredFinancialMetricContext = {
+  name: string;
+  period: string;
+  value: number;
+  unit: string;
+  statement?: string;
+  source?: string | null;
+  currency?: string | null;
+  sourcePage?: number | null;
+  confidence?: number | null;
+};
+
+type StructuredFinancialMetricsContext = {
+  documentId: string;
+  company?: string | null;
+  currency?: string | null;
+  unit?: string | null;
+  metrics: StructuredFinancialMetricContext[];
+  validationWarnings: FinancialMetricsValidationIssue[];
+  uploadedAt: string;
+};
+
+type SaveFinancialMetricsResponse = {
+  sessionId: string;
+  isValid: boolean;
+  context?: StructuredFinancialMetricsContext | null;
+  errors: FinancialMetricsValidationIssue[];
+  warnings: FinancialMetricsValidationIssue[];
+};
+
+type GetFinancialMetricsResponse = {
+  sessionId: string;
+  context?: StructuredFinancialMetricsContext | null;
+};
+
 type AnalysisContext = {
   summary?: string;
   planner?: PlannerContext;
@@ -182,6 +252,41 @@ type AnalysisContext = {
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
+
+const jsonMetricsTemplate = JSON.stringify(
+  {
+    documentId: "manual-json-input",
+    company: "Manual Test Co",
+    currency: "USD",
+    unit: "USD_thousand",
+    metrics: [
+      {
+        name: "Revenue",
+        period: "2024A",
+        value: 1647768,
+        source: "manual_upload",
+        sourcePage: 18,
+        confidence: 0.9,
+      },
+      {
+        name: "Gross Profit",
+        period: "2024A",
+        value: 924000,
+        source: "manual_upload",
+        sourcePage: 18,
+        confidence: 0.85,
+      },
+    ],
+  },
+  null,
+  2
+);
+
+const csvMetricsTemplate = [
+  "name,period,value,unit,currency,source,sourcePage,confidence",
+  "Revenue,2024A,1647768,USD_thousand,USD,manual_upload,18,0.9",
+  "Gross Profit,2024A,924000,USD_thousand,USD,manual_upload,18,0.85",
+].join("\n");
 
 function parseAnomalyContext(contextJson?: string): AnalysisContext | null {
   if (!contextJson) {
@@ -603,6 +708,234 @@ function FinancialRiskEvidencePanel({
   );
 }
 
+function StructuredFinancialMetricsPanel({
+  sessionId,
+  metricsContext,
+  isLoading,
+  isSaving,
+  saveResult,
+  saveError,
+  onSaveJson,
+  onSaveCsv,
+}: {
+  sessionId?: string;
+  metricsContext?: StructuredFinancialMetricsContext | null;
+  isLoading: boolean;
+  isSaving: boolean;
+  saveResult?: SaveFinancialMetricsResponse | null;
+  saveError?: string | null;
+  onSaveJson: (input: StructuredFinancialMetricsInput) => Promise<void>;
+  onSaveCsv: (input: StructuredFinancialMetricsCsvInput) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"json" | "csv">("json");
+  const [jsonText, setJsonText] = useState(jsonMetricsTemplate);
+  const [csvDocumentId, setCsvDocumentId] = useState("manual-csv-input");
+  const [csvCompany, setCsvCompany] = useState("Manual Test Co");
+  const [csvCurrency, setCsvCurrency] = useState("USD");
+  const [csvUnit, setCsvUnit] = useState("USD_thousand");
+  const [csvText, setCsvText] = useState(csvMetricsTemplate);
+  const [inputError, setInputError] = useState<string | null>(null);
+
+  async function handleSaveJson() {
+    setInputError(null);
+
+    try {
+      const parsed = JSON.parse(jsonText) as StructuredFinancialMetricsInput;
+      await onSaveJson(parsed);
+    } catch (error) {
+      console.error(error);
+      setInputError("Invalid JSON format.");
+    }
+  }
+
+  async function handleSaveCsv() {
+    setInputError(null);
+
+    await onSaveCsv({
+      documentId: csvDocumentId,
+      company: csvCompany,
+      currency: csvCurrency,
+      unit: csvUnit,
+      csv: csvText,
+    });
+  }
+
+  return (
+    <section className="structuredMetricsPanel">
+      <div className="structuredMetricsHeader">
+        <div>
+          <p className="structuredMetricsEyebrow">Structured metrics input</p>
+          <h2>Attach financial metrics</h2>
+          <p>
+            Structured validation checks required fields, normalization and
+            basic quality issues. It does not verify accounting correctness.
+          </p>
+        </div>
+
+        <div className="structuredMetricsState">
+          {!sessionId ? (
+            <span>Create or load a session before attaching structured financial metrics.</span>
+          ) : isLoading ? (
+            <span>Loading structured metrics...</span>
+          ) : metricsContext ? (
+            <>
+              <strong>Structured metrics attached</strong>
+              <span>Document: {metricsContext.documentId}</span>
+              <span>Company: {metricsContext.company ?? "-"}</span>
+              <span>Metrics: {metricsContext.metrics.length}</span>
+              <span>Uploaded: {new Date(metricsContext.uploadedAt).toLocaleString()}</span>
+            </>
+          ) : (
+            <span>No structured financial metrics attached to this session.</span>
+          )}
+        </div>
+      </div>
+
+      <div className="metricsModeToggle" role="tablist" aria-label="Metrics input mode">
+        <button
+          className={mode === "json" ? "active" : ""}
+          onClick={() => setMode("json")}
+          type="button"
+        >
+          JSON
+        </button>
+        <button
+          className={mode === "csv" ? "active" : ""}
+          onClick={() => setMode("csv")}
+          type="button"
+        >
+          CSV
+        </button>
+      </div>
+
+      {mode === "json" ? (
+        <div className="metricsEditor">
+          <label>
+            JSON metrics
+            <textarea
+              value={jsonText}
+              onChange={(event) => setJsonText(event.target.value)}
+              spellCheck={false}
+            />
+          </label>
+
+          <button
+            onClick={handleSaveJson}
+            disabled={!sessionId || isSaving}
+            type="button"
+          >
+            {isSaving ? "Saving..." : "Save JSON Metrics"}
+          </button>
+        </div>
+      ) : (
+        <div className="metricsEditor">
+          <div className="csvMetaGrid">
+            <label>
+              DocumentId
+              <input
+                value={csvDocumentId}
+                onChange={(event) => setCsvDocumentId(event.target.value)}
+              />
+            </label>
+            <label>
+              Company
+              <input
+                value={csvCompany}
+                onChange={(event) => setCsvCompany(event.target.value)}
+              />
+            </label>
+            <label>
+              Currency
+              <input
+                value={csvCurrency}
+                onChange={(event) => setCsvCurrency(event.target.value)}
+              />
+            </label>
+            <label>
+              Unit
+              <input
+                value={csvUnit}
+                onChange={(event) => setCsvUnit(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <label>
+            CSV metrics
+            <textarea
+              value={csvText}
+              onChange={(event) => setCsvText(event.target.value)}
+              spellCheck={false}
+            />
+          </label>
+
+          <button
+            onClick={handleSaveCsv}
+            disabled={!sessionId || isSaving}
+            type="button"
+          >
+            {isSaving ? "Saving..." : "Save CSV Metrics"}
+          </button>
+        </div>
+      )}
+
+      {(inputError || saveError) && (
+        <div className="metricsResult metricsResult-danger">
+          {inputError ?? saveError}
+        </div>
+      )}
+
+      {saveResult && (
+        <div
+          className={`metricsResult ${
+            saveResult.isValid ? "metricsResult-success" : "metricsResult-danger"
+          }`}
+        >
+          <strong>
+            {saveResult.isValid
+              ? "Saved successfully"
+              : "Metrics were not persisted."}
+          </strong>
+
+          <IssueList title="Errors" issues={saveResult.errors} />
+          <IssueList title="Warnings" issues={saveResult.warnings} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function IssueList({
+  title,
+  issues,
+}: {
+  title: string;
+  issues: FinancialMetricsValidationIssue[];
+}) {
+  if (issues.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="issueList">
+      <span>{title}</span>
+      <ul>
+        {issues.map((issue, index) => (
+          <li key={`${issue.code}-${index}`}>
+            <strong>[{issue.severity}] {issue.code}</strong> - {issue.message}
+            {(issue.metricName || issue.period) && (
+              <em>
+                {issue.metricName ? ` Metric: ${issue.metricName}` : ""}
+                {issue.period ? ` Period: ${issue.period}` : ""}
+              </em>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function formatSignalTitle(value: string) {
   return value
     .replaceAll("_", " ")
@@ -760,6 +1093,15 @@ function App() {
   );
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [structuredMetrics, setStructuredMetrics] =
+    useState<StructuredFinancialMetricsContext | null>(null);
+  const [isLoadingStructuredMetrics, setIsLoadingStructuredMetrics] =
+    useState(false);
+  const [isSavingStructuredMetrics, setIsSavingStructuredMetrics] =
+    useState(false);
+  const [metricsSaveResult, setMetricsSaveResult] =
+    useState<SaveFinancialMetricsResponse | null>(null);
+  const [metricsSaveError, setMetricsSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let isDisposed = false;
@@ -837,6 +1179,21 @@ function App() {
     });
   }, []);
 
+  useEffect(() => {
+    setMetricsSaveResult(null);
+    setMetricsSaveError(null);
+
+    if (!session?.id) {
+      setStructuredMetrics(null);
+      return;
+    }
+
+    loadStructuredFinancialMetrics(session.id).catch((error) => {
+      console.error("Failed to load structured financial metrics:", error);
+      setStructuredMetrics(null);
+    });
+  }, [session?.id]);
+
   async function loadSessionEvents(sessionId: string) {
     const response = await fetch(
       `${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`
@@ -867,6 +1224,35 @@ function App() {
     }
   }
 
+  async function loadSessionDetails(sessionId: string) {
+    const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}`);
+
+    if (!response.ok) {
+      throw new Error("Failed to load analysis session.");
+    }
+
+    return (await response.json()) as AnalysisSessionResponse;
+  }
+
+  async function loadStructuredFinancialMetrics(sessionId: string) {
+    setIsLoadingStructuredMetrics(true);
+
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load structured financial metrics.");
+      }
+
+      const payload = (await response.json()) as GetFinancialMetricsResponse;
+      setStructuredMetrics(payload.context ?? null);
+    } finally {
+      setIsLoadingStructuredMetrics(false);
+    }
+  }
+
   async function createSession() {
     setIsCreating(true);
     setErrorMessage(null);
@@ -885,6 +1271,9 @@ function App() {
 
       setSession(createdSession);
       setEvents([]);
+      setStructuredMetrics(null);
+      setMetricsSaveResult(null);
+      setMetricsSaveError(null);
       setSelectedSessionId(createdSession.id);
 
       await loadSavedSessions();
@@ -997,16 +1386,7 @@ function App() {
     setErrorMessage(null);
 
     try {
-      const sessionResponse = await fetch(
-        `${apiBaseUrl}/api/analysis-sessions/${idToLoad}`
-      );
-
-      if (!sessionResponse.ok) {
-        throw new Error("Failed to load analysis session.");
-      }
-
-      const loadedSession =
-        (await sessionResponse.json()) as AnalysisSessionResponse;
+      const loadedSession = await loadSessionDetails(idToLoad);
 
       setSession(loadedSession);
 
@@ -1014,6 +1394,68 @@ function App() {
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not load the analysis session.");
+    }
+  }
+
+  async function saveJsonMetrics(input: StructuredFinancialMetricsInput) {
+    if (!session) {
+      return;
+    }
+
+    await saveMetrics(
+      `${apiBaseUrl}/api/analysis-sessions/${session.id}/financial-metrics`,
+      input
+    );
+  }
+
+  async function saveCsvMetrics(input: StructuredFinancialMetricsCsvInput) {
+    if (!session) {
+      return;
+    }
+
+    await saveMetrics(
+      `${apiBaseUrl}/api/analysis-sessions/${session.id}/financial-metrics/csv`,
+      input
+    );
+  }
+
+  async function saveMetrics(
+    url: string,
+    payload: StructuredFinancialMetricsInput | StructuredFinancialMetricsCsvInput
+  ) {
+    if (!session) {
+      return;
+    }
+
+    setIsSavingStructuredMetrics(true);
+    setMetricsSaveError(null);
+    setMetricsSaveResult(null);
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to save structured financial metrics.");
+      }
+
+      const result = (await response.json()) as SaveFinancialMetricsResponse;
+      setMetricsSaveResult(result);
+
+      if (result.isValid) {
+        await loadStructuredFinancialMetrics(session.id);
+        setSession(await loadSessionDetails(session.id));
+      }
+    } catch (error) {
+      console.error(error);
+      setMetricsSaveError("Could not save structured financial metrics.");
+    } finally {
+      setIsSavingStructuredMetrics(false);
     }
   }
 
@@ -1124,6 +1566,17 @@ function App() {
               </div>
             </section>
           )}
+
+          <StructuredFinancialMetricsPanel
+            sessionId={session?.id}
+            metricsContext={structuredMetrics}
+            isLoading={isLoadingStructuredMetrics}
+            isSaving={isSavingStructuredMetrics}
+            saveResult={metricsSaveResult}
+            saveError={metricsSaveError}
+            onSaveJson={saveJsonMetrics}
+            onSaveCsv={saveCsvMetrics}
+          />
 
           <PlannerPanel planner={planner} />
           <ToolPlanAuditPanel toolPlan={toolPlan} />
