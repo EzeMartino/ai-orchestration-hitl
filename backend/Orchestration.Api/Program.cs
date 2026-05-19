@@ -52,9 +52,17 @@ builder.Services.AddScoped<IToolExecutionResultMapper, ToolExecutionResultMapper
 builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 
 // Data agent and plugins configuration
+builder.Services.Configure<DataAgentOptions>(
+    builder.Configuration.GetSection(DataAgentOptions.SectionName)
+);
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
-builder.Services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
+builder.Services.AddScoped<SemanticKernelDataAgent>();
+builder.Services.AddScoped<ILegacyDataAgent>(provider =>
+    provider.GetRequiredService<SemanticKernelDataAgent>());
+builder.Services.AddScoped<IStructuredFinancialMetricsProvider, FixtureStructuredFinancialMetricsProvider>();
+builder.Services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
+builder.Services.AddScoped<IDataAgent, ConfigurableDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
 builder.Services.AddScoped<FinancialAnalysisPlugin>();
 

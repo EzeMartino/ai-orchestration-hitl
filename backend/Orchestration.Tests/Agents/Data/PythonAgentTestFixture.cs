@@ -1,5 +1,6 @@
 using CSnakes.Runtime;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Data;
@@ -20,6 +21,7 @@ public sealed class PythonAgentTestFixture : IDisposable
     public PythonAgentTestFixture()
     {
         var services = new ServiceCollection();
+        services.AddLogging();
 
         services
             .WithPython()
@@ -29,7 +31,14 @@ public sealed class PythonAgentTestFixture : IDisposable
         services.AddScoped<CSnakesDataAgent>();
         services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
         services.AddScoped<PythonAnomalyDetectionPlugin>();
-        services.AddScoped<IDataAgent, SemanticKernelDataAgent>();
+        services.AddScoped<FinancialAnalysisPlugin>();
+        services.AddSingleton(Options.Create(new DataAgentOptions()));
+        services.AddScoped<SemanticKernelDataAgent>();
+        services.AddScoped<ILegacyDataAgent>(provider =>
+            provider.GetRequiredService<SemanticKernelDataAgent>());
+        services.AddScoped<IStructuredFinancialMetricsProvider, FixtureStructuredFinancialMetricsProvider>();
+        services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
+        services.AddScoped<IDataAgent, ConfigurableDataAgent>();
 
         _serviceProvider = services.BuildServiceProvider();
     }

@@ -4,7 +4,7 @@ using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data;
 
-public sealed class SemanticKernelDataAgent : IDataAgent
+public sealed class SemanticKernelDataAgent : ILegacyDataAgent
 {
     private const string PluginName = "PythonAnomalyDetection";
     private const string FunctionName = "analyze_financial_transactions";
