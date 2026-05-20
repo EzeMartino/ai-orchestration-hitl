@@ -560,6 +560,133 @@ This phase does not include:
 
 The financial analysis pipeline currently uses structured financial metrics, including a sample fixture inspired by an equity research report.
 
+## Structured Financial Metrics Input
+
+The platform supports structured financial metrics input through JSON or CSV.
+
+The input is validated, normalized, persisted in the analysis session context, and later consumed by the DataAgent financial workflow.
+
+Current flow:
+
+```text
+Create Analysis Session
+  -> Attach JSON or CSV structured metrics
+  -> Validate and persist metrics in ContextJson
+  -> Start Session
+  -> DataAgent loads persisted metrics first
+  -> Python/Pandas financial analysis through CSnakes
+  -> Financial Risk Evidence panel
+  -> Human approval gate
+```
+
+Saving metrics does not start the analysis automatically and does not change the workflow state. The user must explicitly start the session.
+
+Structured metrics are persisted in `AnalysisSession.ContextJson` under:
+
+```text
+structuredFinancialMetrics
+```
+
+The resulting analysis context is persisted under:
+
+```text
+financialAnalysis
+```
+
+### JSON Metrics Input
+
+Example:
+
+```json
+{
+  "documentId": "manual-json-input",
+  "company": "Manual Test Co",
+  "currency": "USD",
+  "unit": "USD_thousand",
+  "metrics": [
+    {
+      "name": "Revenue",
+      "period": "2024A",
+      "value": 1647768,
+      "source": "manual_upload",
+      "confidence": 0.9
+    },
+    {
+      "name": "Gross Profit",
+      "period": "2024A",
+      "value": 924000,
+      "source": "manual_upload",
+      "confidence": 0.85
+    }
+  ]
+}
+```
+
+Metric names are normalized. For example, `Gross Profit` becomes `gross_profit`.
+
+Missing metric-level `unit` or `currency` values can be defaulted from the document-level metadata and reported as validation warnings.
+
+### CSV Metrics Input
+
+Example:
+
+```csv
+name,period,value,unit,currency,source,sourcePage,confidence
+Revenue,2024A,1647768,USD_thousand,USD,manual_upload,18,0.9
+Gross Profit,2024A,924000,USD_thousand,USD,manual_upload,18,0.85
+```
+
+CSV input is parsed deterministically without PDF/OCR or LLM extraction.
+
+Invalid headers, invalid numbers, invalid source pages, malformed quotes, and missing required values are reported as safe validation errors.
+
+### Structured Metrics Endpoints
+
+```http
+POST /api/financial-metrics/validate
+POST /api/analysis-sessions/{sessionId}/financial-metrics
+GET  /api/analysis-sessions/{sessionId}/financial-metrics
+POST /api/analysis-sessions/{sessionId}/financial-metrics/csv
+```
+
+The validation endpoint does not persist data. The session endpoints attach or retrieve structured metrics for a specific analysis session.
+
+### Metrics Provider Order
+
+When the financial DataAgent workflow is enabled, metrics are loaded in this order:
+
+1. metrics persisted in the current `AnalysisSession.ContextJson`,
+2. fixture fallback, only when `DataAgent__UseFixtureMetricsFallback=true`,
+3. safe result or legacy fallback depending on configuration.
+
+### Structured Input Configuration
+
+`DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
+
+Development configuration for structured financial analysis:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UsePythonFinancialAnalysis=true
+DataAgent__UseLegacyAnomalyDetectionFallback=true
+DataAgent__UseFixtureMetricsFallback=true
+```
+
+### Structured Input Limitations
+
+This phase does not include:
+
+- file upload,
+- PDF parsing,
+- OCR,
+- table extraction from visual reports,
+- LLM-based financial metric extraction,
+- accounting correctness guarantees.
+
+The system validates structure and computes advisory risk signals. It does not verify that the source document was transcribed correctly.
+
+Structured metrics may be incomplete or manually provided. Missing data produces warnings or limitations instead of invented values.
+
 ## Screenshots
 
 ### Planner Review
@@ -577,6 +704,14 @@ The financial analysis pipeline currently uses structured financial metrics, inc
 ### Financial Risk Evidence
 
 ![Financial Risk Evidence](docs/screenshots/financial-risk-evidence.png)
+
+### Structured Metrics Input
+
+![Structured Metrics Input](docs/screenshots/structured-metrics-input.png)
+
+### Financial Risk Evidence from Structured Input
+
+![Financial Risk Evidence from Structured Input](docs/screenshots/financial-risk-evidence-structured-input.png)
 
 ### Compliance Evidence
 
@@ -676,6 +811,7 @@ Defaults are safe. When financial analysis is disabled, the DataAgent uses the l
 DataAgent__FinancialAnalysisToolsEnabled=false
 DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
+DataAgent__UseFixtureMetricsFallback=true
 DataAgent__RiskThresholdProfile=default_oil_and_gas_equity_research
 DataAgent__StructuredMetricsFixturePath=<optional>
 ```
@@ -767,7 +903,7 @@ cd backend
 dotnet test
 ```
 
-Latest validated backend suite: 142 tests.
+Latest validated backend suite: 195 tests.
 Latest validated Python financial-analysis suite: 11 tests.
 
 Current test coverage includes:
@@ -795,6 +931,11 @@ Current test coverage includes:
 - ControlledToolExecutor financial-tool execution,
 - DataAgent financial workflow fallback behavior,
 - `financialAnalysis` context mapping,
+- structured financial metrics validation,
+- structured JSON metrics persistence,
+- structured CSV metrics ingestion,
+- session metrics provider ordering,
+- structured metrics input UI compatibility,
 - frontend build compatibility,
 - CSnakes DataAgent integration,
 - Semantic Kernel DataAgent wrapper,
@@ -836,14 +977,16 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ## Roadmap
 
-### Next: Structured Financial Input and Extraction
+### Next: Structured Financial File Upload and Extraction
 
-The structured financial-analysis workflow is available behind configuration. The next planned work is replacing the sample fixture with safer input paths and richer validation.
+The structured financial-analysis workflow can now consume JSON or CSV metrics pasted into the dashboard and persisted in the session context.
 
 Planned upgrades:
 
-- replace the fixture provider with uploaded structured inputs,
-- add CSV/JSON financial metrics ingestion,
+- add JSON file upload,
+- add CSV file upload,
+- add file size limits and upload validation,
+- add client-side preview before persistence,
 - add validation for financial consistency,
 - later evaluate PDF table extraction or OCR,
 - later evaluate LLM-assisted metric extraction with human review.
