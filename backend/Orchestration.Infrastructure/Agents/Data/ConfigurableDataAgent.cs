@@ -29,14 +29,26 @@ public sealed class ConfigurableDataAgent : IDataAgent
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
-        if (!_options.FinancialAnalysisToolsEnabled ||
-            !_options.UsePythonFinancialAnalysis)
+        var financialWorkflowEnabled =
+            _options.FinancialAnalysisToolsEnabled &&
+            _options.UsePythonFinancialAnalysis;
+
+        _logger.LogInformation(
+            "DataAgent financial workflow enabled: {FinancialWorkflowEnabled}",
+            financialWorkflowEnabled
+        );
+
+        if (!financialWorkflowEnabled)
         {
+            _logger.LogInformation("Using legacy anomaly detection workflow.");
+
             return await _legacyDataAgent.AnalyzeAsync(report, cancellationToken);
         }
 
         try
         {
+            _logger.LogInformation("Using financial analysis workflow.");
+
             return await _financialAnalysisWorkflow.AnalyzeAsync(
                 report,
                 cancellationToken
@@ -56,6 +68,8 @@ public sealed class ConfigurableDataAgent : IDataAgent
 
             if (_options.UseLegacyAnomalyDetectionFallback)
             {
+                _logger.LogWarning("Financial workflow failed; using legacy fallback.");
+
                 var fallback = await _legacyDataAgent.AnalyzeAsync(
                     report,
                     cancellationToken

@@ -9,6 +9,19 @@ var llmServiceId = builder.Configuration["Llm:ServiceId"];
 var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
 var toolCallingExecutionMode = builder.Configuration["ToolCalling:ExecutionMode"];
 
+var dataAgentFinancialAnalysisToolsEnabled =
+    builder.Configuration["DataAgent:FinancialAnalysisToolsEnabled"];
+var dataAgentUsePythonFinancialAnalysis =
+    builder.Configuration["DataAgent:UsePythonFinancialAnalysis"];
+var dataAgentUseLegacyAnomalyDetectionFallback =
+    builder.Configuration["DataAgent:UseLegacyAnomalyDetectionFallback"];
+var dataAgentUseFixtureMetricsFallback =
+    builder.Configuration["DataAgent:UseFixtureMetricsFallback"];
+var dataAgentRiskThresholdProfile =
+    builder.Configuration["DataAgent:RiskThresholdProfile"];
+var dataAgentStructuredMetricsFixturePath =
+    builder.Configuration["DataAgent:StructuredMetricsFixturePath"];
+
 var postgres = builder
     .AddPostgres("postgres")
     .WithImage("pgvector/pgvector", "pg17")
@@ -82,6 +95,12 @@ var api = builder
     .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
     .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
     .WithEnvironment("ToolCalling__ExecutionMode", toolCallingExecutionMode ?? "Shadow")
+    .WithEnvironment("DataAgent__FinancialAnalysisToolsEnabled", dataAgentFinancialAnalysisToolsEnabled ?? "false")
+    .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
+    .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")
+    .WithEnvironment("DataAgent__UseFixtureMetricsFallback", dataAgentUseFixtureMetricsFallback ?? "true")
+    .WithEnvironment("DataAgent__RiskThresholdProfile", dataAgentRiskThresholdProfile ?? "default_oil_and_gas_equity_research")
+    .WithEnvironment("DataAgent__StructuredMetricsFixturePath", dataAgentStructuredMetricsFixturePath ?? "")
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)
