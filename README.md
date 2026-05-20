@@ -562,7 +562,7 @@ The financial analysis pipeline currently uses structured financial metrics, inc
 
 ## Structured Financial Metrics Input
 
-The platform supports structured financial metrics input through JSON or CSV.
+The platform supports structured financial metrics input through pasted JSON, pasted CSV, or uploaded `.json` / `.csv` files.
 
 The input is validated, normalized, persisted in the analysis session context, and later consumed by the DataAgent financial workflow.
 
@@ -570,7 +570,7 @@ Current flow:
 
 ```text
 Create Analysis Session
-  -> Attach JSON or CSV structured metrics
+  -> Attach pasted JSON, pasted CSV, or uploaded JSON/CSV structured metrics
   -> Validate and persist metrics in ContextJson
   -> Start Session
   -> DataAgent loads persisted metrics first
@@ -580,6 +580,12 @@ Create Analysis Session
 ```
 
 Saving metrics does not start the analysis automatically and does not change the workflow state. The user must explicitly start the session.
+
+Supported dashboard input modes:
+
+- Paste JSON,
+- Paste CSV,
+- Upload JSON/CSV file.
 
 Structured metrics are persisted in `AnalysisSession.ContextJson` under:
 
@@ -654,7 +660,7 @@ The validation endpoint does not persist data. The session endpoints attach or r
 
 ### Structured Metrics File Upload
 
-The API supports uploading structured `.json` and `.csv` files.
+The dashboard and API support uploading structured `.json` and `.csv` files.
 
 ```http
 POST /api/analysis-sessions/{sessionId}/financial-metrics/file
@@ -684,6 +690,8 @@ Supported formats:
 - `.csv`
 
 The default upload size limit is 1 MB.
+
+The file upload path uses the same validation, normalization, and session persistence flow as pasted JSON or CSV input. Analysis still starts only when the user clicks `Start Session`.
 
 This is not PDF parsing, OCR, Excel ingestion, or LLM extraction.
 
@@ -720,7 +728,7 @@ StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
 
 This phase does not include:
 
-- file upload,
+- Excel ingestion,
 - PDF parsing,
 - OCR,
 - table extraction from visual reports,
@@ -753,9 +761,17 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 
 ![Structured Metrics Input](docs/screenshots/structured-metrics-input.png)
 
+### Structured Metrics File Upload
+
+![Structured Metrics File Upload](docs/screenshots/structured-metrics-file-upload.png)
+
 ### Financial Risk Evidence from Structured Input
 
 ![Financial Risk Evidence from Structured Input](docs/screenshots/financial-risk-evidence-structured-input.png)
+
+### Financial Risk Evidence from Uploaded Metrics
+
+![Financial Risk Evidence from Uploaded Metrics](docs/screenshots/financial-risk-evidence-uploaded-metrics.png)
 
 ### Compliance Evidence
 
@@ -1022,17 +1038,14 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ## Roadmap
 
-### Next: Structured Financial File Upload and Extraction
+### Next: Structured Financial Input Hardening and Extraction
 
-The structured financial-analysis workflow can now consume JSON or CSV metrics pasted into the dashboard and persisted in the session context.
+The structured financial-analysis workflow can now consume pasted JSON, pasted CSV, uploaded JSON files, or uploaded CSV files persisted in the session context.
 
 Planned upgrades:
 
-- add JSON file upload,
-- add CSV file upload,
-- add file size limits and upload validation,
 - add client-side preview before persistence,
-- add validation for financial consistency,
+- add stronger financial consistency validation,
 - later evaluate PDF table extraction or OCR,
 - later evaluate LLM-assisted metric extraction with human review.
 

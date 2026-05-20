@@ -271,6 +271,57 @@ public class AnalysisOrchestratorContextTests
             .Be("Anomaly detected.");
     }
 
+    [Fact]
+    public void BuildAnalysisContext_Should_preserve_structured_financial_metrics()
+    {
+        const string existingContextJson = """
+        {
+          "structuredFinancialMetrics": {
+            "documentId": "uploaded-json-metrics-test",
+            "company": "Uploaded JSON Test Co",
+            "currency": "USD",
+            "unit": "USD_thousand",
+            "metrics": [
+              {
+                "name": "revenue",
+                "period": "2024A",
+                "value": 1647768,
+                "unit": "USD_thousand",
+                "currency": "USD",
+                "source": "manual_upload",
+                "sourcePage": 18,
+                "confidence": 0.9
+              }
+            ],
+            "validationWarnings": [],
+            "uploadedAt": "2026-05-20T00:00:00Z"
+          }
+        }
+        """;
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(
+            CreatePlannerResult(ToolPlanAuditResult.Empty),
+            existingContextJson
+        );
+
+        using var document = JsonDocument.Parse(contextJson);
+        var structuredMetrics = document.RootElement.GetProperty("structuredFinancialMetrics");
+
+        structuredMetrics.GetProperty("documentId").GetString()
+            .Should()
+            .Be("uploaded-json-metrics-test");
+        structuredMetrics.GetProperty("company").GetString()
+            .Should()
+            .Be("Uploaded JSON Test Co");
+        structuredMetrics.GetProperty("metrics")[0].GetProperty("name").GetString()
+            .Should()
+            .Be("revenue");
+
+        document.RootElement.GetProperty("planner").GetProperty("summary").GetString()
+            .Should()
+            .Be("Planner reviewed collected evidence.");
+    }
+
     private static PlannerAgentResult CreatePlannerResult(
         ToolPlanAuditResult toolPlan,
         FinancialAnalysisContext? financialAnalysisContext = null)

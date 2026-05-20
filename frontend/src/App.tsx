@@ -653,8 +653,11 @@ function FinancialRiskEvidencePanel({
         <div className="financialSection">
           <strong>Risk signals</strong>
           <div className="financialSignalList">
-            {visibleSignals.map((signal) => (
-              <article className="financialSignalCard" key={signal.code}>
+            {visibleSignals.map((signal, index) => (
+              <article
+                className="financialSignalCard"
+                key={`${signal.code}-${signal.metric}-${signal.period}-${index}`}
+              >
                 <span className={`severityPill severity-${signal.severity}`}>
                   {signal.severity}
                 </span>

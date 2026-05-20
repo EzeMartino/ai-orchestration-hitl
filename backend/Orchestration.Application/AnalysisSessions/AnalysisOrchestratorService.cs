@@ -7,6 +7,7 @@ using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using System.Text.Json.Nodes;
 
 namespace Orchestration.Application.AnalysisSessions
 {
@@ -72,7 +73,7 @@ namespace Orchestration.Application.AnalysisSessions
                 cancellationToken
             );
 
-            session.SetContext(BuildAnalysisContext(plannerResult));
+            session.SetContext(BuildAnalysisContext(plannerResult, session.ContextJson));
 
             if (plannerResult.RequiresHumanApproval)
             {
@@ -266,7 +267,9 @@ namespace Orchestration.Application.AnalysisSessions
             );
         }
 
-        internal static string BuildAnalysisContext(PlannerAgentResult plannerResult)
+        internal static string BuildAnalysisContext(
+            PlannerAgentResult plannerResult,
+            string? existingContextJson = null)
         {
             var context = new
             {
@@ -419,7 +422,10 @@ namespace Orchestration.Application.AnalysisSessions
                 }
             };
 
-            return JsonSerializer.Serialize(context);
+            return PreserveStructuredFinancialMetrics(
+                JsonSerializer.Serialize(context),
+                existingContextJson
+            );
         }
 
         private static string ResolveFinancialEvidenceSeverity(
@@ -433,6 +439,43 @@ namespace Orchestration.Application.AnalysisSessions
                         item.Period == evidence.Period
                     )
                 )?.Severity ?? "Info";
+        }
+
+        private static string PreserveStructuredFinancialMetrics(
+            string contextJson,
+            string? existingContextJson)
+        {
+            if (string.IsNullOrWhiteSpace(existingContextJson))
+            {
+                return contextJson;
+            }
+
+            try
+            {
+                var existingRoot = JsonNode.Parse(existingContextJson) as JsonObject;
+                var structuredMetrics = existingRoot?["structuredFinancialMetrics"];
+
+                if (structuredMetrics is null)
+                {
+                    return contextJson;
+                }
+
+                var contextRoot = JsonNode.Parse(contextJson) as JsonObject;
+
+                if (contextRoot is null)
+                {
+                    return contextJson;
+                }
+
+                contextRoot["structuredFinancialMetrics"] =
+                    JsonNode.Parse(structuredMetrics.ToJsonString());
+
+                return contextRoot.ToJsonString();
+            }
+            catch (JsonException)
+            {
+                return contextJson;
+            }
         }
     }
 }
