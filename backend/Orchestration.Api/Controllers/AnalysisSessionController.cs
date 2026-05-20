@@ -1,5 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using System.Text;
+using System.Text.Json;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Application.AnalysisSessions;
@@ -15,17 +18,26 @@ public class AnalysisSessionsController : ControllerBase
     private readonly AnalysisOrchestratorService _orchestrator;
     private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService;
     private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser;
+    private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions;
+
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true
+        };
 
     public AnalysisSessionsController(
         OrchestrationDbContext dbContext,
         AnalysisOrchestratorService orchestrator,
         IStructuredFinancialMetricsSessionService financialMetricsSessionService,
-        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser)
+        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
+        IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions)
     {
         _dbContext = dbContext;
         _orchestrator = orchestrator;
         _financialMetricsSessionService = financialMetricsSessionService;
         _financialMetricsCsvParser = financialMetricsCsvParser;
+        _fileUploadOptions = fileUploadOptions.Value;
     }
 
     [HttpGet]
@@ -253,45 +265,37 @@ public class AnalysisSessionsController : ControllerBase
             return BadRequest();
         }
 
-        var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+        return await SaveCsvInputAsync(id, input, cancellationToken);
+    }
 
-        if (!sessionExists)
+    [HttpPost("{id:guid}/financial-metrics/file")]
+    public async Task<IActionResult> SaveFinancialMetricsFile(
+        Guid id,
+        [FromForm] StructuredFinancialMetricsFileUploadRequest request,
+        CancellationToken cancellationToken)
+    {
+        var fileValidationResult = ValidateUploadedFile(request?.File);
+
+        if (fileValidationResult is not null)
         {
-            return NotFound();
+            return fileValidationResult;
         }
 
-        var parseResult = _financialMetricsCsvParser.Parse(input);
+        var file = request!.File!;
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var content = await ReadFileContentAsync(file, cancellationToken);
 
-        if (!parseResult.IsValid || parseResult.Input is null)
+        if (string.IsNullOrWhiteSpace(content))
         {
-            return Ok(new SaveFinancialMetricsResponse(
-                id,
-                false,
-                null,
-                parseResult.Errors,
-                parseResult.Warnings
-            ));
+            return BadRequest(new FileUploadErrorResponse("Uploaded file is empty."));
         }
 
-        var result = await _financialMetricsSessionService.SaveAsync(
-            id,
-            parseResult.Input,
-            cancellationToken
-        );
-
-        if (result is null)
+        return extension switch
         {
-            return NotFound();
-        }
-
-        return Ok(new SaveFinancialMetricsResponse(
-            result.SessionId,
-            result.IsValid,
-            result.Context,
-            result.Errors,
-            result.Warnings
-        ));
+            ".json" => await SaveJsonFileAsync(id, request, content, cancellationToken),
+            ".csv" => await SaveCsvFileAsync(id, request, content, cancellationToken),
+            _ => BadRequest(new FileUploadErrorResponse("Unsupported file extension."))
+        };
     }
 
     [HttpGet("{id:guid}/financial-metrics")]
@@ -317,7 +321,265 @@ public class AnalysisSessionsController : ControllerBase
             Context: context
         ));
     }
+
+    private async Task<IActionResult> SaveJsonFileAsync(
+        Guid id,
+        StructuredFinancialMetricsFileUploadRequest request,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        StructuredFinancialMetricsInput? input;
+
+        try
+        {
+            input = JsonSerializer.Deserialize<StructuredFinancialMetricsInput>(
+                content,
+                JsonOptions
+            );
+        }
+        catch (JsonException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid JSON file."));
+        }
+
+        if (input is null)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid JSON file."));
+        }
+
+        var result = await _financialMetricsSessionService.SaveAsync(
+            id,
+            ApplyFallbackMetadata(input, request),
+            cancellationToken
+        );
+
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(CreateFileResponse(request.File!, "json", result));
+    }
+
+    private async Task<IActionResult> SaveCsvFileAsync(
+        Guid id,
+        StructuredFinancialMetricsFileUploadRequest request,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.DocumentId))
+        {
+            return BadRequest(new FileUploadErrorResponse(
+                "DocumentId is required for CSV uploads."
+            ));
+        }
+
+        var result = await SaveCsvInputCoreAsync(
+            id,
+            new StructuredFinancialMetricsCsvInput(
+                DocumentId: request.DocumentId,
+                Company: request.Company,
+                Currency: request.Currency,
+                Unit: request.Unit,
+                Csv: content
+            ),
+            cancellationToken
+        );
+
+        return result.SaveResult is null
+            ? result.ActionResult
+            : Ok(CreateFileResponse(request.File!, "csv", result.SaveResult));
+    }
+
+    private async Task<IActionResult> SaveCsvInputAsync(
+        Guid id,
+        StructuredFinancialMetricsCsvInput input,
+        CancellationToken cancellationToken)
+    {
+        var result = await SaveCsvInputCoreAsync(id, input, cancellationToken);
+
+        return result.ActionResult;
+    }
+
+    private async Task<CsvSaveResult> SaveCsvInputCoreAsync(
+        Guid id,
+        StructuredFinancialMetricsCsvInput input,
+        CancellationToken cancellationToken)
+    {
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return new CsvSaveResult(NotFound(), null);
+        }
+
+        var parseResult = _financialMetricsCsvParser.Parse(input);
+
+        if (!parseResult.IsValid || parseResult.Input is null)
+        {
+            var invalidResult = new FinancialMetricsSessionSaveResult(
+                SessionId: id,
+                IsValid: false,
+                Context: null,
+                Errors: parseResult.Errors,
+                Warnings: parseResult.Warnings
+            );
+
+            return new CsvSaveResult(
+                Ok(new SaveFinancialMetricsResponse(
+                    invalidResult.SessionId,
+                    invalidResult.IsValid,
+                    invalidResult.Context,
+                    invalidResult.Errors,
+                    invalidResult.Warnings
+                )),
+                invalidResult
+            );
+        }
+
+        var saveResult = await _financialMetricsSessionService.SaveAsync(
+            id,
+            parseResult.Input,
+            cancellationToken
+        );
+
+        if (saveResult is null)
+        {
+            return new CsvSaveResult(NotFound(), null);
+        }
+
+        return new CsvSaveResult(
+            Ok(new SaveFinancialMetricsResponse(
+                saveResult.SessionId,
+                saveResult.IsValid,
+                saveResult.Context,
+                saveResult.Errors,
+                saveResult.Warnings
+            )),
+            saveResult
+        );
+    }
+
+    private IActionResult? ValidateUploadedFile(
+        IFormFile? file)
+    {
+        if (file is null)
+        {
+            return BadRequest(new FileUploadErrorResponse("Missing file."));
+        }
+
+        if (file.Length <= 0)
+        {
+            return BadRequest(new FileUploadErrorResponse("Empty file."));
+        }
+
+        if (file.Length > _fileUploadOptions.MaxFileSizeBytes)
+        {
+            return BadRequest(new FileUploadErrorResponse(
+                "File exceeds maximum allowed size."
+            ));
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+        if (!_fileUploadOptions.AllowedExtensions.Contains(
+            extension,
+            StringComparer.OrdinalIgnoreCase
+        ))
+        {
+            return BadRequest(new FileUploadErrorResponse(
+                "Unsupported file extension."
+            ));
+        }
+
+        return null;
+    }
+
+    private static async Task<string> ReadFileContentAsync(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(
+            file.OpenReadStream(),
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true
+        );
+
+        return await reader.ReadToEndAsync(cancellationToken);
+    }
+
+    private static StructuredFinancialMetricsInput ApplyFallbackMetadata(
+        StructuredFinancialMetricsInput input,
+        StructuredFinancialMetricsFileUploadRequest request)
+    {
+        return input with
+        {
+            DocumentId = string.IsNullOrWhiteSpace(input.DocumentId)
+                ? request.DocumentId ?? ""
+                : input.DocumentId,
+            Company = string.IsNullOrWhiteSpace(input.Company)
+                ? request.Company
+                : input.Company,
+            Currency = string.IsNullOrWhiteSpace(input.Currency)
+                ? request.Currency
+                : input.Currency,
+            Unit = string.IsNullOrWhiteSpace(input.Unit)
+                ? request.Unit
+                : input.Unit
+        };
+    }
+
+    private static SaveFinancialMetricsFileResponse CreateFileResponse(
+        IFormFile file,
+        string fileType,
+        FinancialMetricsSessionSaveResult result)
+    {
+        return new SaveFinancialMetricsFileResponse(
+            SessionId: result.SessionId,
+            IsValid: result.IsValid,
+            Context: result.Context,
+            Errors: result.Errors,
+            Warnings: result.Warnings,
+            FileName: Path.GetFileName(file.FileName),
+            FileType: fileType,
+            FileSizeBytes: file.Length
+        );
+    }
+
+    private sealed record CsvSaveResult(
+        IActionResult ActionResult,
+        FinancialMetricsSessionSaveResult? SaveResult
+    );
 }
+
+public sealed class StructuredFinancialMetricsFileUploadRequest
+{
+    public IFormFile? File { get; init; }
+
+    public string? DocumentId { get; init; }
+
+    public string? Company { get; init; }
+
+    public string? Currency { get; init; }
+
+    public string? Unit { get; init; }
+}
+
+public sealed record SaveFinancialMetricsFileResponse(
+    Guid SessionId,
+    bool IsValid,
+    StructuredFinancialMetricsContext? Context,
+    IReadOnlyList<FinancialMetricsValidationIssue> Errors,
+    IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
+    string FileName,
+    string FileType,
+    long FileSizeBytes
+);
+
+public sealed record FileUploadErrorResponse(
+    string Error
+);
 
 public sealed record SaveFinancialMetricsResponse(
     Guid SessionId,

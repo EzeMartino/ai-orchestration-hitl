@@ -55,6 +55,9 @@ builder.Services.AddScoped<IPlannerAgent, PlannerAgent>();
 builder.Services.Configure<DataAgentOptions>(
     builder.Configuration.GetSection(DataAgentOptions.SectionName)
 );
+builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
+    builder.Configuration.GetSection(StructuredFinancialMetricsFileUploadOptions.SectionName)
+);
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
 builder.Services.AddScoped<SemanticKernelDataAgent>();

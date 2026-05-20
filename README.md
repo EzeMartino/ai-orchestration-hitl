@@ -647,9 +647,45 @@ POST /api/financial-metrics/validate
 POST /api/analysis-sessions/{sessionId}/financial-metrics
 GET  /api/analysis-sessions/{sessionId}/financial-metrics
 POST /api/analysis-sessions/{sessionId}/financial-metrics/csv
+POST /api/analysis-sessions/{sessionId}/financial-metrics/file
 ```
 
 The validation endpoint does not persist data. The session endpoints attach or retrieve structured metrics for a specific analysis session.
+
+### Structured Metrics File Upload
+
+The API supports uploading structured `.json` and `.csv` files.
+
+```http
+POST /api/analysis-sessions/{sessionId}/financial-metrics/file
+```
+
+Content type:
+
+```text
+multipart/form-data
+```
+
+Form fields:
+
+- `file`: required `.json` or `.csv` file,
+- `documentId`: optional for JSON, required for CSV,
+- `company`: optional,
+- `currency`: optional,
+- `unit`: optional.
+
+Uploaded files are parsed in memory, validated, normalized, and persisted as structured metrics in the analysis session context.
+
+The raw file is not stored.
+
+Supported formats:
+
+- `.json`
+- `.csv`
+
+The default upload size limit is 1 MB.
+
+This is not PDF parsing, OCR, Excel ingestion, or LLM extraction.
 
 ### Metrics Provider Order
 
@@ -670,6 +706,14 @@ DataAgent__FinancialAnalysisToolsEnabled=true
 DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
 DataAgent__UseFixtureMetricsFallback=true
+```
+
+Structured file upload defaults:
+
+```text
+StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=1048576
+StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
+StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
 ```
 
 ### Structured Input Limitations
@@ -903,7 +947,7 @@ cd backend
 dotnet test
 ```
 
-Latest validated backend suite: 195 tests.
+Latest validated backend suite: 210 tests.
 Latest validated Python financial-analysis suite: 11 tests.
 
 Current test coverage includes:
@@ -934,6 +978,7 @@ Current test coverage includes:
 - structured financial metrics validation,
 - structured JSON metrics persistence,
 - structured CSV metrics ingestion,
+- structured JSON/CSV metrics file upload,
 - session metrics provider ordering,
 - structured metrics input UI compatibility,
 - frontend build compatibility,
