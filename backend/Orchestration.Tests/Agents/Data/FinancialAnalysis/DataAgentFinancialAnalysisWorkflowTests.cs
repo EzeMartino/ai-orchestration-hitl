@@ -36,9 +36,8 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             evidence.Value == 3.75 &&
             evidence.Threshold == 3.0
         );
-        result.Evidence.Should().Contain(evidence =>
-            evidence.Metric == "FinancialAnalysisWarning" &&
-            evidence.Interpretation.Contains("Human review recommended.", StringComparison.Ordinal)
+        result.Evidence.Should().NotContain(evidence =>
+            evidence.Metric == "FinancialAnalysisWarning"
         );
         result.FinancialAnalysis.Should().NotBeNull();
         result.FinancialAnalysis!.DocumentId.Should().Be("vista-energy-fixture");
@@ -50,6 +49,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             evidence.MetricName == "net_debt_to_ebitda"
         );
         result.FinancialAnalysis.Warnings.Should().Contain("Structured metrics only.");
+        result.FinancialAnalysis.Warnings.Should().Contain("Human review recommended.");
         result.FinancialAnalysis.Limitations.Should().Contain(limitation =>
             limitation.Contains("structured metrics only", StringComparison.OrdinalIgnoreCase)
         );
@@ -107,6 +107,34 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             metric.Unit == "ARS_thousand" &&
             metric.Currency == "ARS"
         );
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_not_turn_warnings_into_anomaly_evidence_when_no_risk_signals_exist()
+    {
+        var provider = new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument());
+        var service = new FakePythonFinancialAnalysisService
+        {
+            ReturnNoRiskSignals = true,
+            RatioWarnings = ["Missing input metric: current_liabilities."],
+            SignalWarnings = ["Insufficient comparable periods for trend risk signals."]
+        };
+        var workflow = CreateWorkflow(provider, service);
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.HasAnomaly.Should().BeFalse();
+        result.Severity.Should().Be("Low");
+        result.Evidence.Should().BeEmpty();
+        result.Summary.Should().Contain("No quantitative risk signals were detected");
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.RiskSignals.Should().BeEmpty();
+        result.FinancialAnalysis.RiskEvidence.Should().BeEmpty();
+        result.FinancialAnalysis.Warnings.Should().Contain("Missing input metric: current_liabilities.");
+        result.FinancialAnalysis.Warnings.Should().Contain("Insufficient comparable periods for trend risk signals.");
     }
 
     private static DataAgentFinancialAnalysisWorkflow CreateWorkflow(
@@ -201,6 +229,8 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
 
         public IReadOnlyList<string> SignalWarnings { get; init; } = [];
 
+        public bool ReturnNoRiskSignals { get; init; }
+
         public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
             ComputeFinancialRatiosRequest request,
             CancellationToken cancellationToken)
@@ -254,6 +284,22 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             DetectFinancialRiskSignalsRequest request,
             CancellationToken cancellationToken)
         {
+            if (ReturnNoRiskSignals)
+            {
+                return Task.FromResult(new DetectFinancialRiskSignalsResponse(
+                    Engine: "Fake Financial Analysis",
+                    Signals: [],
+                    Result: new FinancialAnalysisToolResult(
+                        HasRiskSignals: false,
+                        RiskLevel: "Low",
+                        Summary: "No financial risk signals detected.",
+                        Engine: "Fake Financial Analysis",
+                        Evidence: [],
+                        Warnings: SignalWarnings
+                    )
+                ));
+            }
+
             var leverageEvidence = new RiskEvidenceItem(
                 MetricName: "net_debt_to_ebitda",
                 Period: "2025E",
@@ -306,6 +352,22 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             SummarizeQuantitativeEvidenceRequest request,
             CancellationToken cancellationToken)
         {
+            if (ReturnNoRiskSignals)
+            {
+                return Task.FromResult(new SummarizeQuantitativeEvidenceResponse(
+                    Engine: "Fake Financial Analysis",
+                    Narrative: "No quantitative risk signals were detected from the provided structured metrics. Review warnings and limitations for data coverage.",
+                    Result: new FinancialAnalysisToolResult(
+                        HasRiskSignals: false,
+                        RiskLevel: "Low",
+                        Summary: "No quantitative risk signals were detected.",
+                        Engine: "Fake Financial Analysis",
+                        Evidence: [],
+                        Warnings: []
+                    )
+                ));
+            }
+
             var evidence = new RiskEvidenceItem(
                 MetricName: "net_debt_to_ebitda",
                 Period: "2025E",

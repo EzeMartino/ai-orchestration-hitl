@@ -1465,6 +1465,7 @@ function App() {
   const toolPlan = analysisContext?.toolPlan;
   const anomaly = analysisContext?.anomaly;
   const financialAnalysis = analysisContext?.financialAnalysis;
+  const hasFinancialAnalysis = Boolean(financialAnalysis);
   const compliance = analysisContext?.compliance;
 
   return (
@@ -1580,8 +1581,10 @@ function App() {
 
           <PlannerPanel planner={planner} />
           <ToolPlanAuditPanel toolPlan={toolPlan} />
-          <EvidencePanel anomaly={anomaly} />
-          <FinancialRiskEvidencePanel financialAnalysis={financialAnalysis} />
+          {!hasFinancialAnalysis && <EvidencePanel anomaly={anomaly} />}
+          {hasFinancialAnalysis && (
+            <FinancialRiskEvidencePanel financialAnalysis={financialAnalysis} />
+          )}
           <CompliancePanel compliance={compliance} />
 
           {session?.status === "Completed" && (

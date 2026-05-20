@@ -125,13 +125,10 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
 
         var evidence = MapEvidence(
             signals.Signals,
-            summary.Result.Evidence,
-            warnings
+            summary.Result.Evidence
         );
         var severity = ResolveSeverity(signals.Signals.Select(signal => signal.Severity));
-        var hasAnomaly = IsMediumOrHigh(severity) ||
-            IsMediumOrHigh(signals.Result.RiskLevel) ||
-            signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
+        var hasAnomaly = signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
 
         return new DataAgentResult(
             HasAnomaly: hasAnomaly,
@@ -186,10 +183,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
 
     private static IReadOnlyList<AnomalyEvidence> MapEvidence(
         IReadOnlyList<FinancialRiskSignal> signals,
-        IReadOnlyList<RiskEvidenceItem> summaryEvidence,
-        IReadOnlyList<string> warnings)
+        IReadOnlyList<RiskEvidenceItem> summaryEvidence)
     {
-        var evidence = signals
+        return signals
             .SelectMany(signal => signal.Evidence.Select(item => MapEvidenceItem(item, signal)))
             .Concat(summaryEvidence.Select(item => MapEvidenceItem(item, null)))
             .DistinctBy(item => new
@@ -200,18 +196,6 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 item.Interpretation
             })
             .ToList();
-
-        if (warnings.Count > 0)
-        {
-            evidence.Add(new AnomalyEvidence(
-                Metric: "FinancialAnalysisWarning",
-                Value: 0,
-                Threshold: 0,
-                Interpretation: string.Join(" ", warnings)
-            ));
-        }
-
-        return evidence;
     }
 
     private static AnomalyEvidence MapEvidenceItem(
