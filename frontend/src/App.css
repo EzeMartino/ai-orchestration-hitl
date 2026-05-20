@@ -660,6 +660,46 @@ code {
   gap: 0.75rem;
 }
 
+.fileUploadBox {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px dashed #94a3b8;
+  border-radius: 16px;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.fileUploadBox input[type="file"] {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.75rem;
+  background: white;
+  color: #0f172a;
+}
+
+.fileUploadBox p {
+  margin: 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.selectedFileSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  align-items: center;
+  border-radius: 12px;
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  color: #155e75;
+  padding: 0.75rem;
+}
+
+.selectedFileSummary span {
+  overflow-wrap: anywhere;
+}
+
 .metricsEditor button {
   justify-self: flex-start;
   background: #0f766e;

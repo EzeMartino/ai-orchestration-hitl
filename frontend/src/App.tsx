@@ -191,6 +191,13 @@ type StructuredFinancialMetricsCsvInput = {
   csv: string;
 };
 
+type StructuredFinancialMetricsFileMetadata = {
+  documentId?: string | null;
+  company?: string | null;
+  currency?: string | null;
+  unit?: string | null;
+};
+
 type FinancialMetricsValidationIssue = {
   code: string;
   message: string;
@@ -234,6 +241,10 @@ type GetFinancialMetricsResponse = {
   context?: StructuredFinancialMetricsContext | null;
 };
 
+type FileUploadErrorResponse = {
+  error?: string;
+};
+
 type AnalysisContext = {
   summary?: string;
   planner?: PlannerContext;
@@ -252,6 +263,8 @@ type AnalysisContext = {
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
+const maxStructuredMetricsFileSizeBytes = 1_048_576;
+const allowedStructuredMetricsFileExtensions = [".json", ".csv"];
 
 const jsonMetricsTemplate = JSON.stringify(
   {
@@ -717,6 +730,7 @@ function StructuredFinancialMetricsPanel({
   saveError,
   onSaveJson,
   onSaveCsv,
+  onUploadFile,
 }: {
   sessionId?: string;
   metricsContext?: StructuredFinancialMetricsContext | null;
@@ -726,14 +740,23 @@ function StructuredFinancialMetricsPanel({
   saveError?: string | null;
   onSaveJson: (input: StructuredFinancialMetricsInput) => Promise<void>;
   onSaveCsv: (input: StructuredFinancialMetricsCsvInput) => Promise<void>;
+  onUploadFile: (
+    file: File,
+    metadata: StructuredFinancialMetricsFileMetadata
+  ) => Promise<void>;
 }) {
-  const [mode, setMode] = useState<"json" | "csv">("json");
+  const [mode, setMode] = useState<"json" | "csv" | "file">("json");
   const [jsonText, setJsonText] = useState(jsonMetricsTemplate);
   const [csvDocumentId, setCsvDocumentId] = useState("manual-csv-input");
   const [csvCompany, setCsvCompany] = useState("Manual Test Co");
   const [csvCurrency, setCsvCurrency] = useState("USD");
   const [csvUnit, setCsvUnit] = useState("USD_thousand");
   const [csvText, setCsvText] = useState(csvMetricsTemplate);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileDocumentId, setFileDocumentId] = useState("manual-file-input");
+  const [fileCompany, setFileCompany] = useState("Manual Test Co");
+  const [fileCurrency, setFileCurrency] = useState("USD");
+  const [fileUnit, setFileUnit] = useState("USD_thousand");
   const [inputError, setInputError] = useState<string | null>(null);
 
   async function handleSaveJson() {
@@ -757,6 +780,44 @@ function StructuredFinancialMetricsPanel({
       currency: csvCurrency,
       unit: csvUnit,
       csv: csvText,
+    });
+  }
+
+  function handleFileSelected(file: File | null) {
+    setInputError(null);
+    setSelectedFile(file);
+  }
+
+  async function handleUploadFile() {
+    setInputError(null);
+
+    if (!selectedFile) {
+      setInputError("Select a JSON or CSV metrics file.");
+      return;
+    }
+
+    const extension = getFileExtension(selectedFile.name);
+
+    if (!allowedStructuredMetricsFileExtensions.includes(extension)) {
+      setInputError("Only .json and .csv files are supported.");
+      return;
+    }
+
+    if (selectedFile.size > maxStructuredMetricsFileSizeBytes) {
+      setInputError("Only files up to 1 MB are supported.");
+      return;
+    }
+
+    if (extension === ".csv" && fileDocumentId.trim().length === 0) {
+      setInputError("DocumentId is required for CSV uploads.");
+      return;
+    }
+
+    await onUploadFile(selectedFile, {
+      documentId: fileDocumentId,
+      company: fileCompany,
+      currency: fileCurrency,
+      unit: fileUnit,
     });
   }
 
@@ -806,6 +867,13 @@ function StructuredFinancialMetricsPanel({
         >
           CSV
         </button>
+        <button
+          className={mode === "file" ? "active" : ""}
+          onClick={() => setMode("file")}
+          type="button"
+        >
+          File Upload
+        </button>
       </div>
 
       {mode === "json" ? (
@@ -827,7 +895,7 @@ function StructuredFinancialMetricsPanel({
             {isSaving ? "Saving..." : "Save JSON Metrics"}
           </button>
         </div>
-      ) : (
+      ) : mode === "csv" ? (
         <div className="metricsEditor">
           <div className="csvMetaGrid">
             <label>
@@ -877,6 +945,75 @@ function StructuredFinancialMetricsPanel({
             {isSaving ? "Saving..." : "Save CSV Metrics"}
           </button>
         </div>
+      ) : (
+        <div className="metricsEditor">
+          <div className="fileUploadBox">
+            <label>
+              JSON or CSV file
+              <input
+                type="file"
+                accept=".json,.csv"
+                disabled={!sessionId || isSaving}
+                onChange={(event) =>
+                  handleFileSelected(event.currentTarget.files?.[0] ?? null)
+                }
+              />
+            </label>
+
+            <p>Only .json and .csv files up to 1 MB are supported.</p>
+
+            {selectedFile && (
+              <div className="selectedFileSummary">
+                <strong>Selected file</strong>
+                <span>{selectedFile.name}</span>
+                <span>{formatFileSize(selectedFile.size)}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="csvMetaGrid">
+            <label>
+              DocumentId
+              <input
+                value={fileDocumentId}
+                disabled={!sessionId || isSaving}
+                onChange={(event) => setFileDocumentId(event.target.value)}
+              />
+            </label>
+            <label>
+              Company
+              <input
+                value={fileCompany}
+                disabled={!sessionId || isSaving}
+                onChange={(event) => setFileCompany(event.target.value)}
+              />
+            </label>
+            <label>
+              Currency
+              <input
+                value={fileCurrency}
+                disabled={!sessionId || isSaving}
+                onChange={(event) => setFileCurrency(event.target.value)}
+              />
+            </label>
+            <label>
+              Unit
+              <input
+                value={fileUnit}
+                disabled={!sessionId || isSaving}
+                onChange={(event) => setFileUnit(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <button
+            onClick={handleUploadFile}
+            disabled={!sessionId || isSaving || !selectedFile}
+            type="button"
+          >
+            {isSaving ? "Uploading..." : "Upload File"}
+          </button>
+        </div>
       )}
 
       {(inputError || saveError) && (
@@ -893,7 +1030,9 @@ function StructuredFinancialMetricsPanel({
         >
           <strong>
             {saveResult.isValid
-              ? "Saved successfully"
+              ? mode === "file"
+                ? "File metrics saved successfully"
+                : "Saved successfully"
               : "Metrics were not persisted."}
           </strong>
 
@@ -951,6 +1090,26 @@ function formatNumber(value?: number | null) {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 3,
   }).format(value);
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function getFileExtension(fileName: string) {
+  const dotIndex = fileName.lastIndexOf(".");
+
+  return dotIndex >= 0
+    ? fileName.slice(dotIndex).toLowerCase()
+    : "";
 }
 
 function formatPercent(value?: number | null) {
@@ -1419,6 +1578,76 @@ function App() {
     );
   }
 
+  async function uploadFinancialMetricsFile(
+    file: File,
+    metadata: StructuredFinancialMetricsFileMetadata
+  ) {
+    if (!session) {
+      return;
+    }
+
+    setIsSavingStructuredMetrics(true);
+    setMetricsSaveError(null);
+    setMetricsSaveResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      if (metadata.documentId?.trim()) {
+        formData.append("documentId", metadata.documentId.trim());
+      }
+
+      if (metadata.company?.trim()) {
+        formData.append("company", metadata.company.trim());
+      }
+
+      if (metadata.currency?.trim()) {
+        formData.append("currency", metadata.currency.trim());
+      }
+
+      if (metadata.unit?.trim()) {
+        formData.append("unit", metadata.unit.trim());
+      }
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/analysis-sessions/${session.id}/financial-metrics/file`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const uploadError = (await response
+          .json()
+          .catch(() => ({}))) as FileUploadErrorResponse;
+
+        throw new Error(
+          uploadError.error ??
+            "File upload failed. Please check the file format and try again."
+        );
+      }
+
+      const result = (await response.json()) as SaveFinancialMetricsResponse;
+      setMetricsSaveResult(result);
+
+      if (result.isValid) {
+        await loadStructuredFinancialMetrics(session.id);
+        setSession(await loadSessionDetails(session.id));
+      }
+    } catch (error) {
+      console.error(error);
+      setMetricsSaveError(
+        error instanceof Error
+          ? error.message
+          : "File upload failed. Please check the file format and try again."
+      );
+    } finally {
+      setIsSavingStructuredMetrics(false);
+    }
+  }
+
   async function saveMetrics(
     url: string,
     payload: StructuredFinancialMetricsInput | StructuredFinancialMetricsCsvInput
@@ -1577,6 +1806,7 @@ function App() {
             saveError={metricsSaveError}
             onSaveJson={saveJsonMetrics}
             onSaveCsv={saveCsvMetrics}
+            onUploadFile={uploadFinancialMetricsFile}
           />
 
           <PlannerPanel planner={planner} />
