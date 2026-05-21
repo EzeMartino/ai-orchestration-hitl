@@ -596,6 +596,9 @@ function FinancialRiskEvidencePanel({
   const visibleEvidence = financialAnalysis.riskEvidence.slice(0, 6);
   const visibleSignals = financialAnalysis.riskSignals.slice(0, 6);
   const visibleRatios = financialAnalysis.ratios.slice(0, 6);
+  const metricsInputSource = financialAnalysis.metricsInputSource ?? "unknown";
+  const isFixtureFallback = metricsInputSource === "fixture_fallback";
+  const hasNoMetrics = metricsInputSource === "none";
 
   return (
     <section className="financialRiskPanel">
@@ -636,6 +639,19 @@ function FinancialRiskEvidencePanel({
           <strong>{financialAnalysis.documentId}</strong>
         </div>
       </div>
+
+      {isFixtureFallback && (
+        <div className="financialSourceWarning">
+          Fixture fallback metrics were used. Attach structured metrics to
+          analyze session-specific data.
+        </div>
+      )}
+
+      {hasNoMetrics && (
+        <div className="financialSourceWarning">
+          No structured financial metrics were available.
+        </div>
+      )}
 
       {visibleEvidence.length > 0 && (
         <div className="financialEvidenceGrid">
@@ -1360,7 +1376,8 @@ function getEventTone(type: string) {
 
   if (
     type.includes("planner_reasoning_fallback_used") ||
-    type.includes("tool_execution_fallback_used")
+    type.includes("tool_execution_fallback_used") ||
+    type.includes("financial_metrics_fixture_fallback_used")
   ) {
     return "event-warning";
   }

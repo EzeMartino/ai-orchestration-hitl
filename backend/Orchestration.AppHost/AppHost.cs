@@ -98,7 +98,7 @@ var api = builder
     .WithEnvironment("DataAgent__FinancialAnalysisToolsEnabled", dataAgentFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
     .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")
-    .WithEnvironment("DataAgent__UseFixtureMetricsFallback", dataAgentUseFixtureMetricsFallback ?? "true")
+    .WithEnvironment("DataAgent__UseFixtureMetricsFallback", dataAgentUseFixtureMetricsFallback ?? "false")
     .WithEnvironment("DataAgent__RiskThresholdProfile", dataAgentRiskThresholdProfile ?? "default_oil_and_gas_equity_research")
     .WithEnvironment("DataAgent__StructuredMetricsFixturePath", dataAgentStructuredMetricsFixturePath ?? "")
     .WithReference(orchestrationDb)

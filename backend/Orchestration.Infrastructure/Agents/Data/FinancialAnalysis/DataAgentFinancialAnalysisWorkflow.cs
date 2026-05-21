@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Shared;
@@ -13,6 +14,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private const string ComparisonPeriod = "2025E";
     private const string StructuredMetricsOnlyLimitation =
         "Financial analysis uses structured metrics only. It does not parse PDFs, perform OCR, or make operational decisions.";
+    private const string FixtureFallbackWarning =
+        "Fixture fallback metrics were used. This mode is intended for development/demo only.";
 
     private static readonly string[] RequestedRatios =
     [
@@ -44,17 +47,20 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private readonly IStructuredFinancialMetricsProvider _metricsProvider;
     private readonly IPythonFinancialAnalysisService _financialAnalysisService;
     private readonly DataAgentOptions _options;
+    private readonly IActivityEventPublisher _activityPublisher;
     private readonly ILogger<DataAgentFinancialAnalysisWorkflow> _logger;
 
     public DataAgentFinancialAnalysisWorkflow(
         IStructuredFinancialMetricsProvider metricsProvider,
         IPythonFinancialAnalysisService financialAnalysisService,
         IOptions<DataAgentOptions> options,
+        IActivityEventPublisher activityPublisher,
         ILogger<DataAgentFinancialAnalysisWorkflow> logger)
     {
         _metricsProvider = metricsProvider;
         _financialAnalysisService = financialAnalysisService;
         _options = options.Value;
+        _activityPublisher = activityPublisher;
         _logger = logger;
     }
 
@@ -120,8 +126,23 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
             .Concat(comparisons.Warnings)
             .Concat(signals.Result.Warnings)
             .Concat(summary.Result.Warnings)
+            .Concat(GetInputSourceWarnings(metricsDocument))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+
+        if (IsFixtureFallback(metricsDocument))
+        {
+            await _activityPublisher.PublishAsync(
+                new ActivityEvent(
+                    report.SessionId,
+                    "financial_metrics_fixture_fallback_used",
+                    "DataAgent",
+                    "Financial analysis used fixture fallback metrics because no session metrics were attached.",
+                    DateTimeOffset.UtcNow
+                ),
+                cancellationToken
+            );
+        }
 
         var evidence = MapEvidence(
             signals.Signals,
@@ -181,6 +202,24 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Limitations: [StructuredMetricsOnlyLimitation],
                 MetricsInputSource: FinancialMetricsInputSources.None
             )
+        );
+    }
+
+    private static IReadOnlyList<string> GetInputSourceWarnings(
+        StructuredFinancialMetricsDocument metricsDocument)
+    {
+        return IsFixtureFallback(metricsDocument)
+            ? [FixtureFallbackWarning]
+            : [];
+    }
+
+    private static bool IsFixtureFallback(
+        StructuredFinancialMetricsDocument metricsDocument)
+    {
+        return string.Equals(
+            metricsDocument.InputSource,
+            FinancialMetricsInputSources.FixtureFallback,
+            StringComparison.Ordinal
         );
     }
 

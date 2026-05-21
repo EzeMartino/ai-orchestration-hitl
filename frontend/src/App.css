@@ -857,6 +857,17 @@ code {
   word-break: break-word;
 }
 
+.financialSourceWarning {
+  margin-top: 1rem;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-left: 5px solid #f59e0b;
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  color: #78350f;
+  font-weight: 800;
+}
+
 .financialEvidenceGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

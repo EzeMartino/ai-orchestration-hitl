@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
+using Orchestration.Tests.Agents;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
@@ -145,13 +146,14 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     [Fact]
     public async Task AnalyzeAsync_Should_store_fixture_metrics_input_source()
     {
+        var publisher = new FakeActivityEventPublisher();
         var provider = new FakeStructuredFinancialMetricsProvider(
             CreateMetricsDocument(
                 inputSource: FinancialMetricsInputSources.FixtureFallback
             )
         );
         var service = new FakePythonFinancialAnalysisService();
-        var workflow = CreateWorkflow(provider, service);
+        var workflow = CreateWorkflow(provider, service, publisher);
 
         var result = await workflow.AnalyzeAsync(
             CreateReport(),
@@ -163,6 +165,40 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             .Should()
             .Be(FinancialMetricsInputSources.FixtureFallback);
         result.FinancialAnalysis.MetricsProvenance.Should().BeNull();
+        result.FinancialAnalysis.Warnings.Should().Contain(
+            "Fixture fallback metrics were used. This mode is intended for development/demo only."
+        );
+        publisher.PublishedEvents.Should().ContainSingle(e =>
+            e.Type == "financial_metrics_fixture_fallback_used" &&
+            e.Agent == "DataAgent"
+        );
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_not_add_fixture_warning_or_event_for_session_metrics()
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var provider = new FakeStructuredFinancialMetricsProvider(
+            CreateMetricsDocument(
+                inputSource: FinancialMetricsInputSources.SessionContext
+            )
+        );
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(provider, service, publisher);
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.MetricsInputSource
+            .Should()
+            .Be(FinancialMetricsInputSources.SessionContext);
+        result.FinancialAnalysis.Warnings.Should().NotContain(
+            "Fixture fallback metrics were used. This mode is intended for development/demo only."
+        );
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -195,12 +231,14 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
 
     private static DataAgentFinancialAnalysisWorkflow CreateWorkflow(
         FakeStructuredFinancialMetricsProvider provider,
-        FakePythonFinancialAnalysisService service)
+        FakePythonFinancialAnalysisService service,
+        FakeActivityEventPublisher? publisher = null)
     {
         return new DataAgentFinancialAnalysisWorkflow(
             provider,
             service,
             Options.Create(new DataAgentOptions()),
+            publisher ?? new FakeActivityEventPublisher(),
             NullLogger<DataAgentFinancialAnalysisWorkflow>.Instance
         );
     }

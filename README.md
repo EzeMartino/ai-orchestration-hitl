@@ -721,6 +721,8 @@ When the financial DataAgent workflow is enabled, metrics are loaded in this ord
 2. fixture fallback, only when `DataAgent__UseFixtureMetricsFallback=true`,
 3. safe result or legacy fallback depending on configuration.
 
+Fixture fallback is intended for development/demo only. Production-like runs should set `DataAgent__UseFixtureMetricsFallback=false` and attach session-specific structured metrics before starting analysis. When fallback is used, `financialAnalysis.metricsInputSource` is set to `fixture_fallback`, the dashboard shows a warning, and the Activity Feed records `financial_metrics_fixture_fallback_used`.
+
 ### Structured Input Configuration
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
@@ -889,7 +891,7 @@ Defaults are safe. When financial analysis is disabled, the DataAgent uses the l
 DataAgent__FinancialAnalysisToolsEnabled=false
 DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
-DataAgent__UseFixtureMetricsFallback=true
+DataAgent__UseFixtureMetricsFallback=false
 DataAgent__RiskThresholdProfile=default_oil_and_gas_equity_research
 DataAgent__StructuredMetricsFixturePath=<optional>
 ```
