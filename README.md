@@ -761,6 +761,14 @@ If metrics are missing, `POST /api/analysis-sessions/{sessionId}/start` returns 
 
 The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON/CSV metrics, then start the session again.
 
+The dashboard also calls:
+
+```http
+GET /api/analysis-sessions/{sessionId}/start-preflight
+```
+
+to show start readiness before the user clicks `Start Session`. If the preflight says `canStart=false`, the UI disables the button and shows the missing input issue. This is only a UX guardrail; `POST /start` still enforces the same preflight server-side.
+
 ### Structured Input Configuration
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.

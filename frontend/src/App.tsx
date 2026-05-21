@@ -1478,6 +1478,106 @@ function getConflictErrorMessage(value: unknown) {
   return typeof candidate.error === "string" ? candidate.error : null;
 }
 
+async function getStartPreflight(
+  sessionId: string
+): Promise<AnalysisSessionStartPreflightResult> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/analysis-sessions/${sessionId}/start-preflight`
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to check start readiness.");
+  }
+
+  return (await response.json()) as AnalysisSessionStartPreflightResult;
+}
+
+function StartReadinessPanel({
+  sessionId,
+  preflight,
+  isChecking,
+  error,
+}: {
+  sessionId?: string;
+  preflight: AnalysisSessionStartPreflightResult | null;
+  isChecking: boolean;
+  error: string | null;
+}) {
+  if (!sessionId) {
+    return (
+      <section className="startReadinessPanel startReadiness-neutral">
+        <div>
+          <span>Start readiness</span>
+          <strong>Create or load a session to check start readiness.</strong>
+        </div>
+      </section>
+    );
+  }
+
+  if (isChecking && !preflight) {
+    return (
+      <section className="startReadinessPanel startReadiness-neutral">
+        <div>
+          <span>Start readiness</span>
+          <strong>Checking readiness...</strong>
+        </div>
+      </section>
+    );
+  }
+
+  if (error && !preflight) {
+    return (
+      <section className="startReadinessPanel startReadiness-warning">
+        <div>
+          <span>Start readiness</span>
+          <strong>Could not check start readiness.</strong>
+          <p>Backend preflight will still run when starting.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!preflight) {
+    return (
+      <section className="startReadinessPanel startReadiness-neutral">
+        <div>
+          <span>Start readiness</span>
+          <strong>Readiness has not been checked yet.</strong>
+        </div>
+      </section>
+    );
+  }
+
+  const toneClass = preflight.canStart
+    ? "startReadiness-success"
+    : "startReadiness-danger";
+  const title = preflight.canStart
+    ? "Ready to start analysis."
+    : "Analysis cannot start yet.";
+
+  return (
+    <section className={`startReadinessPanel ${toneClass}`}>
+      <div>
+        <span>Start readiness</span>
+        <strong>{title}</strong>
+        {!preflight.canStart && (
+          <p>Attach JSON/CSV structured metrics before starting this analysis.</p>
+        )}
+      </div>
+
+      {(preflight.errors.length > 0 || preflight.warnings.length > 0) && (
+        <div className="preflightIssueList">
+          {[...preflight.errors, ...preflight.warnings].map((issue) => (
+            <div key={`${issue.severity}-${issue.code}-${issue.message}`}>
+              <b>[{issue.severity}]</b> {issue.code} - {issue.message}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function App() {
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
   const [session, setSession] = useState<AnalysisSessionResponse | null>(null);
@@ -1500,6 +1600,13 @@ function App() {
   const [metricsSaveResult, setMetricsSaveResult] =
     useState<SaveFinancialMetricsResponse | null>(null);
   const [metricsSaveError, setMetricsSaveError] = useState<string | null>(null);
+  const [startPreflight, setStartPreflight] =
+    useState<AnalysisSessionStartPreflightResult | null>(null);
+  const [isCheckingStartPreflight, setIsCheckingStartPreflight] =
+    useState(false);
+  const [startPreflightError, setStartPreflightError] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     let isDisposed = false;
@@ -1583,12 +1690,22 @@ function App() {
 
     if (!session?.id) {
       setStructuredMetrics(null);
+      setStartPreflight(null);
+      setStartPreflightError(null);
+      setIsCheckingStartPreflight(false);
       return;
     }
+
+    setStartPreflight(null);
+    setStartPreflightError(null);
 
     loadStructuredFinancialMetrics(session.id).catch((error) => {
       console.error("Failed to load structured financial metrics:", error);
       setStructuredMetrics(null);
+    });
+
+    refreshStartPreflight(session.id).catch((error) => {
+      console.error("Failed to load start preflight:", error);
     });
   }, [session?.id]);
 
@@ -1651,6 +1768,24 @@ function App() {
     }
   }
 
+  async function refreshStartPreflight(sessionId: string) {
+    setIsCheckingStartPreflight(true);
+    setStartPreflightError(null);
+
+    try {
+      const preflight = await getStartPreflight(sessionId);
+      setStartPreflight(preflight);
+    } catch (error) {
+      console.error(error);
+      setStartPreflight(null);
+      setStartPreflightError(
+        "Could not check start readiness. Backend preflight will still run when starting."
+      );
+    } finally {
+      setIsCheckingStartPreflight(false);
+    }
+  }
+
   async function createSession() {
     setIsCreating(true);
     setErrorMessage(null);
@@ -1675,6 +1810,7 @@ function App() {
       setSelectedSessionId(createdSession.id);
 
       await loadSavedSessions();
+      await refreshStartPreflight(createdSession.id);
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not create the analysis session.");
@@ -1704,6 +1840,7 @@ function App() {
           const conflictPayload = await readJsonOrNull(response);
 
           if (isStartPreflightResult(conflictPayload)) {
+            setStartPreflight(conflictPayload);
             setErrorMessage(getStartPreflightErrorMessage(conflictPayload));
             await loadSessionEvents(session.id);
             return;
@@ -1730,6 +1867,7 @@ function App() {
       await loadSessionEvents(updatedSession.id);
 
       await loadSavedSessions();
+      await refreshStartPreflight(updatedSession.id);
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not start the analysis session.");
@@ -1805,6 +1943,7 @@ function App() {
       setSession(loadedSession);
 
       await loadSessionEvents(loadedSession.id);
+      await refreshStartPreflight(loadedSession.id);
     } catch (error) {
       console.error(error);
       setErrorMessage("Could not load the analysis session.");
@@ -1891,6 +2030,8 @@ function App() {
         await loadStructuredFinancialMetrics(session.id);
         setSession(await loadSessionDetails(session.id));
       }
+
+      await refreshStartPreflight(session.id);
     } catch (error) {
       console.error(error);
       setMetricsSaveError(
@@ -1935,6 +2076,8 @@ function App() {
         await loadStructuredFinancialMetrics(session.id);
         setSession(await loadSessionDetails(session.id));
       }
+
+      await refreshStartPreflight(session.id);
     } catch (error) {
       console.error(error);
       setMetricsSaveError("Could not save structured financial metrics.");
@@ -1951,6 +2094,7 @@ function App() {
   const financialAnalysis = analysisContext?.financialAnalysis;
   const hasFinancialAnalysis = Boolean(financialAnalysis);
   const compliance = analysisContext?.compliance;
+  const isStartBlockedByPreflight = startPreflight?.canStart === false;
 
   return (
     <main className="page">
@@ -1974,10 +2118,29 @@ function App() {
             {isCreating ? "Creating..." : "Create Analysis Session"}
           </button>
 
-          <button onClick={startSession} disabled={!session || isStarting}>
-            {isStarting ? "Starting..." : "Start Session"}
+          <button
+            onClick={startSession}
+            disabled={!session || isStarting || isStartBlockedByPreflight}
+            title={
+              isStartBlockedByPreflight
+                ? "Start blocked by preflight"
+                : undefined
+            }
+          >
+            {isStarting
+              ? "Starting..."
+              : isStartBlockedByPreflight
+                ? "Start blocked by preflight"
+                : "Start Session"}
           </button>
         </section>
+
+        <StartReadinessPanel
+          sessionId={session?.id}
+          preflight={startPreflight}
+          isChecking={isCheckingStartPreflight}
+          error={startPreflightError}
+        />
 
         <section className="loadSessionPanel">
           <label>

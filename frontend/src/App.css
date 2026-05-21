@@ -80,6 +80,68 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.startReadinessPanel {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  border-radius: 18px;
+  padding: 1rem;
+  border: 1px solid #dbe3ef;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.startReadinessPanel span {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.startReadinessPanel strong {
+  display: block;
+}
+
+.startReadinessPanel p {
+  margin: 0.35rem 0 0;
+  font-weight: 700;
+}
+
+.startReadiness-neutral {
+  background: #ffffff;
+  color: #334155;
+}
+
+.startReadiness-success {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.startReadiness-warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.startReadiness-danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.preflightIssueList {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 280px;
+  max-width: 520px;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
 .loadSessionPanel {
   margin-bottom: 1rem;
   background: white;
@@ -1428,7 +1490,8 @@ code {
   .structuredMetricsHeader,
   .financialRiskHeader,
   .complianceHeader,
-  .metricsTemplateBox {
+  .metricsTemplateBox,
+  .startReadinessPanel {
     flex-direction: column;
   }
 
