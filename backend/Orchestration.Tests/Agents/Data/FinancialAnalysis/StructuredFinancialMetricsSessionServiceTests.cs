@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
+using Orchestration.Tests.Agents;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
@@ -60,10 +61,108 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         context.GetProperty("documentId").GetString().Should().Be("vista-energy-structured-input");
         context.GetProperty("metrics")[0].GetProperty("name").GetString().Should().Be("revenue");
         context.GetProperty("metrics")[0].GetProperty("sourcePage").GetInt32().Should().Be(18);
+        context.GetProperty("provenance").GetProperty("ingestionMethod").GetString()
+            .Should()
+            .Be("unknown");
+        context.GetProperty("provenance").GetProperty("metricCount").GetInt32()
+            .Should()
+            .Be(1);
         context.GetProperty("uploadedAt").GetDateTimeOffset().Should().BeCloseTo(
             DateTimeOffset.UtcNow,
             TimeSpan.FromSeconds(10)
         );
+    }
+
+    [Fact]
+    public async Task SaveAsync_Should_store_json_paste_provenance()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, publisher);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "json_paste",
+                    OriginalFileName: null,
+                    FileSizeBytes: null,
+                    ContentHash: null
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.Context.Should().NotBeNull();
+        result.Context!.Provenance.Should().NotBeNull();
+        result.Context.Provenance!.IngestionMethod.Should().Be("json_paste");
+        result.Context.Provenance.MetricCount.Should().Be(result.Context.Metrics.Count);
+        result.Context.Provenance.WarningCount.Should().Be(result.Warnings.Count);
+        publisher.PublishedEvents.Should().ContainSingle(e =>
+            e.Type == "structured_financial_metrics_attached" &&
+            e.Message.Contains("1 metrics from json_paste", StringComparison.Ordinal)
+        );
+    }
+
+    [Fact]
+    public async Task SaveAsync_Should_store_csv_paste_provenance()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "csv_paste",
+                    OriginalFileName: null,
+                    FileSizeBytes: null,
+                    ContentHash: null
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.Context!.Provenance!.IngestionMethod.Should().Be("csv_paste");
+    }
+
+    [Fact]
+    public async Task SaveAsync_Should_not_emit_event_when_input_is_invalid()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, publisher);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(documentId: ""),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "json_paste",
+                    OriginalFileName: null,
+                    FileSizeBytes: null,
+                    ContentHash: null
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.IsValid.Should().BeFalse();
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -151,6 +250,47 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
     }
 
+    [Fact]
+    public async Task GetAsync_Should_deserialize_old_context_without_provenance()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        session.SetContext("""
+        {
+          "structuredFinancialMetrics": {
+            "documentId": "legacy-context",
+            "company": "Legacy Co",
+            "currency": "USD",
+            "unit": "USD_thousand",
+            "metrics": [
+              {
+                "name": "revenue",
+                "period": "2024A",
+                "value": 100,
+                "unit": "USD_thousand",
+                "statement": "unknown",
+                "source": "legacy",
+                "currency": "USD",
+                "sourcePage": 1,
+                "confidence": 0.8
+              }
+            ],
+            "validationWarnings": [],
+            "uploadedAt": "2026-05-20T00:00:00Z"
+          }
+        }
+        """);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var context = await service.GetAsync(session.Id, CancellationToken.None);
+
+        context.Should().NotBeNull();
+        context!.DocumentId.Should().Be("legacy-context");
+        context.Provenance.Should().BeNull();
+    }
+
     internal static OrchestrationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
@@ -161,12 +301,14 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
     }
 
     internal static StructuredFinancialMetricsSessionService CreateService(
-        OrchestrationDbContext dbContext)
+        OrchestrationDbContext dbContext,
+        FakeActivityEventPublisher? publisher = null)
     {
         return new StructuredFinancialMetricsSessionService(
             dbContext,
             new StructuredFinancialMetricsValidator(),
-            new FinancialMetricInputMapper()
+            new FinancialMetricInputMapper(),
+            publisher ?? new FakeActivityEventPublisher()
         );
     }
 

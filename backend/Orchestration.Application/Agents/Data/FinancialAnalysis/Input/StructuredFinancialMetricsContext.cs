@@ -7,5 +7,6 @@ public sealed record StructuredFinancialMetricsContext(
     string? Unit,
     IReadOnlyList<FinancialMetric> Metrics,
     IReadOnlyList<FinancialMetricsValidationIssue> ValidationWarnings,
-    DateTimeOffset UploadedAt
+    DateTimeOffset UploadedAt,
+    StructuredFinancialMetricsProvenance? Provenance = null
 );

@@ -7,6 +7,10 @@ public interface IStructuredFinancialMetricsSessionService
         StructuredFinancialMetricsInput input,
         CancellationToken cancellationToken);
 
+    Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+        SaveStructuredFinancialMetricsRequest request,
+        CancellationToken cancellationToken);
+
     Task<StructuredFinancialMetricsContext?> GetAsync(
         Guid sessionId,
         CancellationToken cancellationToken);

@@ -600,6 +600,17 @@ Structured metrics are persisted in `AnalysisSession.ContextJson` under:
 structuredFinancialMetrics
 ```
 
+The persisted block includes audit provenance:
+
+- ingestion method (`json_paste`, `csv_paste`, `json_file`, or `csv_file`),
+- metric count,
+- validation warning count,
+- upload timestamp,
+- sanitized file name and file size for uploads,
+- SHA-256 content hash for uploads.
+
+Raw uploaded files are not stored. Activity Feed records successful metric attachment without logging raw JSON, raw CSV, or metric values. The content hash is for traceability only; it does not prove accounting correctness.
+
 The resulting analysis context is persisted under:
 
 ```text

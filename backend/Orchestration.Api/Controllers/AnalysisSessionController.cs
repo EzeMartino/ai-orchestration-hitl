@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Orchestration.Domain.AnalysisSessions;
@@ -235,8 +236,16 @@ public class AnalysisSessionsController : ControllerBase
         }
 
         var result = await _financialMetricsSessionService.SaveAsync(
-            id,
-            input,
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: id,
+                Input: input,
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "json_paste",
+                    OriginalFileName: null,
+                    FileSizeBytes: null,
+                    ContentHash: null
+                )
+            ),
             cancellationToken
         );
 
@@ -348,8 +357,15 @@ public class AnalysisSessionsController : ControllerBase
         }
 
         var result = await _financialMetricsSessionService.SaveAsync(
-            id,
-            ApplyFallbackMetadata(input, request),
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: id,
+                Input: ApplyFallbackMetadata(input, request),
+                Provenance: CreateFileProvenance(
+                    request.File!,
+                    "json_file",
+                    content
+                )
+            ),
             cancellationToken
         );
 
@@ -383,7 +399,12 @@ public class AnalysisSessionsController : ControllerBase
                 Unit: request.Unit,
                 Csv: content
             ),
-            cancellationToken
+            cancellationToken,
+            CreateFileProvenance(
+                request.File!,
+                "csv_file",
+                content
+            )
         );
 
         return result.SaveResult is null
@@ -396,7 +417,17 @@ public class AnalysisSessionsController : ControllerBase
         StructuredFinancialMetricsCsvInput input,
         CancellationToken cancellationToken)
     {
-        var result = await SaveCsvInputCoreAsync(id, input, cancellationToken);
+        var result = await SaveCsvInputCoreAsync(
+            id,
+            input,
+            cancellationToken,
+            new StructuredFinancialMetricsProvenanceInput(
+                IngestionMethod: "csv_paste",
+                OriginalFileName: null,
+                FileSizeBytes: null,
+                ContentHash: null
+            )
+        );
 
         return result.ActionResult;
     }
@@ -404,7 +435,8 @@ public class AnalysisSessionsController : ControllerBase
     private async Task<CsvSaveResult> SaveCsvInputCoreAsync(
         Guid id,
         StructuredFinancialMetricsCsvInput input,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StructuredFinancialMetricsProvenanceInput? provenance = null)
     {
         var sessionExists = await _dbContext.AnalysisSessions
             .AnyAsync(x => x.Id == id, cancellationToken);
@@ -439,8 +471,11 @@ public class AnalysisSessionsController : ControllerBase
         }
 
         var saveResult = await _financialMetricsSessionService.SaveAsync(
-            id,
-            parseResult.Input,
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: id,
+                Input: parseResult.Input,
+                Provenance: provenance
+            ),
             cancellationToken
         );
 
@@ -545,6 +580,27 @@ public class AnalysisSessionsController : ControllerBase
             FileType: fileType,
             FileSizeBytes: file.Length
         );
+    }
+
+    private static StructuredFinancialMetricsProvenanceInput CreateFileProvenance(
+        IFormFile file,
+        string ingestionMethod,
+        string content)
+    {
+        return new StructuredFinancialMetricsProvenanceInput(
+            IngestionMethod: ingestionMethod,
+            OriginalFileName: Path.GetFileName(file.FileName),
+            FileSizeBytes: file.Length,
+            ContentHash: ComputeSha256(content)
+        );
+    }
+
+    private static string ComputeSha256(
+        string content)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private sealed record CsvSaveResult(

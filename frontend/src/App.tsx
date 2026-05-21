@@ -218,6 +218,15 @@ type StructuredFinancialMetricContext = {
   confidence?: number | null;
 };
 
+type StructuredFinancialMetricsProvenanceContext = {
+  ingestionMethod: string;
+  originalFileName?: string | null;
+  fileSizeBytes?: number | null;
+  contentHash?: string | null;
+  metricCount: number;
+  warningCount: number;
+};
+
 type StructuredFinancialMetricsContext = {
   documentId: string;
   company?: string | null;
@@ -226,6 +235,7 @@ type StructuredFinancialMetricsContext = {
   metrics: StructuredFinancialMetricContext[];
   validationWarnings: FinancialMetricsValidationIssue[];
   uploadedAt: string;
+  provenance?: StructuredFinancialMetricsProvenanceContext | null;
 };
 
 type SaveFinancialMetricsResponse = {
@@ -890,7 +900,25 @@ function StructuredFinancialMetricsPanel({
               <strong>Structured metrics attached</strong>
               <span>Document: {metricsContext.documentId}</span>
               <span>Company: {metricsContext.company ?? "-"}</span>
-              <span>Metrics: {metricsContext.metrics.length}</span>
+              <span>
+                Source:{" "}
+                {formatIngestionMethod(
+                  metricsContext.provenance?.ingestionMethod
+                )}
+              </span>
+              {metricsContext.provenance?.originalFileName && (
+                <span>File: {metricsContext.provenance.originalFileName}</span>
+              )}
+              <span>
+                Metrics:{" "}
+                {metricsContext.provenance?.metricCount ??
+                  metricsContext.metrics.length}
+              </span>
+              <span>
+                Warnings:{" "}
+                {metricsContext.provenance?.warningCount ??
+                  metricsContext.validationWarnings.length}
+              </span>
               <span>Uploaded: {new Date(metricsContext.uploadedAt).toLocaleString()}</span>
             </>
           ) : (
@@ -1184,6 +1212,21 @@ function getFileExtension(fileName: string) {
     : "";
 }
 
+function formatIngestionMethod(ingestionMethod?: string | null) {
+  switch (ingestionMethod) {
+    case "json_paste":
+      return "JSON paste";
+    case "csv_paste":
+      return "CSV paste";
+    case "json_file":
+      return "JSON file";
+    case "csv_file":
+      return "CSV file";
+    default:
+      return "Unknown";
+  }
+}
+
 function formatPercent(value?: number | null) {
   if (value === null || value === undefined) {
     return "-";
@@ -1273,7 +1316,8 @@ function getEventTone(type: string) {
 
   if (
     type.includes("tool_plan_proposed") ||
-    type.includes("tool_plan_validated")
+    type.includes("tool_plan_validated") ||
+    type.includes("structured_financial_metrics_attached")
   ) {
     return "event-info";
   }

@@ -2,10 +2,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 using Orchestration.Api.Controllers;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
+using Orchestration.Tests.Agents;
 using Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Tests.Api;
@@ -19,7 +22,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create();
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var controller = CreateController(dbContext);
+        var publisher = new FakeActivityEventPublisher();
+        var controller = CreateController(dbContext, publisher: publisher);
 
         var result = await controller.SaveFinancialMetrics(
             session.Id,
@@ -33,6 +37,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.IsValid.Should().BeTrue();
         response.Context.Should().NotBeNull();
         response.Context!.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.Context.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.IngestionMethod.Should().Be("json_paste");
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -43,7 +49,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create();
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var controller = CreateController(dbContext);
+        var publisher = new FakeActivityEventPublisher();
+        var controller = CreateController(dbContext, publisher: publisher);
 
         var result = await controller.SaveFinancialMetrics(
             session.Id,
@@ -57,6 +64,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.IsValid.Should().BeFalse();
         response.Context.Should().BeNull();
         response.Errors.Should().Contain(issue => issue.Code == "DOCUMENT_ID_REQUIRED");
+        publisher.PublishedEvents.Should().BeEmpty();
         session.ContextJson.Should().Be("{}");
     }
 
@@ -115,6 +123,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("manual-csv-input");
         response.Context.Company.Should().Be("Manual Test Co");
+        response.Context.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.IngestionMethod.Should().Be("csv_paste");
         response.Context.Metrics.Should().Contain(metric =>
             metric.Name == "revenue" &&
             metric.Period == "2024A" &&
@@ -232,31 +242,32 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
+        const string content = """
+            {
+              "documentId": "json-file-input",
+              "company": "JSON File Co",
+              "currency": "USD",
+              "unit": "USD_thousand",
+              "metrics": [
+                {
+                  "name": "Revenue",
+                  "period": "2024A",
+                  "value": 1647768,
+                  "unit": "USD_thousand",
+                  "currency": "USD",
+                  "source": "file_upload",
+                  "sourcePage": 18,
+                  "confidence": 0.9
+                }
+              ]
+            }
+            """;
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
             CreateFileUploadRequest(
                 "metrics.json",
-                """
-                {
-                  "documentId": "json-file-input",
-                  "company": "JSON File Co",
-                  "currency": "USD",
-                  "unit": "USD_thousand",
-                  "metrics": [
-                    {
-                      "name": "Revenue",
-                      "period": "2024A",
-                      "value": 1647768,
-                      "unit": "USD_thousand",
-                      "currency": "USD",
-                      "source": "file_upload",
-                      "sourcePage": 18,
-                      "confidence": 0.9
-                    }
-                  ]
-                }
-                """
+                content
             ),
             CancellationToken.None
         );
@@ -271,6 +282,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("json-file-input");
         response.Context.Company.Should().Be("JSON File Co");
+        response.Context.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.IngestionMethod.Should().Be("json_file");
+        response.Context.Provenance.OriginalFileName.Should().Be("metrics.json");
+        response.Context.Provenance.FileSizeBytes.Should().Be(response.FileSizeBytes);
+        response.Context.Provenance.ContentHash.Should().Be(ComputeSha256(content));
+        response.Context.Provenance.MetricCount.Should().Be(1);
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
@@ -348,7 +365,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create();
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var controller = CreateController(dbContext);
+        var publisher = new FakeActivityEventPublisher();
+        var controller = CreateController(dbContext, publisher: publisher);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -378,6 +396,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Errors.Should().Contain(issue => issue.Code == "DOCUMENT_ID_REQUIRED");
         response.Errors.Should().Contain(issue => issue.Code == "METRIC_NAME_REQUIRED");
         response.Errors.Should().Contain(issue => issue.Code == "METRIC_VALUE_REQUIRED");
+        publisher.PublishedEvents.Should().BeEmpty();
         session.ContextJson.Should().Be("{}");
     }
 
@@ -444,6 +463,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("csv-file-input");
         response.Context.Company.Should().Be("CSV File Co");
+        response.Context.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.IngestionMethod.Should().Be("csv_file");
+        response.Context.Provenance.OriginalFileName.Should().Be("metrics.csv");
+        response.Context.Provenance.FileSizeBytes.Should().Be(response.FileSizeBytes);
+        response.Context.Provenance.ContentHash.Should().NotBeNullOrWhiteSpace();
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
@@ -687,16 +711,19 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.FileName.Should().Be("METRICS.JSON");
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("uppercase-json-file");
+        response.Context.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.OriginalFileName.Should().Be("METRICS.JSON");
     }
 
     private static AnalysisSessionsController CreateController(
         OrchestrationDbContext dbContext,
-        StructuredFinancialMetricsFileUploadOptions? fileUploadOptions = null)
+        StructuredFinancialMetricsFileUploadOptions? fileUploadOptions = null,
+        FakeActivityEventPublisher? publisher = null)
     {
         return new AnalysisSessionsController(
             dbContext,
             orchestrator: null!,
-            StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext),
+            StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
             Options.Create(fileUploadOptions ?? new StructuredFinancialMetricsFileUploadOptions())
         );
@@ -742,5 +769,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Currency = currency,
             Unit = unit
         };
+    }
+
+    private static string ComputeSha256(
+        string content)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }
