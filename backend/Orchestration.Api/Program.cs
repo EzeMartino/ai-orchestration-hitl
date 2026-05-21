@@ -31,6 +31,7 @@ builder.Services.AddScoped<AnalysisSessionStateMachine>();
 builder.Services.AddScoped<AnalysisSessionWorkflowService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IActivityEventPublisher, SignalRActivityEventPublisher>();
+builder.Services.AddScoped<IAnalysisSessionStartPreflightValidator, AnalysisSessionStartPreflightValidator>();
 builder.Services.AddScoped<AnalysisOrchestratorService>();
 
 // Planner agent configuration

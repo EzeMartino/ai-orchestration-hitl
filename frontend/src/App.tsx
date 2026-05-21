@@ -257,6 +257,18 @@ type FileUploadErrorResponse = {
   error?: string;
 };
 
+type AnalysisSessionStartPreflightIssue = {
+  code: string;
+  message: string;
+  severity: string;
+};
+
+type AnalysisSessionStartPreflightResult = {
+  canStart: boolean;
+  errors: AnalysisSessionStartPreflightIssue[];
+  warnings: AnalysisSessionStartPreflightIssue[];
+};
+
 type AnalysisContext = {
   summary?: string;
   planner?: PlannerContext;
@@ -1382,6 +1394,7 @@ function getEventTone(type: string) {
   if (
     type.includes("planner_reasoning_fallback_used") ||
     type.includes("tool_execution_fallback_used") ||
+    type.includes("analysis_start_blocked") ||
     type.includes("financial_metrics_fixture_fallback_used") ||
     type.includes("financial_metrics_required_missing")
   ) {
@@ -1412,6 +1425,57 @@ function getEventTone(type: string) {
   }
 
   return "event-neutral";
+}
+
+async function readJsonOrNull(response: Response) {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isStartPreflightResult(
+  value: unknown
+): value is AnalysisSessionStartPreflightResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<AnalysisSessionStartPreflightResult>;
+
+  return (
+    typeof candidate.canStart === "boolean" &&
+    Array.isArray(candidate.errors) &&
+    Array.isArray(candidate.warnings)
+  );
+}
+
+function getStartPreflightErrorMessage(
+  preflight: AnalysisSessionStartPreflightResult
+) {
+  const missingMetricsIssue = preflight.errors.find(
+    (issue) => issue.code === "STRUCTURED_FINANCIAL_METRICS_REQUIRED"
+  );
+
+  if (missingMetricsIssue) {
+    return "Structured financial metrics are required before starting this analysis. Attach JSON/CSV metrics and try again.";
+  }
+
+  return (
+    preflight.errors[0]?.message ??
+    "The analysis session could not be started."
+  );
+}
+
+function getConflictErrorMessage(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as { error?: unknown };
+
+  return typeof candidate.error === "string" ? candidate.error : null;
 }
 
 function App() {
@@ -1636,6 +1700,22 @@ function App() {
       );
 
       if (!response.ok) {
+        if (response.status === 409) {
+          const conflictPayload = await readJsonOrNull(response);
+
+          if (isStartPreflightResult(conflictPayload)) {
+            setErrorMessage(getStartPreflightErrorMessage(conflictPayload));
+            await loadSessionEvents(session.id);
+            return;
+          }
+
+          setErrorMessage(
+            getConflictErrorMessage(conflictPayload) ??
+              "Could not start the analysis session."
+          );
+          return;
+        }
+
         throw new Error("Failed to start analysis session.");
       }
 

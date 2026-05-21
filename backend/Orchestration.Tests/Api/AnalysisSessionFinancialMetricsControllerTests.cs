@@ -5,7 +5,14 @@ using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Text;
 using Orchestration.Api.Controllers;
+using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Planner;
+using Orchestration.Application.Agents.Planner.Reasoning;
+using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.AnalysisSessions;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
@@ -715,18 +722,172 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance!.OriginalFileName.Should().Be("METRICS.JSON");
     }
 
+    [Fact]
+    public async Task GetStartPreflight_Should_return_blocked_result_when_required_metrics_are_missing()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(
+            dbContext,
+            dataAgentOptions: RequiredMetricsOptions()
+        );
+
+        var result = await controller.GetStartPreflight(
+            session.Id,
+            CancellationToken.None
+        );
+
+        var preflight = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<AnalysisSessionStartPreflightResult>()
+            .Subject;
+        preflight.CanStart.Should().BeFalse();
+        preflight.Errors.Should().ContainSingle(issue =>
+            issue.Code == AnalysisSessionStartPreflightValidator
+                .StructuredFinancialMetricsRequiredCode
+        );
+    }
+
+    [Fact]
+    public async Task StartSession_Should_return_conflict_when_required_metrics_are_missing()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new FakePlannerAgent();
+        var controller = CreateController(
+            dbContext,
+            publisher: publisher,
+            dataAgentOptions: RequiredMetricsOptions(),
+            orchestrator: CreateOrchestrator(dbContext, publisher, planner)
+        );
+
+        var result = await controller.StartSession(
+            session.Id,
+            CancellationToken.None
+        );
+
+        var preflight = result.Should().BeOfType<ConflictObjectResult>()
+            .Which.Value.Should().BeOfType<AnalysisSessionStartPreflightResult>()
+            .Subject;
+        preflight.CanStart.Should().BeFalse();
+        session.Status.Should().Be(AnalysisSessionStatus.Pending);
+        session.CurrentAgent.Should().BeNull();
+        planner.RunCalls.Should().Be(0);
+        publisher.PublishedEvents.Should().ContainSingle(evt =>
+            evt.Type == "analysis_start_blocked" &&
+            evt.Agent == "Orchestrator"
+        );
+    }
+
+    [Fact]
+    public async Task StartSession_Should_start_when_required_metrics_are_attached()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new FakePlannerAgent();
+        var controller = CreateController(
+            dbContext,
+            publisher: publisher,
+            dataAgentOptions: RequiredMetricsOptions(),
+            orchestrator: CreateOrchestrator(dbContext, publisher, planner)
+        );
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            CancellationToken.None
+        );
+
+        var result = await controller.StartSession(
+            session.Id,
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>();
+        planner.RunCalls.Should().Be(1);
+        session.Status.Should().Be(AnalysisSessionStatus.Completed);
+    }
+
+    [Fact]
+    public async Task StartSession_Should_allow_demo_mode_without_session_metrics()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new FakePlannerAgent();
+        var controller = CreateController(
+            dbContext,
+            publisher: publisher,
+            dataAgentOptions: new DataAgentOptions
+            {
+                FinancialAnalysisToolsEnabled = true,
+                UseFixtureMetricsFallback = true,
+                RequireSessionFinancialMetrics = false
+            },
+            orchestrator: CreateOrchestrator(dbContext, publisher, planner)
+        );
+
+        var result = await controller.StartSession(
+            session.Id,
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>();
+        planner.RunCalls.Should().Be(1);
+        session.Status.Should().Be(AnalysisSessionStatus.Completed);
+    }
+
     private static AnalysisSessionsController CreateController(
         OrchestrationDbContext dbContext,
         StructuredFinancialMetricsFileUploadOptions? fileUploadOptions = null,
-        FakeActivityEventPublisher? publisher = null)
+        FakeActivityEventPublisher? publisher = null,
+        DataAgentOptions? dataAgentOptions = null,
+        AnalysisOrchestratorService? orchestrator = null)
     {
+        publisher ??= new FakeActivityEventPublisher();
+
         return new AnalysisSessionsController(
             dbContext,
-            orchestrator: null!,
+            orchestrator: orchestrator!,
+            new AnalysisSessionStartPreflightValidator(
+                Options.Create(dataAgentOptions ?? new DataAgentOptions())
+            ),
+            publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
             Options.Create(fileUploadOptions ?? new StructuredFinancialMetricsFileUploadOptions())
         );
+    }
+
+    private static AnalysisOrchestratorService CreateOrchestrator(
+        OrchestrationDbContext dbContext,
+        IActivityEventPublisher publisher,
+        IPlannerAgent planner)
+    {
+        return new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner
+        );
+    }
+
+    private static DataAgentOptions RequiredMetricsOptions()
+    {
+        return new DataAgentOptions
+        {
+            FinancialAnalysisToolsEnabled = true,
+            UseFixtureMetricsFallback = false,
+            RequireSessionFinancialMetrics = true
+        };
     }
 
     private static OrchestrationDbContext CreateDbContext()
@@ -777,5 +938,50 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
 
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private sealed class FakePlannerAgent : IPlannerAgent
+    {
+        public int RunCalls { get; private set; }
+
+        public Task<PlannerAgentResult> RunAsync(
+            AnalysisSession session,
+            CancellationToken cancellationToken)
+        {
+            RunCalls++;
+
+            return Task.FromResult(new PlannerAgentResult(
+                RequiresHumanApproval: false,
+                Summary: "No human approval required.",
+                DataResult: new DataAgentResult(
+                    HasAnomaly: false,
+                    Severity: "Low",
+                    Summary: "No anomaly detected.",
+                    Engine: "Test DataAgent",
+                    Evidence: []
+                ),
+                LegalResult: new LegalAgentResult(
+                    HasComplianceRisk: false,
+                    RiskLevel: "Low",
+                    Summary: "No compliance risk detected.",
+                    Engine: "Test LegalAgent",
+                    Evidence: [],
+                    Warnings: []
+                ),
+                ReasoningResult: new PlannerReasoningResult(
+                    Engine: "Test Planner",
+                    Summary: "Planner completed.",
+                    RecommendedActions: [],
+                    RiskFactors: [],
+                    Limitations: [],
+                    UsedLlm: false,
+                    UsedFallback: false,
+                    Provider: null,
+                    Model: null,
+                    FailureReason: null
+                ),
+                ToolPlan: ToolPlanAuditResult.Empty
+            ));
+        }
     }
 }

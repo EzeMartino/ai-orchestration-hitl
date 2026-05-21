@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
+using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
@@ -17,6 +18,8 @@ public class AnalysisSessionsController : ControllerBase
 {
     private readonly OrchestrationDbContext _dbContext;
     private readonly AnalysisOrchestratorService _orchestrator;
+    private readonly IAnalysisSessionStartPreflightValidator _startPreflightValidator;
+    private readonly IActivityEventPublisher _activityPublisher;
     private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService;
     private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser;
     private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions;
@@ -30,12 +33,16 @@ public class AnalysisSessionsController : ControllerBase
     public AnalysisSessionsController(
         OrchestrationDbContext dbContext,
         AnalysisOrchestratorService orchestrator,
+        IAnalysisSessionStartPreflightValidator startPreflightValidator,
+        IActivityEventPublisher activityPublisher,
         IStructuredFinancialMetricsSessionService financialMetricsSessionService,
         IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
         IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions)
     {
         _dbContext = dbContext;
         _orchestrator = orchestrator;
+        _startPreflightValidator = startPreflightValidator;
+        _activityPublisher = activityPublisher;
         _financialMetricsSessionService = financialMetricsSessionService;
         _financialMetricsCsvParser = financialMetricsCsvParser;
         _fileUploadOptions = fileUploadOptions.Value;
@@ -115,6 +122,35 @@ public class AnalysisSessionsController : ControllerBase
         Guid id,
         CancellationToken cancellationToken)
     {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var preflight = await _startPreflightValidator.ValidateAsync(
+            session,
+            cancellationToken
+        );
+
+        if (!preflight.CanStart)
+        {
+            await _activityPublisher.PublishAsync(
+                new ActivityEvent(
+                    id,
+                    "analysis_start_blocked",
+                    "Orchestrator",
+                    "Analysis start blocked: structured financial metrics are required but missing.",
+                    DateTimeOffset.UtcNow
+                ),
+                cancellationToken
+            );
+
+            return Conflict(preflight);
+        }
+
         try
         {
             var result = await _orchestrator.StartAnalysisAsync(id, cancellationToken);
@@ -133,6 +169,27 @@ public class AnalysisSessionsController : ControllerBase
                 error = ex.Message
             });
         }
+    }
+
+    [HttpGet("{id:guid}/start-preflight")]
+    public async Task<IActionResult> GetStartPreflight(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
+        var preflight = await _startPreflightValidator.ValidateAsync(
+            session,
+            cancellationToken
+        );
+
+        return Ok(preflight);
     }
 
     [HttpPost("{id:guid}/approve")]

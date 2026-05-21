@@ -733,6 +733,34 @@ DataAgent__RequireSessionFinancialMetrics=true
 
 In this mode, missing metrics produce a safe review-required result with `financialAnalysis.metricsInputSource=none`. The system does not use the demo fixture fallback and does not treat missing structured metrics as a real financial analysis.
 
+### Start Session Preflight Guardrail
+
+In production-like mode, sessions cannot be started until structured financial metrics are attached:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=true
+```
+
+If metrics are missing, `POST /api/analysis-sessions/{sessionId}/start` returns `409 Conflict` with a structured preflight result:
+
+```json
+{
+  "canStart": false,
+  "errors": [
+    {
+      "code": "STRUCTURED_FINANCIAL_METRICS_REQUIRED",
+      "message": "Structured financial metrics are required for this mode but were not attached to this session.",
+      "severity": "Error"
+    }
+  ],
+  "warnings": []
+}
+```
+
+The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON/CSV metrics, then start the session again.
+
 ### Structured Input Configuration
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
