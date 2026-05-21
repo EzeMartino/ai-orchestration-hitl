@@ -403,7 +403,19 @@ namespace Orchestration.Application.AnalysisSessions
                             confidence = 0.75m
                         }),
                         warnings = plannerResult.DataResult.FinancialAnalysis.Warnings,
-                        limitations = plannerResult.DataResult.FinancialAnalysis.Limitations
+                        limitations = plannerResult.DataResult.FinancialAnalysis.Limitations,
+                        metricsInputSource = plannerResult.DataResult.FinancialAnalysis.MetricsInputSource,
+                        metricsProvenance = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance is null
+                            ? null
+                            : new
+                            {
+                                ingestionMethod = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.IngestionMethod,
+                                originalFileName = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.OriginalFileName,
+                                fileSizeBytes = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.FileSizeBytes,
+                                contentHash = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.ContentHash,
+                                metricCount = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.MetricCount,
+                                warningCount = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.WarningCount
+                            }
                     },
                 compliance = new
                 {

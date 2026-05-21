@@ -9,5 +9,7 @@ public sealed record FinancialAnalysisContext(
     IReadOnlyList<FinancialRiskSignal> RiskSignals,
     IReadOnlyList<RiskEvidenceItem> RiskEvidence,
     IReadOnlyList<string> Warnings,
-    IReadOnlyList<string> Limitations
+    IReadOnlyList<string> Limitations,
+    string MetricsInputSource = FinancialMetricsInputSources.Unknown,
+    StructuredFinancialMetricsProvenance? MetricsProvenance = null
 );

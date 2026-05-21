@@ -30,7 +30,9 @@ public sealed class SessionStructuredFinancialMetricsProvider
                 Company: context.Company ?? "",
                 Currency: context.Currency ?? "",
                 Unit: context.Unit ?? "",
-                Metrics: context.Metrics
+                Metrics: context.Metrics,
+                InputSource: FinancialMetricsInputSources.SessionContext,
+                Provenance: context.Provenance
             );
     }
 }

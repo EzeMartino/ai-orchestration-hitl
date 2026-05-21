@@ -224,7 +224,16 @@ public class AnalysisOrchestratorContextTests
                 )
             ],
             Warnings: ["Structured metrics only."],
-            Limitations: ["No PDF parsing or OCR was performed."]
+            Limitations: ["No PDF parsing or OCR was performed."],
+            MetricsInputSource: FinancialMetricsInputSources.SessionContext,
+            MetricsProvenance: new StructuredFinancialMetricsProvenance(
+                IngestionMethod: "json_file",
+                OriginalFileName: "metrics.json",
+                FileSizeBytes: 1024,
+                ContentHash: "abc123",
+                MetricCount: 10,
+                WarningCount: 1
+            )
         );
         var plannerResult = CreatePlannerResult(
             ToolPlanAuditResult.Empty,
@@ -250,6 +259,9 @@ public class AnalysisOrchestratorContextTests
         financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("engine").GetString().Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
         financialAnalysis.GetProperty("warnings")[0].GetString().Should().Be("Structured metrics only.");
         financialAnalysis.GetProperty("limitations")[0].GetString().Should().Be("No PDF parsing or OCR was performed.");
+        financialAnalysis.GetProperty("metricsInputSource").GetString().Should().Be("session_context");
+        financialAnalysis.GetProperty("metricsProvenance").GetProperty("ingestionMethod").GetString().Should().Be("json_file");
+        financialAnalysis.GetProperty("metricsProvenance").GetProperty("originalFileName").GetString().Should().Be("metrics.json");
 
         root.GetProperty("anomaly").GetProperty("summary").GetString().Should().Be("Anomaly detected.");
     }

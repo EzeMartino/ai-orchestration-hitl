@@ -76,6 +76,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.Should().NotBeNull();
         result.FinancialAnalysis!.Warnings.Should().Contain("Structured financial metrics were not available.");
         result.FinancialAnalysis.Limitations.Should().NotBeEmpty();
+        result.FinancialAnalysis.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
         service.ComputeCalls.Should().Be(0);
     }
 
@@ -107,6 +108,61 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             metric.Unit == "ARS_thousand" &&
             metric.Currency == "ARS"
         );
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_store_metrics_input_source_and_provenance()
+    {
+        var provenance = new StructuredFinancialMetricsProvenance(
+            IngestionMethod: "json_file",
+            OriginalFileName: "metrics.json",
+            FileSizeBytes: 1024,
+            ContentHash: "abc123",
+            MetricCount: 4,
+            WarningCount: 0
+        );
+        var provider = new FakeStructuredFinancialMetricsProvider(
+            CreateMetricsDocument(
+                inputSource: FinancialMetricsInputSources.SessionContext,
+                provenance: provenance
+            )
+        );
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(provider, service);
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.MetricsInputSource
+            .Should()
+            .Be(FinancialMetricsInputSources.SessionContext);
+        result.FinancialAnalysis.MetricsProvenance.Should().BeSameAs(provenance);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_store_fixture_metrics_input_source()
+    {
+        var provider = new FakeStructuredFinancialMetricsProvider(
+            CreateMetricsDocument(
+                inputSource: FinancialMetricsInputSources.FixtureFallback
+            )
+        );
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(provider, service);
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.MetricsInputSource
+            .Should()
+            .Be(FinancialMetricsInputSources.FixtureFallback);
+        result.FinancialAnalysis.MetricsProvenance.Should().BeNull();
     }
 
     [Fact]
@@ -164,7 +220,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         string documentId = "vista-energy-fixture",
         string company = "Vista Energy",
         string currency = "USD",
-        string unit = "USD millions")
+        string unit = "USD millions",
+        string inputSource = FinancialMetricsInputSources.Unknown,
+        StructuredFinancialMetricsProvenance? provenance = null)
     {
         return new StructuredFinancialMetricsDocument(
             DocumentId: documentId,
@@ -177,7 +235,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                 CreateMetric("revenue", "2025E", 80m, unit, currency),
                 CreateMetric("ebitda", "2025E", 12m, unit, currency),
                 CreateMetric("net_debt", "2025E", 45m, unit, currency)
-            ]
+            ],
+            InputSource: inputSource,
+            Provenance: provenance
         );
     }
 

@@ -162,6 +162,8 @@ type FinancialAnalysisContext = {
   riskEvidence: FinancialRiskEvidenceContext[];
   warnings: string[];
   limitations: string[];
+  metricsInputSource?: string | null;
+  metricsProvenance?: StructuredFinancialMetricsProvenanceContext | null;
 };
 
 type StructuredFinancialMetricInput = {
@@ -608,6 +610,25 @@ function FinancialRiskEvidencePanel({
           <div className="engineBadge">
             Financial engine: <strong>{financialAnalysis.engine}</strong>
           </div>
+          <div className="engineBadge">
+            Metrics source:{" "}
+            <strong>
+              {formatMetricsInputSource(financialAnalysis.metricsInputSource)}
+            </strong>
+          </div>
+          {financialAnalysis.metricsProvenance && (
+            <div className="engineBadge">
+              Ingestion:{" "}
+              <strong>
+                {formatIngestionMethod(
+                  financialAnalysis.metricsProvenance.ingestionMethod
+                )}
+              </strong>
+              {financialAnalysis.metricsProvenance.originalFileName
+                ? ` - File: ${financialAnalysis.metricsProvenance.originalFileName}`
+                : ""}
+            </div>
+          )}
         </div>
 
         <div className="documentBadge">
@@ -1222,6 +1243,21 @@ function formatIngestionMethod(ingestionMethod?: string | null) {
       return "JSON file";
     case "csv_file":
       return "CSV file";
+    default:
+      return "Unknown";
+  }
+}
+
+function formatMetricsInputSource(inputSource?: string | null) {
+  switch (inputSource) {
+    case "session_context":
+      return "Session context";
+    case "fixture_fallback":
+      return "Fixture fallback";
+    case "none":
+      return "None";
+    case "unknown":
+      return "Unknown";
     default:
       return "Unknown";
   }

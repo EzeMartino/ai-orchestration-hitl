@@ -52,7 +52,8 @@ public sealed class FixtureStructuredFinancialMetricsProvider : IStructuredFinan
                     Company: fixture.Company,
                     Currency: fixture.Currency,
                     Unit: fixture.Unit,
-                    Metrics: fixture.Metrics
+                    Metrics: fixture.Metrics,
+                    InputSource: FinancialMetricsInputSources.FixtureFallback
                 );
         }
         catch (OperationCanceledException)

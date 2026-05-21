@@ -145,7 +145,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskSignals: signals.Signals,
                 RiskEvidence: summary.Result.Evidence,
                 Warnings: warnings,
-                Limitations: [StructuredMetricsOnlyLimitation]
+                Limitations: [StructuredMetricsOnlyLimitation],
+                MetricsInputSource: metricsDocument.InputSource,
+                MetricsProvenance: metricsDocument.Provenance
             )
         );
     }
@@ -176,7 +178,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskSignals: [],
                 RiskEvidence: [],
                 Warnings: ["Structured financial metrics were not available."],
-                Limitations: [StructuredMetricsOnlyLimitation]
+                Limitations: [StructuredMetricsOnlyLimitation],
+                MetricsInputSource: FinancialMetricsInputSources.None
             )
         );
     }

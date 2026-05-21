@@ -5,5 +5,7 @@ public sealed record StructuredFinancialMetricsDocument(
     string Company,
     string Currency,
     string Unit,
-    IReadOnlyList<FinancialMetric> Metrics
+    IReadOnlyList<FinancialMetric> Metrics,
+    string InputSource = FinancialMetricsInputSources.Unknown,
+    StructuredFinancialMetricsProvenance? Provenance = null
 );

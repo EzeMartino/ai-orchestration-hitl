@@ -36,6 +36,8 @@ public sealed class StructuredFinancialMetricsProviderTests
         document.Company.Should().Be("Vista Energy");
         document.Currency.Should().Be("USD");
         document.Unit.Should().Be("USD_thousand");
+        document.InputSource.Should().Be(FinancialMetricsInputSources.SessionContext);
+        document.Provenance.Should().NotBeNull();
         document.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
     }
 
@@ -100,6 +102,7 @@ public sealed class StructuredFinancialMetricsProviderTests
         document.Company.Should().Be("Vista Energy");
         document.Currency.Should().Be("USD");
         document.Unit.Should().Be("USD_thousand");
+        document.InputSource.Should().Be(FinancialMetricsInputSources.SessionContext);
     }
 
     [Fact]
@@ -109,7 +112,8 @@ public sealed class StructuredFinancialMetricsProviderTests
             documentId: "session-document",
             company: "Manual Test Co",
             currency: "ARS",
-            unit: "ARS_thousand"
+            unit: "ARS_thousand",
+            inputSource: FinancialMetricsInputSources.SessionContext
         );
         var sessionProvider = new FakeStructuredFinancialMetricsProvider(sessionDocument);
         var fixtureProvider = new FakeStructuredFinancialMetricsProvider(CreateDocument("fixture-document"));
@@ -125,6 +129,7 @@ public sealed class StructuredFinancialMetricsProviderTests
         );
 
         document.Should().BeSameAs(sessionDocument);
+        document!.InputSource.Should().Be(FinancialMetricsInputSources.SessionContext);
         sessionProvider.CallCount.Should().Be(1);
         fixtureProvider.CallCount.Should().Be(0);
     }
@@ -144,6 +149,64 @@ public sealed class StructuredFinancialMetricsProviderTests
         document.Should().NotBeNull();
         document!.Metrics.Should().NotBeEmpty();
         document.DocumentId.Should().Be("vista_energy_sample_metrics");
+        document.InputSource.Should().Be(FinancialMetricsInputSources.FixtureFallback);
+        document.Provenance.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Composite_provider_Should_preserve_fixture_input_source()
+    {
+        var provider = CreateCompositeProvider(
+            new FakeStructuredFinancialMetricsProvider(null),
+            new FakeStructuredFinancialMetricsProvider(CreateDocument(
+                "fixture-document",
+                inputSource: FinancialMetricsInputSources.FixtureFallback
+            )),
+            useFixtureFallback: true
+        );
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(Guid.NewGuid()),
+            CancellationToken.None
+        );
+
+        document.Should().NotBeNull();
+        document!.InputSource.Should().Be(FinancialMetricsInputSources.FixtureFallback);
+    }
+
+    [Fact]
+    public async Task Session_provider_Should_propagate_structured_metrics_provenance()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext);
+        await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "json_file",
+                    OriginalFileName: "metrics.json",
+                    FileSizeBytes: 1024,
+                    ContentHash: "abc123"
+                )
+            ),
+            CancellationToken.None
+        );
+        var provider = new SessionStructuredFinancialMetricsProvider(service);
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(session.Id),
+            CancellationToken.None
+        );
+
+        document.Should().NotBeNull();
+        document!.InputSource.Should().Be(FinancialMetricsInputSources.SessionContext);
+        document.Provenance.Should().NotBeNull();
+        document.Provenance!.IngestionMethod.Should().Be("json_file");
+        document.Provenance.OriginalFileName.Should().Be("metrics.json");
     }
 
     [Fact]
@@ -203,7 +266,9 @@ public sealed class StructuredFinancialMetricsProviderTests
         string documentId,
         string company = "Vista Energy",
         string currency = "USD",
-        string unit = "USD_thousand")
+        string unit = "USD_thousand",
+        string inputSource = FinancialMetricsInputSources.Unknown,
+        StructuredFinancialMetricsProvenance? provenance = null)
     {
         return new StructuredFinancialMetricsDocument(
             DocumentId: documentId,
@@ -223,7 +288,9 @@ public sealed class StructuredFinancialMetricsProviderTests
                     SourcePage: 18,
                     Confidence: 0.9m
                 )
-            ]
+            ],
+            InputSource: inputSource,
+            Provenance: provenance
         );
     }
 
