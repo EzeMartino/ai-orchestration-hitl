@@ -82,6 +82,46 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_Should_return_required_metrics_result_when_metrics_are_missing_and_required()
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var provider = new FakeStructuredFinancialMetricsProvider(null);
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(
+            provider,
+            service,
+            publisher,
+            new DataAgentOptions
+            {
+                RequireSessionFinancialMetrics = true
+            }
+        );
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.Engine.Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
+        result.HasAnomaly.Should().BeTrue();
+        result.Severity.Should().Be("Medium");
+        result.Summary.Should().Be("Structured financial metrics are required but were not attached to this session.");
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
+        result.FinancialAnalysis.Warnings.Should().Contain(
+            "Structured financial metrics are required for this mode but were not attached to the session."
+        );
+        result.FinancialAnalysis.Limitations.Should().Contain(
+            "No financial ratios or period comparisons were computed because no structured metrics were available."
+        );
+        service.ComputeCalls.Should().Be(0);
+        publisher.PublishedEvents.Should().ContainSingle(e =>
+            e.Type == "financial_metrics_required_missing" &&
+            e.Agent == "DataAgent"
+        );
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_Should_use_metrics_returned_by_provider()
     {
         var provider = new FakeStructuredFinancialMetricsProvider(
@@ -202,6 +242,34 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_Should_run_financial_analysis_when_session_metrics_exist_and_required()
+    {
+        var provider = new FakeStructuredFinancialMetricsProvider(
+            CreateMetricsDocument(
+                inputSource: FinancialMetricsInputSources.SessionContext
+            )
+        );
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(
+            provider,
+            service,
+            options: new DataAgentOptions
+            {
+                RequireSessionFinancialMetrics = true
+            }
+        );
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.MetricsInputSource.Should().Be(FinancialMetricsInputSources.SessionContext);
+        service.ComputeCalls.Should().Be(1);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_Should_not_turn_warnings_into_anomaly_evidence_when_no_risk_signals_exist()
     {
         var provider = new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument());
@@ -232,12 +300,13 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     private static DataAgentFinancialAnalysisWorkflow CreateWorkflow(
         FakeStructuredFinancialMetricsProvider provider,
         FakePythonFinancialAnalysisService service,
-        FakeActivityEventPublisher? publisher = null)
+        FakeActivityEventPublisher? publisher = null,
+        DataAgentOptions? options = null)
     {
         return new DataAgentFinancialAnalysisWorkflow(
             provider,
             service,
-            Options.Create(new DataAgentOptions()),
+            Options.Create(options ?? new DataAgentOptions()),
             publisher ?? new FakeActivityEventPublisher(),
             NullLogger<DataAgentFinancialAnalysisWorkflow>.Instance
         );

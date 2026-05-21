@@ -599,6 +599,9 @@ function FinancialRiskEvidencePanel({
   const metricsInputSource = financialAnalysis.metricsInputSource ?? "unknown";
   const isFixtureFallback = metricsInputSource === "fixture_fallback";
   const hasNoMetrics = metricsInputSource === "none";
+  const requiresSessionMetrics = financialAnalysis.warnings.some((warning) =>
+    warning.includes("required for this mode")
+  );
 
   return (
     <section className="financialRiskPanel">
@@ -649,7 +652,9 @@ function FinancialRiskEvidencePanel({
 
       {hasNoMetrics && (
         <div className="financialSourceWarning">
-          No structured financial metrics were available.
+          {requiresSessionMetrics
+            ? "Structured financial metrics are required for this mode but were not attached to this session. Attach JSON/CSV metrics before starting the analysis."
+            : "No structured financial metrics were available."}
         </div>
       )}
 
@@ -1377,7 +1382,8 @@ function getEventTone(type: string) {
   if (
     type.includes("planner_reasoning_fallback_used") ||
     type.includes("tool_execution_fallback_used") ||
-    type.includes("financial_metrics_fixture_fallback_used")
+    type.includes("financial_metrics_fixture_fallback_used") ||
+    type.includes("financial_metrics_required_missing")
   ) {
     return "event-warning";
   }

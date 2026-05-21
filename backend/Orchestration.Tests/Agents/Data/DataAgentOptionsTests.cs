@@ -12,6 +12,7 @@ public sealed class DataAgentOptionsTests
         var options = new DataAgentOptions();
 
         options.UseFixtureMetricsFallback.Should().BeFalse();
+        options.RequireSessionFinancialMetrics.Should().BeFalse();
     }
 
     [Fact]
@@ -20,6 +21,7 @@ public sealed class DataAgentOptionsTests
         var options = LoadOptions("appsettings.json");
 
         options.UseFixtureMetricsFallback.Should().BeFalse();
+        options.RequireSessionFinancialMetrics.Should().BeFalse();
     }
 
     [Fact]
@@ -34,6 +36,20 @@ public sealed class DataAgentOptionsTests
         var options = LoadOptions(configuration);
 
         options.UseFixtureMetricsFallback.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Explicit_config_Should_enable_required_session_financial_metrics()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DataAgent:RequireSessionFinancialMetrics"] = "true"
+            })
+            .Build();
+        var options = LoadOptions(configuration);
+
+        options.RequireSessionFinancialMetrics.Should().BeTrue();
     }
 
     private static DataAgentOptions LoadOptions(
@@ -55,10 +71,15 @@ public sealed class DataAgentOptionsTests
             configuration["DataAgent:UseFixtureMetricsFallback"],
             out var parsed
         ) && parsed;
+        var requireSessionFinancialMetrics = bool.TryParse(
+            configuration["DataAgent:RequireSessionFinancialMetrics"],
+            out var parsedRequired
+        ) && parsedRequired;
 
         return new DataAgentOptions
         {
-            UseFixtureMetricsFallback = useFixtureMetricsFallback
+            UseFixtureMetricsFallback = useFixtureMetricsFallback,
+            RequireSessionFinancialMetrics = requireSessionFinancialMetrics
         };
     }
 

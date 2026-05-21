@@ -226,13 +226,42 @@ public sealed class StructuredFinancialMetricsProviderTests
         document.Should().BeNull();
     }
 
+    [Fact]
+    public async Task Composite_provider_Should_not_use_fixture_when_session_metrics_are_required()
+    {
+        var sessionProvider = new FakeStructuredFinancialMetricsProvider(null);
+        var fixtureProvider = new FakeStructuredFinancialMetricsProvider(
+            CreateDocument(
+                "fixture-document",
+                inputSource: FinancialMetricsInputSources.FixtureFallback
+            )
+        );
+        var provider = CreateCompositeProvider(
+            sessionProvider,
+            fixtureProvider,
+            useFixtureFallback: true,
+            requireSessionFinancialMetrics: true
+        );
+
+        var document = await provider.GetMetricsAsync(
+            CreateReport(Guid.NewGuid()),
+            CancellationToken.None
+        );
+
+        document.Should().BeNull();
+        sessionProvider.CallCount.Should().Be(1);
+        fixtureProvider.CallCount.Should().Be(0);
+    }
+
     private static CompositeStructuredFinancialMetricsProvider CreateCompositeProvider(
         IStructuredFinancialMetricsSessionService service,
-        bool useFixtureFallback)
+        bool useFixtureFallback,
+        bool requireSessionFinancialMetrics = false)
     {
         var options = Options.Create(new DataAgentOptions
         {
-            UseFixtureMetricsFallback = useFixtureFallback
+            UseFixtureMetricsFallback = useFixtureFallback,
+            RequireSessionFinancialMetrics = requireSessionFinancialMetrics
         });
 
         return new CompositeStructuredFinancialMetricsProvider(
@@ -249,14 +278,16 @@ public sealed class StructuredFinancialMetricsProviderTests
     private static CompositeStructuredFinancialMetricsProvider CreateCompositeProvider(
         IStructuredFinancialMetricsProvider sessionProvider,
         IStructuredFinancialMetricsProvider fixtureProvider,
-        bool useFixtureFallback)
+        bool useFixtureFallback,
+        bool requireSessionFinancialMetrics = false)
     {
         return new CompositeStructuredFinancialMetricsProvider(
             sessionProvider,
             fixtureProvider,
             Options.Create(new DataAgentOptions
             {
-                UseFixtureMetricsFallback = useFixtureFallback
+                UseFixtureMetricsFallback = useFixtureFallback,
+                RequireSessionFinancialMetrics = requireSessionFinancialMetrics
             }),
             NullLogger<CompositeStructuredFinancialMetricsProvider>.Instance
         );

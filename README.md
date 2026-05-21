@@ -723,6 +723,16 @@ When the financial DataAgent workflow is enabled, metrics are loaded in this ord
 
 Fixture fallback is intended for development/demo only. Production-like runs should set `DataAgent__UseFixtureMetricsFallback=false` and attach session-specific structured metrics before starting analysis. When fallback is used, `financialAnalysis.metricsInputSource` is set to `fixture_fallback`, the dashboard shows a warning, and the Activity Feed records `financial_metrics_fixture_fallback_used`.
 
+Production-like mode can require session-attached metrics explicitly:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=true
+```
+
+In this mode, missing metrics produce a safe review-required result with `financialAnalysis.metricsInputSource=none`. The system does not use the demo fixture fallback and does not treat missing structured metrics as a real financial analysis.
+
 ### Structured Input Configuration
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
@@ -734,6 +744,7 @@ DataAgent__FinancialAnalysisToolsEnabled=true
 DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
 DataAgent__UseFixtureMetricsFallback=true
+DataAgent__RequireSessionFinancialMetrics=false
 ```
 
 Structured file upload defaults:
@@ -892,6 +903,7 @@ DataAgent__FinancialAnalysisToolsEnabled=false
 DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
 DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=false
 DataAgent__RiskThresholdProfile=default_oil_and_gas_equity_research
 DataAgent__StructuredMetricsFixturePath=<optional>
 ```

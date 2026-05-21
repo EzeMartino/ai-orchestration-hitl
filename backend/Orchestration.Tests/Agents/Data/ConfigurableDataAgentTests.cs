@@ -117,6 +117,57 @@ public sealed class ConfigurableDataAgentTests
         result.Summary.Should().Be("Financial analysis could not be completed. Human review recommended.");
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_Should_not_use_legacy_fallback_for_missing_required_metrics_result()
+    {
+        var legacy = new FakeLegacyDataAgent();
+        var workflow = new FakeFinancialAnalysisWorkflow
+        {
+            Result = new DataAgentResult(
+                HasAnomaly: true,
+                Severity: "Medium",
+                Summary: "Structured financial metrics are required but were not attached to this session.",
+                Engine: "Financial Workflow",
+                Evidence: [],
+                FinancialAnalysis: new FinancialAnalysisContext(
+                    Engine: "Financial Workflow",
+                    DocumentId: "missing-required-metrics",
+                    Company: null,
+                    Ratios: [],
+                    Comparisons: [],
+                    RiskSignals: [],
+                    RiskEvidence: [],
+                    Warnings:
+                    [
+                        "Structured financial metrics are required for this mode but were not attached to the session."
+                    ],
+                    Limitations: [],
+                    MetricsInputSource: FinancialMetricsInputSources.None
+                )
+            )
+        };
+        var agent = CreateAgent(
+            legacy,
+            workflow,
+            new DataAgentOptions
+            {
+                FinancialAnalysisToolsEnabled = true,
+                RequireSessionFinancialMetrics = true,
+                UseLegacyAnomalyDetectionFallback = true
+            }
+        );
+
+        var result = await agent.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        legacy.WasCalled.Should().BeFalse();
+        workflow.WasCalled.Should().BeTrue();
+        result.Summary.Should().Be("Structured financial metrics are required but were not attached to this session.");
+        result.FinancialAnalysis!.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
+    }
+
     private static ConfigurableDataAgent CreateAgent(
         FakeLegacyDataAgent legacyDataAgent,
         FakeFinancialAnalysisWorkflow financialAnalysisWorkflow,
@@ -175,6 +226,8 @@ public sealed class ConfigurableDataAgentTests
 
         public bool ThrowOnAnalyze { get; init; }
 
+        public DataAgentResult? Result { get; init; }
+
         public Task<DataAgentResult> AnalyzeAsync(
             FinancialReportContext report,
             CancellationToken cancellationToken)
@@ -186,7 +239,7 @@ public sealed class ConfigurableDataAgentTests
                 throw new InvalidOperationException("Financial workflow failed.");
             }
 
-            return Task.FromResult(new DataAgentResult(
+            return Task.FromResult(Result ?? new DataAgentResult(
                 HasAnomaly: true,
                 Severity: "Medium",
                 Summary: "Financial workflow completed.",

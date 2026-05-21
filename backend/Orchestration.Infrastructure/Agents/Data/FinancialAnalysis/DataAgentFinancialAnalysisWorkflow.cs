@@ -16,6 +16,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         "Financial analysis uses structured metrics only. It does not parse PDFs, perform OCR, or make operational decisions.";
     private const string FixtureFallbackWarning =
         "Fixture fallback metrics were used. This mode is intended for development/demo only.";
+    private const string RequiredMetricsWarning =
+        "Structured financial metrics are required for this mode but were not attached to the session.";
 
     private static readonly string[] RequestedRatios =
     [
@@ -81,6 +83,22 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
 
         if (metricsDocument is null || metricsDocument.Metrics.Count == 0)
         {
+            if (_options.RequireSessionFinancialMetrics)
+            {
+                await _activityPublisher.PublishAsync(
+                    new ActivityEvent(
+                        report.SessionId,
+                        "financial_metrics_required_missing",
+                        "DataAgent",
+                        "Structured financial metrics were required but not attached to this session.",
+                        DateTimeOffset.UtcNow
+                    ),
+                    cancellationToken
+                );
+
+                return RequiredMetricsMissingResult(report);
+            }
+
             return NoMetricsResult(report);
         }
 
@@ -200,6 +218,42 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskEvidence: [],
                 Warnings: ["Structured financial metrics were not available."],
                 Limitations: [StructuredMetricsOnlyLimitation],
+                MetricsInputSource: FinancialMetricsInputSources.None
+            )
+        );
+    }
+
+    private static DataAgentResult RequiredMetricsMissingResult(
+        FinancialReportContext report)
+    {
+        return new DataAgentResult(
+            HasAnomaly: true,
+            Severity: "Medium",
+            Summary: "Structured financial metrics are required but were not attached to this session.",
+            Engine: Engine,
+            Evidence:
+            [
+                new AnomalyEvidence(
+                    Metric: "StructuredFinancialMetricsRequired",
+                    Value: 0,
+                    Threshold: 1,
+                    Interpretation: "Structured financial metrics are required for this mode but were not attached to the session."
+                )
+            ],
+            FinancialAnalysis: new FinancialAnalysisContext(
+                Engine: Engine,
+                DocumentId: report.ReportName,
+                Company: null,
+                Ratios: [],
+                Comparisons: [],
+                RiskSignals: [],
+                RiskEvidence: [],
+                Warnings: [RequiredMetricsWarning],
+                Limitations:
+                [
+                    "No financial ratios or period comparisons were computed because no structured metrics were available.",
+                    StructuredMetricsOnlyLimitation
+                ],
                 MetricsInputSource: FinancialMetricsInputSources.None
             )
         );

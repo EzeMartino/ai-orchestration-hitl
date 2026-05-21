@@ -12,6 +12,8 @@ public sealed class DataAgentOptions
 
     public bool UseFixtureMetricsFallback { get; init; }
 
+    public bool RequireSessionFinancialMetrics { get; init; }
+
     public string RiskThresholdProfile { get; init; } =
         "default_oil_and_gas_equity_research";
 

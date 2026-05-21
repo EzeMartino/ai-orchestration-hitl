@@ -17,6 +17,8 @@ var dataAgentUseLegacyAnomalyDetectionFallback =
     builder.Configuration["DataAgent:UseLegacyAnomalyDetectionFallback"];
 var dataAgentUseFixtureMetricsFallback =
     builder.Configuration["DataAgent:UseFixtureMetricsFallback"];
+var dataAgentRequireSessionFinancialMetrics =
+    builder.Configuration["DataAgent:RequireSessionFinancialMetrics"];
 var dataAgentRiskThresholdProfile =
     builder.Configuration["DataAgent:RiskThresholdProfile"];
 var dataAgentStructuredMetricsFixturePath =
@@ -99,6 +101,7 @@ var api = builder
     .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
     .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")
     .WithEnvironment("DataAgent__UseFixtureMetricsFallback", dataAgentUseFixtureMetricsFallback ?? "false")
+    .WithEnvironment("DataAgent__RequireSessionFinancialMetrics", dataAgentRequireSessionFinancialMetrics ?? "false")
     .WithEnvironment("DataAgent__RiskThresholdProfile", dataAgentRiskThresholdProfile ?? "default_oil_and_gas_equity_research")
     .WithEnvironment("DataAgent__StructuredMetricsFixturePath", dataAgentStructuredMetricsFixturePath ?? "")
     .WithReference(orchestrationDb)

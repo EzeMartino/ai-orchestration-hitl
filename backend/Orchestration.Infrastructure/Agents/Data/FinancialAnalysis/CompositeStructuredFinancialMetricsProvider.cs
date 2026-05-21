@@ -44,6 +44,15 @@ public sealed class CompositeStructuredFinancialMetricsProvider
             return sessionMetrics;
         }
 
+        if (_options.RequireSessionFinancialMetrics)
+        {
+            _logger.LogInformation(
+                "No session structured financial metrics available and session metrics are required."
+            );
+
+            return null;
+        }
+
         if (_options.UseFixtureMetricsFallback)
         {
             _logger.LogInformation(
