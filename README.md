@@ -737,6 +737,27 @@ In this mode, missing metrics produce a safe review-required result with `financ
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
 
+Versioned configuration examples are available in:
+
+```text
+backend/Orchestration.Api/appsettings.Development.example.json
+backend/Orchestration.Api/appsettings.ProductionLike.example.json
+```
+
+For local development, copy the development example to the ignored local settings file:
+
+```powershell
+Copy-Item backend/Orchestration.Api/appsettings.Development.example.json backend/Orchestration.Api/appsettings.Development.json
+```
+
+### Financial Analysis Mode Matrix
+
+| Mode | FinancialAnalysisToolsEnabled | UseFixtureMetricsFallback | RequireSessionFinancialMetrics | Behavior |
+| --- | --- | --- | --- | --- |
+| Default | `false` | `false` | `false` | Uses the legacy anomaly-detection path. |
+| Demo | `true` | `true` | `false` | Uses session metrics first and fixture fallback if missing. |
+| Production-like | `true` | `false` | `true` | Requires session metrics and returns a safe review-required result if missing. |
+
 Development configuration for structured financial analysis:
 
 ```text
