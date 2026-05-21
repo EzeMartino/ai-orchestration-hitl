@@ -593,6 +593,54 @@ code {
   overflow-wrap: anywhere;
 }
 
+.metricsTemplateBox {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1rem;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: #f8fafc;
+}
+
+.metricsTemplateBox strong {
+  color: #0f2747;
+}
+
+.metricsTemplateBox p {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.templateActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.templateActions a,
+.templateActions button {
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.templateActions a {
+  border: 1px solid #99f6e4;
+  color: #0f766e;
+  background: white;
+  text-decoration: none;
+}
+
+.templateActions a:hover {
+  border-color: #0f766e;
+}
+
 .metricsModeToggle {
   display: inline-flex;
   gap: 0.35rem;
@@ -1368,7 +1416,8 @@ code {
   .evidenceHeader,
   .structuredMetricsHeader,
   .financialRiskHeader,
-  .complianceHeader {
+  .complianceHeader,
+  .metricsTemplateBox {
     flex-direction: column;
   }
 
@@ -1391,7 +1440,8 @@ code {
 
   .actions,
   .approvalActions,
-  .loadSessionRow {
+  .loadSessionRow,
+  .templateActions {
     flex-direction: column;
   }
 

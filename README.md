@@ -587,6 +587,13 @@ Supported dashboard input modes:
 - Paste CSV,
 - Upload JSON/CSV file.
 
+Sample templates are available from the dashboard:
+
+- `frontend/public/templates/structured-financial-metrics-sample.json`,
+- `frontend/public/templates/structured-financial-metrics-sample.csv`.
+
+The templates use synthetic sample values. They are examples of the expected structure, not accounting guidance or source-document verification.
+
 Structured metrics are persisted in `AnalysisSession.ContextJson` under:
 
 ```text

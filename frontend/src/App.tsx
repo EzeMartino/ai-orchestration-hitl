@@ -265,6 +265,10 @@ type AnalysisContext = {
 const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
 const maxStructuredMetricsFileSizeBytes = 1_048_576;
 const allowedStructuredMetricsFileExtensions = [".json", ".csv"];
+const sampleJsonTemplateUrl =
+  "/templates/structured-financial-metrics-sample.json";
+const sampleCsvTemplateUrl =
+  "/templates/structured-financial-metrics-sample.csv";
 
 const jsonMetricsTemplate = JSON.stringify(
   {
@@ -786,6 +790,46 @@ function StructuredFinancialMetricsPanel({
     });
   }
 
+  async function loadSampleJson() {
+    setInputError(null);
+
+    try {
+      const response = await fetch(sampleJsonTemplateUrl);
+
+      if (!response.ok) {
+        throw new Error("Sample JSON template could not be loaded.");
+      }
+
+      setJsonText(await response.text());
+      setMode("json");
+    } catch (error) {
+      console.error(error);
+      setInputError("Sample JSON template could not be loaded.");
+    }
+  }
+
+  async function loadSampleCsv() {
+    setInputError(null);
+
+    try {
+      const response = await fetch(sampleCsvTemplateUrl);
+
+      if (!response.ok) {
+        throw new Error("Sample CSV template could not be loaded.");
+      }
+
+      setCsvText(await response.text());
+      setCsvDocumentId("sample-csv-metrics");
+      setCsvCompany("Sample Energy Co");
+      setCsvCurrency("USD");
+      setCsvUnit("USD_thousand");
+      setMode("csv");
+    } catch (error) {
+      console.error(error);
+      setInputError("Sample CSV template could not be loaded.");
+    }
+  }
+
   function handleFileSelected(file: File | null) {
     setInputError(null);
     setSelectedFile(file);
@@ -852,6 +896,31 @@ function StructuredFinancialMetricsPanel({
           ) : (
             <span>No structured financial metrics attached to this session.</span>
           )}
+        </div>
+      </div>
+
+      <div className="metricsTemplateBox">
+        <div>
+          <strong>Templates</strong>
+          <p>
+            Use these samples to match the expected structured financial
+            metrics format.
+          </p>
+        </div>
+
+        <div className="templateActions">
+          <a href={sampleJsonTemplateUrl} download>
+            Download sample JSON
+          </a>
+          <button onClick={loadSampleJson} type="button">
+            Load sample JSON
+          </button>
+          <a href={sampleCsvTemplateUrl} download>
+            Download sample CSV
+          </a>
+          <button onClick={loadSampleCsv} type="button">
+            Load sample CSV
+          </button>
         </div>
       </div>
 

@@ -1,0 +1,49 @@
+name,period,value,unit,currency,source,sourcePage,confidence
+Revenue,2024A,1647768,USD_thousand,USD,sample_template,18,0.9
+Gross Profit,2024A,924000,USD_thousand,USD,sample_template,18,0.88
+EBITDA,2024A,680000,USD_thousand,USD,sample_template,19,0.88
+EBIT,2024A,520000,USD_thousand,USD,sample_template,19,0.88
+Net Income,2024A,354000,USD_thousand,USD,sample_template,20,0.86
+Current Assets,2024A,1203000,USD_thousand,USD,sample_template,22,0.86
+Current Liabilities,2024A,1000000,USD_thousand,USD,sample_template,22,0.86
+Cash,2024A,441000,USD_thousand,USD,sample_template,22,0.86
+Short Term Investments,2024A,120000,USD_thousand,USD,sample_template,22,0.84
+Receivables,2024A,210000,USD_thousand,USD,sample_template,22,0.84
+Total Debt,2024A,970000,USD_thousand,USD,sample_template,23,0.85
+Net Debt,2024A,529000,USD_thousand,USD,sample_template,23,0.85
+Equity,2024A,841000,USD_thousand,USD,sample_template,24,0.85
+Free Cash Flow,2024A,120000,USD_thousand,USD,sample_template,25,0.84
+Capex,2024A,460000,USD_thousand,USD,sample_template,25,0.84
+Interest Expense,2024A,140000,USD_thousand,USD,sample_template,26,0.84
+Revenue,2025E,1800000,USD_thousand,USD,sample_template,18,0.8
+Gross Profit,2025E,920000,USD_thousand,USD,sample_template,18,0.8
+EBITDA,2025E,610000,USD_thousand,USD,sample_template,19,0.8
+EBIT,2025E,440000,USD_thousand,USD,sample_template,19,0.8
+Net Income,2025E,280000,USD_thousand,USD,sample_template,20,0.8
+Current Assets,2025E,950000,USD_thousand,USD,sample_template,22,0.8
+Current Liabilities,2025E,1400000,USD_thousand,USD,sample_template,22,0.8
+Cash,2025E,550000,USD_thousand,USD,sample_template,22,0.8
+Short Term Investments,2025E,0,USD_thousand,USD,sample_template,22,0.8
+Receivables,2025E,0,USD_thousand,USD,sample_template,22,0.8
+Total Debt,2025E,1850000,USD_thousand,USD,sample_template,23,0.8
+Net Debt,2025E,1300000,USD_thousand,USD,sample_template,23,0.8
+Equity,2025E,899000,USD_thousand,USD,sample_template,24,0.8
+Free Cash Flow,2025E,-85000,USD_thousand,USD,sample_template,25,0.8
+Capex,2025E,700000,USD_thousand,USD,sample_template,25,0.8
+Interest Expense,2025E,260000,USD_thousand,USD,sample_template,26,0.8
+Revenue,2026E,2050000,USD_thousand,USD,sample_template,18,0.75
+Gross Profit,2026E,1120000,USD_thousand,USD,sample_template,18,0.75
+EBITDA,2026E,820000,USD_thousand,USD,sample_template,19,0.75
+EBIT,2026E,650000,USD_thousand,USD,sample_template,19,0.75
+Net Income,2026E,420000,USD_thousand,USD,sample_template,20,0.75
+Current Assets,2026E,1280000,USD_thousand,USD,sample_template,22,0.75
+Current Liabilities,2026E,1400000,USD_thousand,USD,sample_template,22,0.75
+Cash,2026E,620000,USD_thousand,USD,sample_template,22,0.75
+Short Term Investments,2026E,80000,USD_thousand,USD,sample_template,22,0.75
+Receivables,2026E,260000,USD_thousand,USD,sample_template,22,0.75
+Total Debt,2026E,1650000,USD_thousand,USD,sample_template,23,0.75
+Net Debt,2026E,950000,USD_thousand,USD,sample_template,23,0.75
+Equity,2026E,1040000,USD_thousand,USD,sample_template,24,0.75
+Free Cash Flow,2026E,180000,USD_thousand,USD,sample_template,25,0.75
+Capex,2026E,620000,USD_thousand,USD,sample_template,25,0.75
+Interest Expense,2026E,240000,USD_thousand,USD,sample_template,26,0.75

@@ -1,0 +1,488 @@
+{
+  "documentId": "sample-json-metrics",
+  "company": "Sample Energy Co",
+  "currency": "USD",
+  "unit": "USD_thousand",
+  "metrics": [
+    {
+      "name": "Revenue",
+      "period": "2024A",
+      "value": 1647768,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.9
+    },
+    {
+      "name": "Gross Profit",
+      "period": "2024A",
+      "value": 924000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.88
+    },
+    {
+      "name": "EBITDA",
+      "period": "2024A",
+      "value": 680000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.88
+    },
+    {
+      "name": "EBIT",
+      "period": "2024A",
+      "value": 520000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.88
+    },
+    {
+      "name": "Net Income",
+      "period": "2024A",
+      "value": 354000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 20,
+      "confidence": 0.86
+    },
+    {
+      "name": "Current Assets",
+      "period": "2024A",
+      "value": 1203000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.86
+    },
+    {
+      "name": "Current Liabilities",
+      "period": "2024A",
+      "value": 1000000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.86
+    },
+    {
+      "name": "Cash",
+      "period": "2024A",
+      "value": 441000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.86
+    },
+    {
+      "name": "Short Term Investments",
+      "period": "2024A",
+      "value": 120000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.84
+    },
+    {
+      "name": "Receivables",
+      "period": "2024A",
+      "value": 210000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.84
+    },
+    {
+      "name": "Total Debt",
+      "period": "2024A",
+      "value": 970000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.85
+    },
+    {
+      "name": "Net Debt",
+      "period": "2024A",
+      "value": 529000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.85
+    },
+    {
+      "name": "Equity",
+      "period": "2024A",
+      "value": 841000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 24,
+      "confidence": 0.85
+    },
+    {
+      "name": "Free Cash Flow",
+      "period": "2024A",
+      "value": 120000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.84
+    },
+    {
+      "name": "Capex",
+      "period": "2024A",
+      "value": 460000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.84
+    },
+    {
+      "name": "Interest Expense",
+      "period": "2024A",
+      "value": 140000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 26,
+      "confidence": 0.84
+    },
+    {
+      "name": "Revenue",
+      "period": "2025E",
+      "value": 1800000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.8
+    },
+    {
+      "name": "Gross Profit",
+      "period": "2025E",
+      "value": 920000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.8
+    },
+    {
+      "name": "EBITDA",
+      "period": "2025E",
+      "value": 610000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.8
+    },
+    {
+      "name": "EBIT",
+      "period": "2025E",
+      "value": 440000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.8
+    },
+    {
+      "name": "Net Income",
+      "period": "2025E",
+      "value": 280000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 20,
+      "confidence": 0.8
+    },
+    {
+      "name": "Current Assets",
+      "period": "2025E",
+      "value": 950000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.8
+    },
+    {
+      "name": "Current Liabilities",
+      "period": "2025E",
+      "value": 1400000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.8
+    },
+    {
+      "name": "Cash",
+      "period": "2025E",
+      "value": 550000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.8
+    },
+    {
+      "name": "Short Term Investments",
+      "period": "2025E",
+      "value": 0,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.8
+    },
+    {
+      "name": "Receivables",
+      "period": "2025E",
+      "value": 0,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.8
+    },
+    {
+      "name": "Total Debt",
+      "period": "2025E",
+      "value": 1850000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.8
+    },
+    {
+      "name": "Net Debt",
+      "period": "2025E",
+      "value": 1300000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.8
+    },
+    {
+      "name": "Equity",
+      "period": "2025E",
+      "value": 899000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 24,
+      "confidence": 0.8
+    },
+    {
+      "name": "Free Cash Flow",
+      "period": "2025E",
+      "value": -85000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.8
+    },
+    {
+      "name": "Capex",
+      "period": "2025E",
+      "value": 700000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.8
+    },
+    {
+      "name": "Interest Expense",
+      "period": "2025E",
+      "value": 260000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 26,
+      "confidence": 0.8
+    },
+    {
+      "name": "Revenue",
+      "period": "2026E",
+      "value": 2050000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.75
+    },
+    {
+      "name": "Gross Profit",
+      "period": "2026E",
+      "value": 1120000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 18,
+      "confidence": 0.75
+    },
+    {
+      "name": "EBITDA",
+      "period": "2026E",
+      "value": 820000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.75
+    },
+    {
+      "name": "EBIT",
+      "period": "2026E",
+      "value": 650000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 19,
+      "confidence": 0.75
+    },
+    {
+      "name": "Net Income",
+      "period": "2026E",
+      "value": 420000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 20,
+      "confidence": 0.75
+    },
+    {
+      "name": "Current Assets",
+      "period": "2026E",
+      "value": 1280000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.75
+    },
+    {
+      "name": "Current Liabilities",
+      "period": "2026E",
+      "value": 1400000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.75
+    },
+    {
+      "name": "Cash",
+      "period": "2026E",
+      "value": 620000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.75
+    },
+    {
+      "name": "Short Term Investments",
+      "period": "2026E",
+      "value": 80000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.75
+    },
+    {
+      "name": "Receivables",
+      "period": "2026E",
+      "value": 260000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 22,
+      "confidence": 0.75
+    },
+    {
+      "name": "Total Debt",
+      "period": "2026E",
+      "value": 1650000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.75
+    },
+    {
+      "name": "Net Debt",
+      "period": "2026E",
+      "value": 950000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 23,
+      "confidence": 0.75
+    },
+    {
+      "name": "Equity",
+      "period": "2026E",
+      "value": 1040000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 24,
+      "confidence": 0.75
+    },
+    {
+      "name": "Free Cash Flow",
+      "period": "2026E",
+      "value": 180000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.75
+    },
+    {
+      "name": "Capex",
+      "period": "2026E",
+      "value": 620000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 25,
+      "confidence": 0.75
+    },
+    {
+      "name": "Interest Expense",
+      "period": "2026E",
+      "value": 240000,
+      "unit": "USD_thousand",
+      "currency": "USD",
+      "source": "sample_template",
+      "sourcePage": 26,
+      "confidence": 0.75
+    }
+  ]
+}
