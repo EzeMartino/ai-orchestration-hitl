@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,6 +14,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
@@ -20,6 +23,7 @@ public sealed class McpRegulatoryKnowledgeSource(
     ICnvRegulationMcpClient client,
     IOptions<CnvRegulationMcpOptions> options,
     ILogger<McpRegulatoryKnowledgeSource> logger,
+    ILegalAnalysisReviewService legalAnalysisReviewService,
     IOrchestrationDbContext? dbContext = null,
     ILegalCnvQueryStrategy? queryStrategy = null,
     IActivityEventPublisher? activityPublisher = null) : IRegulatoryKnowledgeSource
@@ -27,12 +31,14 @@ public sealed class McpRegulatoryKnowledgeSource(
     private readonly ICnvRegulationMcpClient _client = client;
     private readonly CnvRegulationMcpOptions _options = options.Value;
     private readonly ILogger<McpRegulatoryKnowledgeSource> _logger = logger;
+    private readonly ILegalAnalysisReviewService _legalAnalysisReviewService = legalAnalysisReviewService;
     private readonly IOrchestrationDbContext? _dbContext = dbContext;
     private readonly ILegalCnvQueryStrategy _queryStrategy = queryStrategy ?? new FinancialAnalysisLegalCnvQueryStrategy();
     private readonly IActivityEventPublisher? _activityPublisher = activityPublisher;
 
-    private sealed record RegulatorySearchOutcome(
+    private sealed record CnvSearchReviewResult(
         List<RegulatoryFinding> Findings,
+        List<LegalEvidenceReference> EvidenceReferences,
         List<string> Warnings
     );
 
@@ -105,6 +111,67 @@ public sealed class McpRegulatoryKnowledgeSource(
             ? "CNV regulatory evidence was found for the submitted financial anomaly. Human legal review is required."
             : "No CNV regulatory evidence with citations was found for the submitted financial anomaly.";
 
+        // AI Review Execution
+        LegalAnalysisReviewResult legalReviewResult;
+        if (financialAnalysis == null)
+        {
+            legalReviewResult = LegalAnalysisReviewResults.NotRun("financial_analysis_missing");
+        }
+        else
+        {
+            var input = new LegalAnalysisReviewInput(
+                SessionId: report.SessionId.ToString(),
+                Company: financialAnalysis.Company,
+                DocumentId: financialAnalysis.DocumentId,
+                MetricsInputSource: financialAnalysis.MetricsInputSource,
+                MetricsProvenance: financialAnalysis.MetricsProvenance,
+                FinancialAiReview: financialAnalysis.AiReview,
+                FinancialRiskSignals: financialAnalysis.RiskSignals ?? Array.Empty<FinancialRiskSignal>(),
+                FinancialRiskEvidence: financialAnalysis.RiskEvidence ?? Array.Empty<RiskEvidenceItem>(),
+                FinancialWarnings: financialAnalysis.Warnings ?? Array.Empty<string>(),
+                FinancialLimitations: financialAnalysis.Limitations ?? Array.Empty<string>(),
+                CnvEvidence: outcome.EvidenceReferences
+            );
+
+            legalReviewResult = await _legalAnalysisReviewService.ReviewAsync(input, cancellationToken);
+        }
+
+        // Publish Activity Feed event for AI Review
+        if (_activityPublisher != null)
+        {
+            try
+            {
+                string activityMsg;
+                if (legalReviewResult.UsedLlm)
+                {
+                    activityMsg = "LegalAgent AI review completed using LLM.";
+                }
+                else if (legalReviewResult.FailureReason == "financial_analysis_missing")
+                {
+                    activityMsg = "LegalAgent AI review was not executed.";
+                }
+                else
+                {
+                    activityMsg = "LegalAgent AI review completed using deterministic fallback.";
+                }
+
+                await _activityPublisher.PublishAsync(
+                    new ActivityEvent(
+                        report.SessionId,
+                        "legal_agent_ai_review_completed",
+                        "LegalAgent",
+                        activityMsg,
+                        DateTimeOffset.UtcNow
+                    ),
+                    cancellationToken
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish activity feed event for AI review.");
+            }
+        }
+
         return new RegulatoryReviewResult(
             HasComplianceRisk: hasRisk,
             RiskLevel: hasRisk ? "Medium" : "Low",
@@ -112,7 +179,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             SourceEngine: "MCP CNV Regulation Server",
             Findings: findings,
             Warnings: warnings.Distinct().ToList(),
-            QueryStrategy: audit
+            QueryStrategy: audit,
+            LegalReview: legalReviewResult
         );
     }
 
@@ -197,12 +265,13 @@ public sealed class McpRegulatoryKnowledgeSource(
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
-    private async Task<RegulatorySearchOutcome> SearchFindingsAsync(
+    private async Task<CnvSearchReviewResult> SearchFindingsAsync(
         FinancialReportContext report,
         IReadOnlyList<LegalCnvQuery> queries,
         CancellationToken cancellationToken)
     {
         var allFindings = new List<RegulatoryFinding>();
+        var allEvidence = new List<LegalEvidenceReference>();
         var warnings = new List<string>();
         bool hasUncitedEvidence = false;
 
@@ -239,6 +308,36 @@ public sealed class McpRegulatoryKnowledgeSource(
                         {
                             var mapped = MapFindings(result);
                             allFindings.AddRange(mapped);
+
+                            foreach (var citation in result.Citations)
+                            {
+                                var source = BuildSource(citation);
+                                var title = citation.Title ?? result.Title;
+                                var url = citation.Url ?? result.Url;
+                                var citationStr = citation.Article
+                                    ?? citation.Section
+                                    ?? citation.Chapter
+                                    ?? result.Article
+                                    ?? result.Section
+                                    ?? result.Chapter;
+
+                                var snippet = !string.IsNullOrWhiteSpace(citation.QuotedText)
+                                    ? citation.QuotedText
+                                    : result.Snippet;
+
+                                if (!string.IsNullOrWhiteSpace(citationStr))
+                                {
+                                    allEvidence.Add(new LegalEvidenceReference(
+                                        Source: source,
+                                        Title: title,
+                                        Url: string.IsNullOrWhiteSpace(url) ? null : url,
+                                        Citation: citationStr,
+                                        Snippet: string.IsNullOrWhiteSpace(snippet) ? null : snippet,
+                                        RegulationArea: queryInfo.RegulationArea ?? "Agentes",
+                                        Score: result.Score
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
@@ -261,6 +360,12 @@ public sealed class McpRegulatoryKnowledgeSource(
             .Select(g => g.First())
             .ToList();
 
+        // Deduplicate evidence references
+        var uniqueEvidence = allEvidence
+            .GroupBy(e => $"{e.Source}||{e.Title}||{e.Citation}||{e.Snippet}")
+            .Select(g => g.First())
+            .ToList();
+
         if (uniqueFindings.Count > 0)
         {
             warnings.Add("Automated regulatory retrieval only. Human legal review is required before making operational decisions.");
@@ -270,8 +375,9 @@ public sealed class McpRegulatoryKnowledgeSource(
             warnings.Add("No cited CNV regulatory evidence was found by the MCP search strategy.");
         }
 
-        return new RegulatorySearchOutcome(
+        return new CnvSearchReviewResult(
             Findings: uniqueFindings,
+            EvidenceReferences: uniqueEvidence,
             Warnings: warnings.Distinct().ToList()
         );
     }

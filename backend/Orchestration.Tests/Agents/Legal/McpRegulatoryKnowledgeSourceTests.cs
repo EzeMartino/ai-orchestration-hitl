@@ -14,6 +14,7 @@ using Orchestration.Tests.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Activity;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
+using Orchestration.Application.Agents.Legal.AiReview;
 
 namespace Orchestration.Tests.Agents.Legal;
 
@@ -98,7 +99,8 @@ public class McpRegulatoryKnowledgeSourceTests
     }
 
     private static McpRegulatoryKnowledgeSource CreateSource(
-        ICnvRegulationMcpClient client)
+        ICnvRegulationMcpClient client,
+        ILegalAnalysisReviewService? reviewService = null)
     {
         var options = Options.Create(
             new CnvRegulationMcpOptions
@@ -113,7 +115,8 @@ public class McpRegulatoryKnowledgeSourceTests
         return new McpRegulatoryKnowledgeSource(
             client,
             options,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
+            reviewService ?? new DeterministicLegalAnalysisReviewService()
         );
     }
 
@@ -267,7 +270,8 @@ public class McpRegulatoryKnowledgeSourceTests
         ICnvRegulationMcpClient client,
         IOrchestrationDbContext dbContext,
         ILegalCnvQueryStrategy? queryStrategy = null,
-        IActivityEventPublisher? activityPublisher = null)
+        IActivityEventPublisher? activityPublisher = null,
+        ILegalAnalysisReviewService? reviewService = null)
     {
         var options = Options.Create(
             new CnvRegulationMcpOptions
@@ -283,6 +287,7 @@ public class McpRegulatoryKnowledgeSourceTests
             client,
             options,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
+            reviewService ?? new DeterministicLegalAnalysisReviewService(),
             dbContext,
             queryStrategy,
             activityPublisher
@@ -444,8 +449,8 @@ public class McpRegulatoryKnowledgeSourceTests
         client.ReceivedRequests.Should().NotBeEmpty();
         client.ReceivedRequests.Any(r => r.Query.Contains("liquidez")).Should().BeTrue();
 
-        publisher.PublishedEvents.Should().ContainSingle();
-        publisher.PublishedEvents[0].Type.Should().Be("legal_cnv_queries_derived");
+        publisher.PublishedEvents.Should().Contain(e => e.Type == "legal_cnv_queries_derived");
+        publisher.PublishedEvents.Should().Contain(e => e.Type == "legal_agent_ai_review_completed");
     }
 
     [Fact]

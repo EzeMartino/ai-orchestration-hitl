@@ -1,3 +1,4 @@
+using Orchestration.Application.Agents.Legal.AiReview;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Shared;
@@ -87,7 +88,8 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
         var source = new McpRegulatoryKnowledgeSource(
             client,
             options,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
+            new DeterministicLegalAnalysisReviewService()
         );
 
         var report = new FinancialReportContext(

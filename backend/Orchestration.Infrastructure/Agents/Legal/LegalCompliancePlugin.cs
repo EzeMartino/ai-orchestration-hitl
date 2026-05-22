@@ -19,10 +19,18 @@ public sealed class LegalCompliancePlugin(
         double totalAmount,
         [Description("Number of transactions in the report.")]
         int transactionCount,
+        [Description("Unique ID of the active analysis session")]
+        string? sessionId = null,
         CancellationToken cancellationToken = default)
     {
+        var parsedSessionId = Guid.Empty;
+        if (!string.IsNullOrWhiteSpace(sessionId) && Guid.TryParse(sessionId, out var parsedGuid))
+        {
+            parsedSessionId = parsedGuid;
+        }
+
         var report = new FinancialReportContext(
-            SessionId: Guid.Empty,
+            SessionId: parsedSessionId,
             ReportName: reportName,
             TotalAmount: Convert.ToDecimal(totalAmount),
             TransactionCount: transactionCount,
@@ -48,7 +56,8 @@ public sealed class LegalCompliancePlugin(
                 ))
                 .ToList(),
             Warnings: review.Warnings,
-            QueryStrategy: review.QueryStrategy
+            QueryStrategy: review.QueryStrategy,
+            LegalReview: review.LegalReview
         );
     }
 }

@@ -457,7 +457,38 @@ namespace Orchestration.Application.AnalysisSessions
                         section = e.Section,
                         finding = e.Finding,
                         source = e.Source
-                    })
+                    }),
+                    legalReview = plannerResult.LegalResult.LegalReview is null
+                        ? null
+                        : new
+                        {
+                            reviewSummary = plannerResult.LegalResult.LegalReview.ReviewSummary,
+                            possibleRegulatoryReviewAreas = plannerResult.LegalResult.LegalReview.PossibleRegulatoryReviewAreas.Select(area => new
+                            {
+                                title = area.Title,
+                                description = area.Description,
+                                severity = area.Severity,
+                                relatedFinancialSignals = area.RelatedFinancialSignals,
+                                evidenceCitations = area.EvidenceCitations
+                            }),
+                            evidenceReferences = plannerResult.LegalResult.LegalReview.EvidenceReferences.Select(ev => new
+                            {
+                                source = ev.Source,
+                                title = ev.Title,
+                                url = ev.Url,
+                                citation = ev.Citation,
+                                snippet = ev.Snippet,
+                                regulationArea = ev.RegulationArea,
+                                score = ev.Score
+                            }),
+                            warnings = plannerResult.LegalResult.LegalReview.Warnings,
+                            limitations = plannerResult.LegalResult.LegalReview.Limitations,
+                            usedLlm = plannerResult.LegalResult.LegalReview.UsedLlm,
+                            usedFallback = plannerResult.LegalResult.LegalReview.UsedFallback,
+                            provider = plannerResult.LegalResult.LegalReview.Provider,
+                            model = plannerResult.LegalResult.LegalReview.Model,
+                            failureReason = plannerResult.LegalResult.LegalReview.FailureReason
+                        }
                 }
             };
 

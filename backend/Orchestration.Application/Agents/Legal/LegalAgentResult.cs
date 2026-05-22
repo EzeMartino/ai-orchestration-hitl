@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Legal.AiReview;
+
 namespace Orchestration.Application.Agents.Legal;
 
 public sealed record LegalAgentResult(
@@ -7,5 +9,6 @@ public sealed record LegalAgentResult(
     string Engine,
     IReadOnlyList<LegalEvidence> Evidence,
     IReadOnlyList<string> Warnings,
-    object? QueryStrategy = null
+    object? QueryStrategy = null,
+    LegalAnalysisReviewResult? LegalReview = null
 );

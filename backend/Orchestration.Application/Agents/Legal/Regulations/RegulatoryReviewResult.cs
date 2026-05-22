@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Legal.AiReview;
+
 namespace Orchestration.Application.Agents.Legal.Regulations;
 
 public sealed record RegulatoryReviewResult(
@@ -7,5 +9,6 @@ public sealed record RegulatoryReviewResult(
     string SourceEngine,
     IReadOnlyList<RegulatoryFinding> Findings,
     IReadOnlyList<string> Warnings,
-    object? QueryStrategy = null
+    object? QueryStrategy = null,
+    LegalAnalysisReviewResult? LegalReview = null
 );

@@ -27,7 +27,8 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
         {
             ["reportName"] = report.ReportName,
             ["totalAmount"] = Convert.ToDouble(report.TotalAmount),
-            ["transactionCount"] = report.TransactionCount
+            ["transactionCount"] = report.TransactionCount,
+            ["sessionId"] = report.SessionId.ToString()
         };
 
         var pluginResult = await _kernel.InvokeAsync<LegalCompliancePluginResult>(
@@ -55,7 +56,8 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
                 ))
                 .ToList(),
             Warnings: pluginResult.Warnings,
-            QueryStrategy: pluginResult.QueryStrategy
+            QueryStrategy: pluginResult.QueryStrategy,
+            LegalReview: pluginResult.LegalReview
         );
     }
 }

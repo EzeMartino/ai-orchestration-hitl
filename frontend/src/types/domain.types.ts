@@ -38,6 +38,37 @@ export type ComplianceEvidenceItem = {
   source: string;
 };
 
+export type LegalEvidenceReference = {
+  source: string;
+  title: string;
+  url?: string | null;
+  citation?: string | null;
+  snippet?: string | null;
+  regulationArea?: string | null;
+  score?: number | null;
+};
+
+export type PossibleRegulatoryReviewArea = {
+  title: string;
+  description: string;
+  severity: string;
+  relatedFinancialSignals: string[];
+  evidenceCitations: string[];
+};
+
+export type LegalAnalysisReviewResult = {
+  reviewSummary: string;
+  possibleRegulatoryReviewAreas: PossibleRegulatoryReviewArea[];
+  evidenceReferences: LegalEvidenceReference[];
+  warnings: string[];
+  limitations: string[];
+  usedLlm: boolean;
+  usedFallback: boolean;
+  provider?: string | null;
+  model?: string | null;
+  failureReason?: string | null;
+};
+
 export type ComplianceContext = {
   riskDetected: boolean;
   riskLevel: string;
@@ -45,6 +76,7 @@ export type ComplianceContext = {
   summary: string;
   evidence: ComplianceEvidenceItem[];
   warnings?: string[];
+  legalReview?: LegalAnalysisReviewResult | null;
 };
 
 export type PlannerContext = {
