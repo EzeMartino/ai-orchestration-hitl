@@ -6,26 +6,20 @@ using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
 
-public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
+public sealed class McpRegulatoryKnowledgeSource(
+    ICnvRegulationMcpClient client,
+    IOptions<CnvRegulationMcpOptions> options,
+    ILogger<McpRegulatoryKnowledgeSource> logger) : IRegulatoryKnowledgeSource
 {
-    private readonly ICnvRegulationMcpClient _client;
-    private readonly CnvRegulationMcpOptions _options;
-    private readonly ILogger<McpRegulatoryKnowledgeSource> _logger;
+    private readonly ICnvRegulationMcpClient _client = client;
+    private readonly CnvRegulationMcpOptions _options = options.Value;
+    private readonly ILogger<McpRegulatoryKnowledgeSource> _logger = logger;
 
     private sealed record RegulatorySearchOutcome(
         List<RegulatoryFinding> Findings,
         List<string> Warnings
     );
 
-    public McpRegulatoryKnowledgeSource(
-        ICnvRegulationMcpClient client,
-        IOptions<CnvRegulationMcpOptions> options,
-        ILogger<McpRegulatoryKnowledgeSource> logger)
-    {
-        _client = client;
-        _options = options.Value;
-        _logger = logger;
-    }
 
     public async Task<RegulatoryReviewResult> ReviewAsync(
         FinancialReportContext report,

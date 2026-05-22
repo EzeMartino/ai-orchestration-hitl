@@ -1,17 +1,12 @@
-﻿using CSnakes.Runtime;
+using CSnakes.Runtime;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data;
 
-public sealed class CSnakesDataAgent : IDataAgent
+public sealed class CSnakesDataAgent(IPythonEnvironment pythonEnvironment) : IDataAgent
 {
-    private readonly IPythonEnvironment _pythonEnvironment;
-
-    public CSnakesDataAgent(IPythonEnvironment pythonEnvironment)
-    {
-        _pythonEnvironment = pythonEnvironment;
-    }
+    private readonly IPythonEnvironment _pythonEnvironment = pythonEnvironment;
 
     public Task<DataAgentResult> AnalyzeAsync(
         FinancialReportContext report,

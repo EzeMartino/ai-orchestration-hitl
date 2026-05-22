@@ -6,21 +6,14 @@ namespace Orchestration.Api.Controllers;
 
 [ApiController]
 [Route("api/diagnostics")]
-public class DiagnosticsController : ControllerBase
+public class DiagnosticsController(
+    ICnvRegulationMcpClient client,
+    IToolCallingDiagnosticService toolCallingDiagnostics,
+    IHostEnvironment environment) : ControllerBase
 {
-    private readonly ICnvRegulationMcpClient _client;
-    private readonly IToolCallingDiagnosticService _toolCallingDiagnostics;
-    private readonly IHostEnvironment _environment;
-
-    public DiagnosticsController(
-        ICnvRegulationMcpClient client,
-        IToolCallingDiagnosticService toolCallingDiagnostics,
-        IHostEnvironment environment)
-    {
-        _client = client;
-        _toolCallingDiagnostics = toolCallingDiagnostics;
-        _environment = environment;
-    }
+    private readonly ICnvRegulationMcpClient _client = client;
+    private readonly IToolCallingDiagnosticService _toolCallingDiagnostics = toolCallingDiagnostics;
+    private readonly IHostEnvironment _environment = environment;
 
     [HttpPost("cnv-regulation/search")]
     public async Task<IActionResult> SearchCnvRegulation(

@@ -7,11 +7,16 @@ using System.Text.Json;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
-public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyncDisposable
+public sealed class CnvRegulationStdioMcpClient(
+    IOptions<CnvRegulationMcpOptions> options,
+    ILogger<CnvRegulationStdioMcpClient> logger) : ICnvRegulationMcpClient, IAsyncDisposable
 {
-    private readonly CnvRegulationMcpOptions _options;
-    private readonly ILogger<CnvRegulationStdioMcpClient> _logger;
-    private readonly JsonSerializerOptions _jsonOptions;
+    private readonly CnvRegulationMcpOptions _options = options.Value;
+    private readonly ILogger<CnvRegulationStdioMcpClient> _logger = logger;
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     private StdioClientTransport? _transport;
@@ -28,18 +33,6 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
     public int ResetCount => _resetCount;
     public string? LastError => _lastError;
 
-    public CnvRegulationStdioMcpClient(
-        IOptions<CnvRegulationMcpOptions> options,
-        ILogger<CnvRegulationStdioMcpClient> logger)
-    {
-        _options = options.Value;
-        _logger = logger;
-
-        _jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
-    }
 
     public async Task<CnvRegulationSearchResponse> SearchAsync(
         CnvRegulationSearchRequest request,

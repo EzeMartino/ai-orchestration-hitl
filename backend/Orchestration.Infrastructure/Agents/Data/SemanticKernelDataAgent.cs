@@ -1,24 +1,21 @@
-﻿using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data;
 
-public sealed class SemanticKernelDataAgent : ILegacyDataAgent
+public sealed class SemanticKernelDataAgent(PythonAnomalyDetectionPlugin plugin) : ILegacyDataAgent
 {
     private const string PluginName = "PythonAnomalyDetection";
     private const string FunctionName = "analyze_financial_transactions";
 
-    private readonly Kernel _kernel;
+    private readonly Kernel _kernel = BuildKernel(plugin);
 
-    public SemanticKernelDataAgent(PythonAnomalyDetectionPlugin plugin)
+    private static Kernel BuildKernel(PythonAnomalyDetectionPlugin plugin)
     {
-        _kernel = new Kernel();
-
-        _kernel.Plugins.AddFromObject(
-            plugin,
-            PluginName
-        );
+        var kernel = new Kernel();
+        kernel.Plugins.AddFromObject(plugin, PluginName);
+        return kernel;
     }
 
     public async Task<DataAgentResult> AnalyzeAsync(

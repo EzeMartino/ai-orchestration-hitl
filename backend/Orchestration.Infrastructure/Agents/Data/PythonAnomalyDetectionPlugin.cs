@@ -1,17 +1,12 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.SemanticKernel;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data;
 
-public sealed class PythonAnomalyDetectionPlugin
+public sealed class PythonAnomalyDetectionPlugin(CSnakesDataAgent dataAgent)
 {
-    private readonly CSnakesDataAgent _dataAgent;
-
-    public PythonAnomalyDetectionPlugin(CSnakesDataAgent dataAgent)
-    {
-        _dataAgent = dataAgent;
-    }
+    private readonly CSnakesDataAgent _dataAgent = dataAgent;
 
     [KernelFunction("analyze_financial_transactions")]
     [Description("Runs Python-based financial anomaly detection through CSnakes.")]

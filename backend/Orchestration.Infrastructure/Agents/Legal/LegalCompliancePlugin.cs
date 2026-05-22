@@ -1,19 +1,14 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.SemanticKernel;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Legal;
 
-public sealed class LegalCompliancePlugin
+public sealed class LegalCompliancePlugin(
+    IRegulatoryKnowledgeSource regulatoryKnowledgeSource)
 {
-    private readonly IRegulatoryKnowledgeSource _regulatoryKnowledgeSource;
-
-    public LegalCompliancePlugin(
-        IRegulatoryKnowledgeSource regulatoryKnowledgeSource)
-    {
-        _regulatoryKnowledgeSource = regulatoryKnowledgeSource;
-    }
+    private readonly IRegulatoryKnowledgeSource _regulatoryKnowledgeSource = regulatoryKnowledgeSource;
 
     [KernelFunction("review_financial_compliance")]
     [Description("Reviews a financial report summary against compliance rules.")]

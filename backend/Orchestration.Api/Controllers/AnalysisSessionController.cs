@@ -14,39 +14,28 @@ namespace Orchestration.Api.Controllers;
 
 [ApiController]
 [Route("api/analysis-sessions")]
-public class AnalysisSessionsController : ControllerBase
+public class AnalysisSessionsController(
+    IOrchestrationDbContext dbContext,
+    AnalysisOrchestratorService orchestrator,
+    IAnalysisSessionStartPreflightValidator startPreflightValidator,
+    IActivityEventPublisher activityPublisher,
+    IStructuredFinancialMetricsSessionService financialMetricsSessionService,
+    IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
+    IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions) : ControllerBase
 {
-    private readonly IOrchestrationDbContext _dbContext;
-    private readonly AnalysisOrchestratorService _orchestrator;
-    private readonly IAnalysisSessionStartPreflightValidator _startPreflightValidator;
-    private readonly IActivityEventPublisher _activityPublisher;
-    private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService;
-    private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser;
-    private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions;
+    private readonly IOrchestrationDbContext _dbContext = dbContext;
+    private readonly AnalysisOrchestratorService _orchestrator = orchestrator;
+    private readonly IAnalysisSessionStartPreflightValidator _startPreflightValidator = startPreflightValidator;
+    private readonly IActivityEventPublisher _activityPublisher = activityPublisher;
+    private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService = financialMetricsSessionService;
+    private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser = financialMetricsCsvParser;
+    private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions = fileUploadOptions.Value;
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web)
         {
             PropertyNameCaseInsensitive = true
         };
-
-    public AnalysisSessionsController(
-        IOrchestrationDbContext dbContext,
-        AnalysisOrchestratorService orchestrator,
-        IAnalysisSessionStartPreflightValidator startPreflightValidator,
-        IActivityEventPublisher activityPublisher,
-        IStructuredFinancialMetricsSessionService financialMetricsSessionService,
-        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
-        IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions)
-    {
-        _dbContext = dbContext;
-        _orchestrator = orchestrator;
-        _startPreflightValidator = startPreflightValidator;
-        _activityPublisher = activityPublisher;
-        _financialMetricsSessionService = financialMetricsSessionService;
-        _financialMetricsCsvParser = financialMetricsCsvParser;
-        _fileUploadOptions = fileUploadOptions.Value;
-    }
 
     [HttpGet]
     public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)

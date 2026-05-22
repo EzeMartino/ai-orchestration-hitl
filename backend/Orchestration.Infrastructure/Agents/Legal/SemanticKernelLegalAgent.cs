@@ -1,26 +1,22 @@
-﻿using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Legal;
 
-public sealed class SemanticKernelLegalAgent : ILegalAgent
+public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILegalAgent
 {
     private const string PluginName = "LegalCompliance";
     private const string FunctionName = "review_financial_compliance";
 
-    private readonly Kernel _kernel;
+    private readonly Kernel _kernel = BuildKernel(plugin);
 
-    public SemanticKernelLegalAgent(LegalCompliancePlugin plugin)
+    private static Kernel BuildKernel(LegalCompliancePlugin plugin)
     {
         var builder = Kernel.CreateBuilder();
-
-        _kernel = builder.Build();
-
-        _kernel.Plugins.AddFromObject(
-            plugin,
-            PluginName
-        );
+        var kernel = builder.Build();
+        kernel.Plugins.AddFromObject(plugin, PluginName);
+        return kernel;
     }
 
     public async Task<LegalAgentResult> ReviewAsync(
