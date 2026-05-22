@@ -370,9 +370,7 @@ LegalAgent
   -> cnv_regulation PostgreSQL database
 ```
 
-The LegalAgent retrieves cited CNV regulatory evidence and warnings. It does not make legal conclusions.
-
-LegalAgent AI review contracts were added as preparation for reviewing DataAgent financial analysis against provided CNV/Infoleg evidence. The review is advisory and must not declare legal violations or provide legal advice.
+LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is constrained to advisory review over provided FinancialAnalysis and CNV/Infoleg evidence. The deterministic fallback remains the safe default.
 
 
 ## Workflow States

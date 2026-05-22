@@ -7,6 +7,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Infrastructure.Agents.Legal.AiReview;
 
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.ToolCalling;
@@ -126,7 +127,7 @@ else
 
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
-builder.Services.AddScoped<ILegalAnalysisReviewService, DeterministicLegalAnalysisReviewService>();
+builder.Services.AddLegalAgentAiReview(builder.Configuration);
 
 
 // Persistence configuration
