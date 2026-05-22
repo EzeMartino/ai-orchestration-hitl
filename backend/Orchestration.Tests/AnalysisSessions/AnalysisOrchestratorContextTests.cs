@@ -8,6 +8,7 @@ using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.AnalysisSessions;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 
 namespace Orchestration.Tests.AnalysisSessions;
 
@@ -261,7 +262,12 @@ public class AnalysisOrchestratorContextTests
                 Provider: null,
                 Model: null,
                 FailureReason: null
-            )
+            ),
+            ThresholdProfile: "strict",
+            ThresholdsUsed:
+            [
+                new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.5m, "Medium", "Current ratio is below 1.5. Human review recommended.")
+            ]
         );
         var plannerResult = CreatePlannerResult(
             ToolPlanAuditResult.Empty,
@@ -301,6 +307,16 @@ public class AnalysisOrchestratorContextTests
         aiReview.GetProperty("usedFallback").GetBoolean().Should().BeTrue();
         aiReview.GetProperty("failureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
+        financialAnalysis.GetProperty("thresholdProfile").GetString().Should().Be("strict");
+        var thresholdsUsed = financialAnalysis.GetProperty("thresholdsUsed");
+        thresholdsUsed.GetArrayLength().Should().Be(1);
+        thresholdsUsed[0].GetProperty("code").GetString().Should().Be("LOW_CURRENT_RATIO");
+        thresholdsUsed[0].GetProperty("metric").GetString().Should().Be("current_ratio");
+        thresholdsUsed[0].GetProperty("operator").GetString().Should().Be("<");
+        thresholdsUsed[0].GetProperty("value").GetDecimal().Should().Be(1.5m);
+        thresholdsUsed[0].GetProperty("severity").GetString().Should().Be("Medium");
+        thresholdsUsed[0].GetProperty("description").GetString().Should().Be("Current ratio is below 1.5. Human review recommended.");
+
         root.GetProperty("anomaly").GetProperty("summary").GetString().Should().Be("Anomaly detected.");
     }
 
@@ -330,6 +346,36 @@ public class AnalysisOrchestratorContextTests
 
         context.Should().NotBeNull();
         context!.AiReview.Should().BeNull();
+        context.DocumentId.Should().Be("old-session");
+    }
+
+    [Fact]
+    public void FinancialAnalysisContext_Should_deserialize_old_json_without_thresholds()
+    {
+        const string json = """
+        {
+          "engine": "Semantic Kernel + CSnakes + Python/Pandas",
+          "documentId": "old-session",
+          "company": "Old Co",
+          "ratios": [],
+          "comparisons": [],
+          "riskSignals": [],
+          "riskEvidence": [],
+          "warnings": [],
+          "limitations": [],
+          "metricsInputSource": "session_context",
+          "metricsProvenance": null
+        }
+        """;
+
+        var context = JsonSerializer.Deserialize<FinancialAnalysisContext>(
+            json,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        );
+
+        context.Should().NotBeNull();
+        context!.ThresholdProfile.Should().BeNull();
+        context.ThresholdsUsed.Should().NotBeNull().And.BeEmpty();
         context.DocumentId.Should().Be("old-session");
     }
 

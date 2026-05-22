@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 using Orchestration.Tests.Agents.Data;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
@@ -219,6 +220,67 @@ public sealed class CSnakesFinancialAnalysisServiceTests
 
         response.Signals.Should().BeEmpty();
         response.Result.HasRiskSignals.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DetectFinancialRiskSignalsAsync_Should_respect_custom_thresholds_passed_from_CSharp()
+    {
+        var service = _fixture.GetRequiredService<IPythonFinancialAnalysisService>();
+        var metrics = CreateHealthyMetrics();
+        var ratios = new[]
+        {
+            new FinancialRatio(
+                Name: "net_debt_to_ebitda",
+                Period: "2025A",
+                Value: 0.625m,
+                Unit: "x",
+                Formula: "net_debt / ebitda",
+                Inputs: ["net_debt", "ebitda"],
+                Interpretation: "Healthy leverage ratio."
+            )
+        };
+
+        // Scenario 1: Strict threshold is high (2.5), so net_debt_to_ebitda (0.625) does not trigger it
+        var strictThresholds = new[]
+        {
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 2.5m, "High", "Strict threshold is 2.5")
+        };
+        var strictRequest = new DetectFinancialRiskSignalsRequest(
+            Metrics: metrics,
+            Ratios: ratios,
+            Comparisons: [],
+            ThresholdProfileName: "strict",
+            Thresholds: strictThresholds
+        );
+
+        var strictResponse = await service.DetectFinancialRiskSignalsAsync(
+            strictRequest,
+            CancellationToken.None
+        );
+
+        strictResponse.Signals.Should().NotContain(s => s.Name == "HIGH_NET_DEBT_TO_EBITDA");
+
+        // Scenario 2: Demo/Custom threshold is very sensitive (0.5), so net_debt_to_ebitda (0.625) should trigger it
+        var demoThresholds = new[]
+        {
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 0.5m, "High", "Demo threshold is 0.5")
+        };
+        var demoRequest = new DetectFinancialRiskSignalsRequest(
+            Metrics: metrics,
+            Ratios: ratios,
+            Comparisons: [],
+            ThresholdProfileName: "demo",
+            Thresholds: demoThresholds
+        );
+
+        var demoResponse = await service.DetectFinancialRiskSignalsAsync(
+            demoRequest,
+            CancellationToken.None
+        );
+
+        demoResponse.Signals.Should().Contain(s => s.Name == "HIGH_NET_DEBT_TO_EBITDA");
+        var triggeredSignal = demoResponse.Signals.First(s => s.Name == "HIGH_NET_DEBT_TO_EBITDA");
+        triggeredSignal.Evidence.Should().ContainSingle(e => e.MetricName == "net_debt_to_ebitda" && e.Threshold == 0.5m && e.Value == 0.625m);
     }
 
     [Fact]

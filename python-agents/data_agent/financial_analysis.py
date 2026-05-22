@@ -175,7 +175,24 @@ def detect_financial_risk_signals(request_json: str) -> str:
     request = _loads(request_json)
     metrics = request.get("metrics", [])
     ratios = request.get("ratios", [])
-    threshold_profile = request.get("thresholdProfile") or {}
+    
+    thresholds = request.get("thresholds") or []
+    threshold_limits: dict[str, float] = {}
+    for t in thresholds:
+        metric = t.get("metric")
+        val = t.get("value")
+        if metric and val is not None:
+            if metric == "current_ratio":
+                threshold_limits["currentRatioMin"] = float(val)
+            elif metric == "quick_ratio":
+                threshold_limits["quickRatioMin"] = float(val)
+            elif metric == "net_debt_to_ebitda":
+                threshold_limits["netDebtToEbitdaMax"] = float(val)
+            elif metric == "debt_to_equity":
+                threshold_limits["debtToEquityMax"] = float(val)
+            elif metric == "interest_coverage":
+                threshold_limits["interestCoverageMin"] = float(val)
+
     warnings: list[str] = []
     limitations: list[str] = []
     signals: list[dict[str, Any]] = []
@@ -190,7 +207,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "current_ratio",
-        threshold_profile.get("currentRatioMin", 1.0),
+        threshold_limits.get("currentRatioMin", 1.0),
         "LOW_CURRENT_RATIO",
         "Current ratio is below 1.0. Human review recommended.",
         "Medium",
@@ -200,7 +217,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "quick_ratio",
-        threshold_profile.get("quickRatioMin", 0.8),
+        threshold_limits.get("quickRatioMin", 0.8),
         "LOW_QUICK_RATIO",
         "Quick ratio is below 0.8. Liquidity should be reviewed.",
         "Medium",
@@ -210,7 +227,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "net_debt_to_ebitda",
-        threshold_profile.get("netDebtToEbitdaMax", 3.0),
+        threshold_limits.get("netDebtToEbitdaMax", 3.0),
         "HIGH_NET_DEBT_TO_EBITDA",
         "Net debt to EBITDA is above the configured threshold.",
         "High",
@@ -221,7 +238,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "debt_to_equity",
-        threshold_profile.get("debtToEquityMax", 2.0),
+        threshold_limits.get("debtToEquityMax", 2.0),
         "HIGH_DEBT_TO_EQUITY",
         "Debt to equity is above the configured threshold.",
         "High",
@@ -232,7 +249,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "interest_coverage",
-        threshold_profile.get("interestCoverageMin", 2.0),
+        threshold_limits.get("interestCoverageMin", 2.0),
         "LOW_INTEREST_COVERAGE",
         "Interest coverage is below the configured threshold.",
         "High",

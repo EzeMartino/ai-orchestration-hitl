@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Shared;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 
 namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 
@@ -50,6 +51,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private readonly IStructuredFinancialMetricsProvider _metricsProvider;
     private readonly IPythonFinancialAnalysisService _financialAnalysisService;
     private readonly IDataAgentAiReviewService _aiReviewService;
+    private readonly IFinancialRiskThresholdProfileProvider _profileProvider;
     private readonly DataAgentOptions _options;
     private readonly IActivityEventPublisher _activityPublisher;
     private readonly ILogger<DataAgentFinancialAnalysisWorkflow> _logger;
@@ -58,6 +60,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         IStructuredFinancialMetricsProvider metricsProvider,
         IPythonFinancialAnalysisService financialAnalysisService,
         IDataAgentAiReviewService aiReviewService,
+        IFinancialRiskThresholdProfileProvider profileProvider,
         IOptions<DataAgentOptions> options,
         IActivityEventPublisher activityPublisher,
         ILogger<DataAgentFinancialAnalysisWorkflow> logger)
@@ -65,6 +68,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         _metricsProvider = metricsProvider;
         _financialAnalysisService = financialAnalysisService;
         _aiReviewService = aiReviewService;
+        _profileProvider = profileProvider;
         _options = options.Value;
         _activityPublisher = activityPublisher;
         _logger = logger;
@@ -74,10 +78,14 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
+        var resolution = _profileProvider.ResolveProfile(_options.RiskThresholdProfile);
+        var resolvedProfileName = resolution.Profile.Name;
+        var resolvedThresholds = resolution.Profile.Thresholds;
+
         _logger.LogDebug(
-            "Running financial analysis workflow for {ReportName} using threshold profile {RiskThresholdProfile}.",
+            "Running financial analysis workflow for {ReportName} using resolved threshold profile {RiskThresholdProfile}.",
             report.ReportName,
-            _options.RiskThresholdProfile
+            resolvedProfileName
         );
 
         var metricsDocument = await _metricsProvider.GetMetricsAsync(
@@ -128,7 +136,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
             new DetectFinancialRiskSignalsRequest(
                 Metrics: metricsDocument.Metrics,
                 Ratios: ratios.Ratios,
-                Comparisons: comparisons.Comparisons
+                Comparisons: comparisons.Comparisons,
+                ThresholdProfileName: resolvedProfileName,
+                Thresholds: resolvedThresholds
             ),
             cancellationToken
         );
@@ -149,6 +159,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
             .Concat(signals.Result.Warnings)
             .Concat(summary.Result.Warnings)
             .Concat(GetInputSourceWarnings(metricsDocument))
+            .Concat(resolution.Warnings)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -185,7 +196,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskSignals: signals.Signals,
                 RiskEvidence: summary.Result.Evidence,
                 Warnings: warnings,
-                Limitations: limitations
+                Limitations: limitations,
+                ThresholdProfile: resolvedProfileName,
+                ThresholdsUsed: resolvedThresholds
             ),
             cancellationToken
         );
@@ -208,7 +221,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Limitations: limitations,
                 MetricsInputSource: metricsDocument.InputSource,
                 MetricsProvenance: metricsDocument.Provenance,
-                AiReview: aiReview
+                AiReview: aiReview,
+                ThresholdProfile: resolvedProfileName,
+                ThresholdsUsed: resolvedThresholds
             )
         );
     }

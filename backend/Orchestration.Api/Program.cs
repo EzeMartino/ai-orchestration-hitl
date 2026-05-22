@@ -4,6 +4,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Legal.AiReview;
@@ -65,6 +66,7 @@ builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
     builder.Configuration.GetSection(StructuredFinancialMetricsFileUploadOptions.SectionName)
 );
 builder.Services.AddScoped<CSnakesDataAgent>();
+builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
 builder.Services.AddDataAgentAiReview(builder.Configuration);
 builder.Services.AddScoped<SemanticKernelDataAgent>();

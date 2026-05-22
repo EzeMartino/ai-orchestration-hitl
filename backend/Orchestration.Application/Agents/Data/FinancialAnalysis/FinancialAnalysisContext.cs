@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
@@ -14,5 +16,11 @@ public sealed record FinancialAnalysisContext(
     IReadOnlyList<string> Limitations,
     string MetricsInputSource = FinancialMetricsInputSources.Unknown,
     StructuredFinancialMetricsProvenance? MetricsProvenance = null,
-    FinancialAnalysisAiReviewResult? AiReview = null
-);
+    FinancialAnalysisAiReviewResult? AiReview = null,
+    string? ThresholdProfile = null,
+    IReadOnlyList<FinancialRiskThreshold>? ThresholdsUsed = null
+)
+{
+    public IReadOnlyList<FinancialRiskThreshold> ThresholdsUsed { get; init; } = ThresholdsUsed ?? [];
+}
+

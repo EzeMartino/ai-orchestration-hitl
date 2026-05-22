@@ -441,7 +441,17 @@ namespace Orchestration.Application.AnalysisSessions
                                 provider = plannerResult.DataResult.FinancialAnalysis.AiReview.Provider,
                                 model = plannerResult.DataResult.FinancialAnalysis.AiReview.Model,
                                 failureReason = plannerResult.DataResult.FinancialAnalysis.AiReview.FailureReason
-                            }
+                            },
+                        thresholdProfile = plannerResult.DataResult.FinancialAnalysis.ThresholdProfile,
+                        thresholdsUsed = plannerResult.DataResult.FinancialAnalysis.ThresholdsUsed.Select(t => new
+                        {
+                            code = t.Code,
+                            metric = t.Metric,
+                            @operator = t.Operator,
+                            value = t.Value,
+                            severity = t.Severity,
+                            description = t.Description
+                        }).ToList()
                     },
                 compliance = new
                 {

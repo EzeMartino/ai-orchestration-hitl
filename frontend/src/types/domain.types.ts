@@ -206,6 +206,15 @@ export type FinancialAnalysisAiReviewContext = {
   failureReason?: string | null;
 };
 
+export type FinancialRiskThreshold = {
+  code: string;
+  metric: string;
+  operator: string;
+  value: number;
+  severity: string;
+  description: string;
+};
+
 export type FinancialAnalysisContext = {
   engine: string;
   documentId: string;
@@ -219,6 +228,8 @@ export type FinancialAnalysisContext = {
   metricsInputSource?: string | null;
   metricsProvenance?: StructuredFinancialMetricsProvenanceContext | null;
   aiReview?: FinancialAnalysisAiReviewContext | null;
+  thresholdProfile?: string | null;
+  thresholdsUsed?: FinancialRiskThreshold[];
 };
 
 export type StructuredFinancialMetricInput = {

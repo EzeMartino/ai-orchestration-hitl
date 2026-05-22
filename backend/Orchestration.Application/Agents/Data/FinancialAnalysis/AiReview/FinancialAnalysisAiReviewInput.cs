@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 
 public sealed record FinancialAnalysisAiReviewInput(
@@ -11,5 +14,8 @@ public sealed record FinancialAnalysisAiReviewInput(
     IReadOnlyList<FinancialRiskSignal> RiskSignals,
     IReadOnlyList<RiskEvidenceItem> RiskEvidence,
     IReadOnlyList<string> Warnings,
-    IReadOnlyList<string> Limitations
+    IReadOnlyList<string> Limitations,
+    string? ThresholdProfile = null,
+    IReadOnlyList<FinancialRiskThreshold>? ThresholdsUsed = null
 );
+

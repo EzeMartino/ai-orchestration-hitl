@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { FinancialAnalysisContext } from "../types/domain.types";
 
 interface FinancialRiskEvidencePanelProps {
@@ -84,6 +85,8 @@ export function FinancialRiskEvidencePanel({
     return null;
   }
 
+  const [thresholdsExpanded, setThresholdsExpanded] = useState(false);
+
   const visibleEvidence = financialAnalysis.riskEvidence.slice(0, 6);
   const visibleSignals = financialAnalysis.riskSignals.slice(0, 6);
   const visibleRatios = financialAnalysis.ratios.slice(0, 6);
@@ -100,7 +103,14 @@ export function FinancialRiskEvidencePanel({
       <div className="financialRiskHeader">
         <div>
           <p className="financialRiskEyebrow">Financial risk evidence</p>
-          <h2>{financialAnalysis.company ?? "Structured financial metrics"}</h2>
+          <h2 style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+            {financialAnalysis.company ?? "Structured financial metrics"}
+            {financialAnalysis.thresholdProfile && (
+              <span className="profileBadge" style={{ fontWeight: "normal" }}>
+                Profile: <strong>{financialAnalysis.thresholdProfile}</strong>
+              </span>
+            )}
+          </h2>
           <p>
             Quantitative evidence generated from structured financial metrics.
           </p>
@@ -322,6 +332,50 @@ export function FinancialRiskEvidencePanel({
               </article>
             ))}
           </div>
+        </div>
+      )}
+
+      <div className="disclaimerBox">
+        <strong>Heuristic Guardrail</strong>
+        Risk thresholds are heuristic review criteria. They are not investment advice and do not confirm accounting correctness.
+      </div>
+
+      {financialAnalysis.thresholdsUsed && financialAnalysis.thresholdsUsed.length > 0 && (
+        <div className="thresholdsCollapse">
+          <div
+            className="thresholdsCollapseHeader"
+            onClick={() => setThresholdsExpanded(!thresholdsExpanded)}
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          >
+            <span>Applied Thresholds ({financialAnalysis.thresholdsUsed.length})</span>
+            <span style={{ transform: thresholdsExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease", display: "inline-block" }}>
+              ▼
+            </span>
+          </div>
+          {thresholdsExpanded && (
+            <div className="thresholdsCollapseContent">
+              <div className="thresholdsGrid">
+                {financialAnalysis.thresholdsUsed.map((t, idx) => (
+                  <div className="thresholdCard" key={`${t.code}-${idx}`}>
+                    <div className="thresholdCardHeader">
+                      <span className="thresholdCardTitle">{formatSignalTitle(t.code)}</span>
+                      <span className="thresholdValueBadge">
+                        {t.metric} {t.operator} {formatNumber(t.value)}
+                      </span>
+                    </div>
+                    <div className="thresholdCardBody">
+                      {t.description}
+                    </div>
+                    <div className="thresholdCardMeta">
+                      <span className={`severityBadge severity-${t.severity}`} style={{ fontSize: "0.65rem", padding: "0.1rem 0.35rem" }}>
+                        {t.severity}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

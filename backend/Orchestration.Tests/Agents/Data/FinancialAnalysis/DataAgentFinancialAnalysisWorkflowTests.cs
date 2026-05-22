@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Shared;
+using Orchestration.Application.FinancialAnalysis.Thresholds;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Tests.Agents;
 
@@ -350,12 +351,14 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         FakePythonFinancialAnalysisService service,
         FakeActivityEventPublisher? publisher = null,
         DataAgentOptions? options = null,
-        FakeDataAgentAiReviewService? aiReviewService = null)
+        FakeDataAgentAiReviewService? aiReviewService = null,
+        IFinancialRiskThresholdProfileProvider? profileProvider = null)
     {
         return new DataAgentFinancialAnalysisWorkflow(
             provider,
             service,
             aiReviewService ?? new FakeDataAgentAiReviewService(),
+            profileProvider ?? new InMemoryFinancialRiskThresholdProfileProvider(),
             Options.Create(options ?? new DataAgentOptions()),
             publisher ?? new FakeActivityEventPublisher(),
             NullLogger<DataAgentFinancialAnalysisWorkflow>.Instance

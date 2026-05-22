@@ -871,6 +871,27 @@ StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
 StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
 ```
 
+### Financial Risk Threshold Profiles
+
+To customize risk heuristic sensitivity, you can configure the active risk threshold profile:
+
+- `default`: Standard moderate thresholds for general corporate credit risk evaluation.
+- `oil_and_gas`: Industry-specific risk guidelines for energy and commodity extraction corporations.
+- `strict`: Conservative risk settings enforcing highly safe liquidity and low leverage levels.
+- `demo`: Sensitive and aggressive thresholds tailored specifically for demonstrations and testing.
+
+#### Core Principles & Architecture
+1. **C# as Single Source of Truth**: Profile limits, operators, and severity ratings are fully declared in C# (`InMemoryFinancialRiskThresholdProfileProvider`).
+2. **Dynamic Mappings**: The C# workflow passes resolved profile limits dynamically to Python's CSnakes agent (`financial_analysis.py`).
+3. **No Drift / Legacy Alias Fallback**: Direct tests and legacy profiles are mapped gracefully. If an invalid profile name is requested, the provider automatically falls back to `default` with a resolution warning.
+4. **Heuristic Disclaimer**: The frontend renders a mandatory product-advisory disclaimer stating: *"Risk thresholds are heuristic review criteria. They are not investment advice and do not confirm accounting correctness."*
+
+To change the active profile locally, use the environment variable:
+
+```text
+DataAgent__RiskThresholdProfile=oil_and_gas
+```
+
 ### Structured Input Limitations
 
 This phase does not include:
