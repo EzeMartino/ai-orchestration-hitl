@@ -101,7 +101,8 @@ public class McpRegulatoryKnowledgeSourceTests
 
         return new McpRegulatoryKnowledgeSource(
             client,
-            options
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance
         );
     }
 
@@ -118,6 +119,11 @@ public class McpRegulatoryKnowledgeSourceTests
 
     private sealed class MixedCitationCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -149,6 +155,11 @@ public class McpRegulatoryKnowledgeSourceTests
 
     private sealed class UncitedCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -172,6 +183,11 @@ public class McpRegulatoryKnowledgeSourceTests
 
     private sealed class WarningCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)

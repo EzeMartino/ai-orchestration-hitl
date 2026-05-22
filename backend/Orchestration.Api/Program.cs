@@ -104,7 +104,7 @@ builder.Services
 builder.Services.Configure<CnvRegulationMcpOptions>(
     builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName)
 );
-builder.Services.AddScoped<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+builder.Services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
 
 var cnvMcpOptions = builder.Configuration
     .GetSection(CnvRegulationMcpOptions.SectionName)

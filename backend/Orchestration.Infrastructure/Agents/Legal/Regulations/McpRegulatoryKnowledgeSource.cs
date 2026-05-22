@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -9,6 +10,7 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
 {
     private readonly ICnvRegulationMcpClient _client;
     private readonly CnvRegulationMcpOptions _options;
+    private readonly ILogger<McpRegulatoryKnowledgeSource> _logger;
 
     private sealed record RegulatorySearchOutcome(
         List<RegulatoryFinding> Findings,
@@ -17,16 +19,25 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
 
     public McpRegulatoryKnowledgeSource(
         ICnvRegulationMcpClient client,
-        IOptions<CnvRegulationMcpOptions> options)
+        IOptions<CnvRegulationMcpOptions> options,
+        ILogger<McpRegulatoryKnowledgeSource> logger)
     {
         _client = client;
         _options = options.Value;
+        _logger = logger;
     }
 
     public async Task<RegulatoryReviewResult> ReviewAsync(
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
+        using var scope = _logger.BeginScope(new Dictionary<string, object>
+        {
+            ["SessionId"] = report.SessionId
+        });
+
+        _logger.LogInformation("Starting regulatory review for report: {ReportName}", report.ReportName);
+
         var outcome = await SearchFindingsAsync(
             report,
             cancellationToken
@@ -104,6 +115,7 @@ public sealed class McpRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
+    // Realiza búsquedas secuenciales. La latencia total es lineal acumulada en base al número de consultas.
     private async Task<RegulatorySearchOutcome> SearchFindingsAsync(
     FinancialReportContext report,
     CancellationToken cancellationToken)

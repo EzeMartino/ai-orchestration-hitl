@@ -35,6 +35,18 @@ public class DiagnosticsController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("cnv-regulation/status")]
+    public IActionResult GetCnvRegulationStatus()
+    {
+        return Ok(new
+        {
+            connected = _client.IsConnected,
+            coldStartCount = _client.ColdStartCount,
+            resetCount = _client.ResetCount,
+            lastError = _client.LastError
+        });
+    }
+
     [HttpPost("tool-calling/execute")]
     public async Task<IActionResult> ExecuteToolCalling(
         [FromBody] ToolCallingDiagnosticRequest request,

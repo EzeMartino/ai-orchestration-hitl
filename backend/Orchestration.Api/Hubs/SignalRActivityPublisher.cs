@@ -1,18 +1,18 @@
-﻿using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR;
 using Orchestration.Application.Activity;
 using Orchestration.Domain.Activity;
-using Orchestration.Infrastructure.Persistence;
+using Orchestration.Application.Persistence;
 
 namespace Orchestration.Api.Hubs;
 
 public sealed class SignalRActivityEventPublisher : IActivityEventPublisher
 {
     private readonly IHubContext<ActivityHub> _hubContext;
-    private readonly OrchestrationDbContext _dbContext;
+    private readonly IOrchestrationDbContext _dbContext;
 
     public SignalRActivityEventPublisher(
         IHubContext<ActivityHub> hubContext,
-        OrchestrationDbContext dbContext)
+        IOrchestrationDbContext dbContext)
     {
         _hubContext = hubContext;
         _dbContext = dbContext;

@@ -536,6 +536,11 @@ public class ControlledToolExecutorTests
 
     private sealed class FakeCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
         public bool WasCalled { get; private set; }
 
         public CnvRegulationSearchRequest? ReceivedRequest { get; private set; }

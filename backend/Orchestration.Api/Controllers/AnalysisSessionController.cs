@@ -1,14 +1,14 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Orchestration.Domain.AnalysisSessions;
-using Orchestration.Infrastructure.Persistence;
 using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Persistence;
 
 namespace Orchestration.Api.Controllers;
 
@@ -16,7 +16,7 @@ namespace Orchestration.Api.Controllers;
 [Route("api/analysis-sessions")]
 public class AnalysisSessionsController : ControllerBase
 {
-    private readonly OrchestrationDbContext _dbContext;
+    private readonly IOrchestrationDbContext _dbContext;
     private readonly AnalysisOrchestratorService _orchestrator;
     private readonly IAnalysisSessionStartPreflightValidator _startPreflightValidator;
     private readonly IActivityEventPublisher _activityPublisher;
@@ -31,7 +31,7 @@ public class AnalysisSessionsController : ControllerBase
         };
 
     public AnalysisSessionsController(
-        OrchestrationDbContext dbContext,
+        IOrchestrationDbContext dbContext,
         AnalysisOrchestratorService orchestrator,
         IAnalysisSessionStartPreflightValidator startPreflightValidator,
         IActivityEventPublisher activityPublisher,

@@ -1,4 +1,4 @@
-﻿namespace Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
+namespace Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 public interface ICnvRegulationMcpClient
 {
@@ -6,4 +6,9 @@ public interface ICnvRegulationMcpClient
         CnvRegulationSearchRequest request,
         CancellationToken cancellationToken
     );
+
+    bool IsConnected { get; }
+    int ColdStartCount { get; }
+    int ResetCount { get; }
+    string? LastError { get; }
 }

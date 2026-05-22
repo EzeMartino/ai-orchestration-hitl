@@ -1,4 +1,4 @@
-﻿namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
+namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
 
 public sealed class CnvRegulationMcpOptions
 {
@@ -11,4 +11,8 @@ public sealed class CnvRegulationMcpOptions
     public string[] Args { get; init; } = [];
 
     public int DefaultLimit { get; init; } = 5;
+
+    public int ConnectionTimeoutSeconds { get; init; } = 15;
+
+    public int ToolCallTimeoutSeconds { get; init; } = 30;
 }

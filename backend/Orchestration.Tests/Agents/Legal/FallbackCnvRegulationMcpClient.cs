@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
@@ -8,6 +8,11 @@ namespace Orchestration.Tests.Agents.Legal;
 
 public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
 {
+    public bool IsConnected => true;
+    public int ColdStartCount => 0;
+    public int ResetCount => 0;
+    public string? LastError => null;
+
     public List<string> ReceivedQueries { get; } = [];
 
     public Task<CnvRegulationSearchResponse> SearchAsync(
@@ -81,7 +86,8 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
 
         var source = new McpRegulatoryKnowledgeSource(
             client,
-            options
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance
         );
 
         var report = new FinancialReportContext(
