@@ -59,6 +59,24 @@ function formatMetricsInputSource(inputSource?: string | null) {
   }
 }
 
+function formatAiReviewStatus(
+  aiReview: FinancialAnalysisContext["aiReview"]
+) {
+  if (!aiReview) {
+    return "AI review not available";
+  }
+
+  if (aiReview.usedLlm) {
+    return "LLM used";
+  }
+
+  if (aiReview.failureReason?.includes("not") || aiReview.summary.includes("not executed")) {
+    return "Not run";
+  }
+
+  return "Deterministic fallback";
+}
+
 export function FinancialRiskEvidencePanel({
   financialAnalysis,
 }: FinancialRiskEvidencePanelProps) {
@@ -72,6 +90,7 @@ export function FinancialRiskEvidencePanel({
   const metricsInputSource = financialAnalysis.metricsInputSource ?? "unknown";
   const isFixtureFallback = metricsInputSource === "fixture_fallback";
   const hasNoMetrics = metricsInputSource === "none";
+  const aiReview = financialAnalysis.aiReview;
   const requiresSessionMetrics = financialAnalysis.warnings.some((warning) =>
     warning.includes("required for this mode")
   );
@@ -128,6 +147,107 @@ export function FinancialRiskEvidencePanel({
           {requiresSessionMetrics
             ? "Structured financial metrics are required for this mode but were not attached to this session. Attach JSON/CSV metrics before starting the analysis."
             : "No structured financial metrics were available."}
+        </div>
+      )}
+
+      {aiReview && (
+        <div className="financialAiReview">
+          <div className="financialAiReviewHeader">
+            <div>
+              <strong>DataAgent AI Review</strong>
+              <p>Advisory interpretation of deterministic financial evidence.</p>
+            </div>
+            <span className="aiReviewStatus">{formatAiReviewStatus(aiReview)}</span>
+          </div>
+
+          <dl className="aiReviewMeta">
+            <div>
+              <dt>LLM status</dt>
+              <dd>{formatAiReviewStatus(aiReview)}</dd>
+            </div>
+            <div>
+              <dt>Provider</dt>
+              <dd>{aiReview.provider ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>Model</dt>
+              <dd>{aiReview.model ?? "-"}</dd>
+            </div>
+            <div>
+              <dt>Failure reason</dt>
+              <dd>{aiReview.failureReason ?? "-"}</dd>
+            </div>
+          </dl>
+
+          {aiReview.failureReason && (
+            <div className="financialSourceWarning">
+              AI review used a safe fallback. Reason: {aiReview.failureReason}.
+            </div>
+          )}
+
+          <div className="aiReviewTextBlock">
+            <strong>Summary</strong>
+            <p>{aiReview.summary}</p>
+          </div>
+
+          <div className="aiReviewTextBlock">
+            <strong>Risk interpretation</strong>
+            <p>{aiReview.riskInterpretation}</p>
+          </div>
+
+          {aiReview.keyFindings.length > 0 && (
+            <div className="financialSection">
+              <strong>Key findings</strong>
+              <div className="financialSignalList">
+                {aiReview.keyFindings.map((finding, index) => (
+                  <article
+                    className="financialSignalCard"
+                    key={`${finding.title}-${index}`}
+                  >
+                    <span className={`severityPill severity-${finding.severity}`}>
+                      {finding.severity}
+                    </span>
+                    <div>
+                      <strong>{finding.title}</strong>
+                      <p>{finding.description}</p>
+                      {finding.relatedMetrics.length > 0 && (
+                        <small>{finding.relatedMetrics.join(", ")}</small>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(aiReview.dataQualityNotes.length > 0 ||
+            aiReview.limitations.length > 0) && (
+            <div className="financialReviewNotes">
+              {aiReview.dataQualityNotes.length > 0 && (
+                <div>
+                  <strong>Data quality notes</strong>
+                  <ul>
+                    {aiReview.dataQualityNotes.map((note, index) => (
+                      <li key={`${note.message}-${index}`}>
+                        [{note.severity}] {note.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {aiReview.limitations.length > 0 && (
+                <div>
+                  <strong>AI review limitations</strong>
+                  <ul>
+                    {aiReview.limitations.map((limitation) => (
+                      <li key={limitation}>{limitation}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

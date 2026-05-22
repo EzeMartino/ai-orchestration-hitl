@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
@@ -233,6 +234,33 @@ public class AnalysisOrchestratorContextTests
                 ContentHash: "abc123",
                 MetricCount: 10,
                 WarningCount: 1
+            ),
+            AiReview: new FinancialAnalysisAiReviewResult(
+                Summary: "Advisory AI review summarized deterministic evidence.",
+                KeyFindings:
+                [
+                    new FinancialAnalysisAiKeyFinding(
+                        Title: "Liquidity pressure",
+                        Description: "Current ratio is below threshold.",
+                        Severity: "High",
+                        RelatedMetrics: ["current_ratio"]
+                    )
+                ],
+                RiskInterpretation: "Human review should focus on liquidity evidence.",
+                DataQualityNotes:
+                [
+                    new FinancialAnalysisAiDataQualityNote(
+                        Message: "Structured metrics only.",
+                        Severity: "Info",
+                        RelatedFields: ["warnings"]
+                    )
+                ],
+                Limitations: ["AI review is advisory."],
+                UsedLlm: false,
+                UsedFallback: true,
+                Provider: null,
+                Model: null,
+                FailureReason: null
             )
         );
         var plannerResult = CreatePlannerResult(
@@ -262,8 +290,47 @@ public class AnalysisOrchestratorContextTests
         financialAnalysis.GetProperty("metricsInputSource").GetString().Should().Be("session_context");
         financialAnalysis.GetProperty("metricsProvenance").GetProperty("ingestionMethod").GetString().Should().Be("json_file");
         financialAnalysis.GetProperty("metricsProvenance").GetProperty("originalFileName").GetString().Should().Be("metrics.json");
+        var aiReview = financialAnalysis.GetProperty("aiReview");
+        aiReview.GetProperty("summary").GetString().Should().Be("Advisory AI review summarized deterministic evidence.");
+        aiReview.GetProperty("keyFindings")[0].GetProperty("title").GetString().Should().Be("Liquidity pressure");
+        aiReview.GetProperty("keyFindings")[0].GetProperty("relatedMetrics")[0].GetString().Should().Be("current_ratio");
+        aiReview.GetProperty("riskInterpretation").GetString().Should().Be("Human review should focus on liquidity evidence.");
+        aiReview.GetProperty("dataQualityNotes")[0].GetProperty("message").GetString().Should().Be("Structured metrics only.");
+        aiReview.GetProperty("limitations")[0].GetString().Should().Be("AI review is advisory.");
+        aiReview.GetProperty("usedLlm").GetBoolean().Should().BeFalse();
+        aiReview.GetProperty("usedFallback").GetBoolean().Should().BeTrue();
+        aiReview.GetProperty("failureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
         root.GetProperty("anomaly").GetProperty("summary").GetString().Should().Be("Anomaly detected.");
+    }
+
+    [Fact]
+    public void FinancialAnalysisContext_Should_deserialize_old_json_without_ai_review()
+    {
+        const string json = """
+        {
+          "engine": "Semantic Kernel + CSnakes + Python/Pandas",
+          "documentId": "old-session",
+          "company": "Old Co",
+          "ratios": [],
+          "comparisons": [],
+          "riskSignals": [],
+          "riskEvidence": [],
+          "warnings": [],
+          "limitations": [],
+          "metricsInputSource": "session_context",
+          "metricsProvenance": null
+        }
+        """;
+
+        var context = JsonSerializer.Deserialize<FinancialAnalysisContext>(
+            json,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        );
+
+        context.Should().NotBeNull();
+        context!.AiReview.Should().BeNull();
+        context.DocumentId.Should().Be("old-session");
     }
 
     [Fact]

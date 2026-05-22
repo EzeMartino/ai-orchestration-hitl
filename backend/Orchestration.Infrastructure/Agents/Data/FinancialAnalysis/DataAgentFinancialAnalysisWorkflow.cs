@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
@@ -48,6 +49,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
 
     private readonly IStructuredFinancialMetricsProvider _metricsProvider;
     private readonly IPythonFinancialAnalysisService _financialAnalysisService;
+    private readonly IDataAgentAiReviewService _aiReviewService;
     private readonly DataAgentOptions _options;
     private readonly IActivityEventPublisher _activityPublisher;
     private readonly ILogger<DataAgentFinancialAnalysisWorkflow> _logger;
@@ -55,12 +57,14 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     public DataAgentFinancialAnalysisWorkflow(
         IStructuredFinancialMetricsProvider metricsProvider,
         IPythonFinancialAnalysisService financialAnalysisService,
+        IDataAgentAiReviewService aiReviewService,
         IOptions<DataAgentOptions> options,
         IActivityEventPublisher activityPublisher,
         ILogger<DataAgentFinancialAnalysisWorkflow> logger)
     {
         _metricsProvider = metricsProvider;
         _financialAnalysisService = financialAnalysisService;
+        _aiReviewService = aiReviewService;
         _options = options.Value;
         _activityPublisher = activityPublisher;
         _logger = logger;
@@ -168,6 +172,23 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         );
         var severity = ResolveSeverity(signals.Signals.Select(signal => signal.Severity));
         var hasAnomaly = signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
+        var limitations = new[] { StructuredMetricsOnlyLimitation };
+        var aiReview = await _aiReviewService.ReviewAsync(
+            new FinancialAnalysisAiReviewInput(
+                SessionId: report.SessionId.ToString(),
+                DocumentId: metricsDocument.DocumentId,
+                Company: metricsDocument.Company,
+                MetricsInputSource: metricsDocument.InputSource,
+                MetricsProvenance: metricsDocument.Provenance,
+                Ratios: ratios.Ratios,
+                PeriodComparisons: comparisons.Comparisons,
+                RiskSignals: signals.Signals,
+                RiskEvidence: summary.Result.Evidence,
+                Warnings: warnings,
+                Limitations: limitations
+            ),
+            cancellationToken
+        );
 
         return new DataAgentResult(
             HasAnomaly: hasAnomaly,
@@ -184,9 +205,10 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskSignals: signals.Signals,
                 RiskEvidence: summary.Result.Evidence,
                 Warnings: warnings,
-                Limitations: [StructuredMetricsOnlyLimitation],
+                Limitations: limitations,
                 MetricsInputSource: metricsDocument.InputSource,
-                MetricsProvenance: metricsDocument.Provenance
+                MetricsProvenance: metricsDocument.Provenance,
+                AiReview: aiReview
             )
         );
     }
@@ -218,7 +240,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskEvidence: [],
                 Warnings: ["Structured financial metrics were not available."],
                 Limitations: [StructuredMetricsOnlyLimitation],
-                MetricsInputSource: FinancialMetricsInputSources.None
+                MetricsInputSource: FinancialMetricsInputSources.None,
+                AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
             )
         );
     }
@@ -254,7 +277,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                     "No financial ratios or period comparisons were computed because no structured metrics were available.",
                     StructuredMetricsOnlyLimitation
                 ],
-                MetricsInputSource: FinancialMetricsInputSources.None
+                MetricsInputSource: FinancialMetricsInputSources.None,
+                AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
             )
         );
     }

@@ -148,6 +148,32 @@ export type FinancialRiskEvidenceContext = {
   confidence?: number;
 };
 
+export type FinancialAnalysisAiKeyFindingContext = {
+  title: string;
+  description: string;
+  severity: string;
+  relatedMetrics: string[];
+};
+
+export type FinancialAnalysisAiDataQualityNoteContext = {
+  message: string;
+  severity: string;
+  relatedFields: string[];
+};
+
+export type FinancialAnalysisAiReviewContext = {
+  summary: string;
+  keyFindings: FinancialAnalysisAiKeyFindingContext[];
+  riskInterpretation: string;
+  dataQualityNotes: FinancialAnalysisAiDataQualityNoteContext[];
+  limitations: string[];
+  usedLlm: boolean;
+  usedFallback: boolean;
+  provider?: string | null;
+  model?: string | null;
+  failureReason?: string | null;
+};
+
 export type FinancialAnalysisContext = {
   engine: string;
   documentId: string;
@@ -160,6 +186,7 @@ export type FinancialAnalysisContext = {
   limitations: string[];
   metricsInputSource?: string | null;
   metricsProvenance?: StructuredFinancialMetricsProvenanceContext | null;
+  aiReview?: FinancialAnalysisAiReviewContext | null;
 };
 
 export type StructuredFinancialMetricInput = {

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Tests.Agents;
@@ -20,7 +21,12 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             RatioWarnings = ["Structured metrics only."],
             SignalWarnings = ["Human review recommended."]
         };
-        var workflow = CreateWorkflow(provider, service);
+        var aiReviewService = new FakeDataAgentAiReviewService();
+        var workflow = CreateWorkflow(
+            provider,
+            service,
+            aiReviewService: aiReviewService
+        );
 
         var result = await workflow.AnalyzeAsync(
             CreateReport(),
@@ -54,6 +60,16 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.Limitations.Should().Contain(limitation =>
             limitation.Contains("structured metrics only", StringComparison.OrdinalIgnoreCase)
         );
+        result.FinancialAnalysis.AiReview.Should().NotBeNull();
+        result.FinancialAnalysis.AiReview!.UsedLlm.Should().BeFalse();
+        result.FinancialAnalysis.AiReview.UsedFallback.Should().BeTrue();
+        aiReviewService.Calls.Should().Be(1);
+        aiReviewService.LastInput.Should().NotBeNull();
+        aiReviewService.LastInput!.DocumentId.Should().Be("vista-energy-fixture");
+        aiReviewService.LastInput.Ratios.Should().BeEquivalentTo(result.FinancialAnalysis.Ratios);
+        aiReviewService.LastInput.PeriodComparisons.Should().BeEquivalentTo(result.FinancialAnalysis.Comparisons);
+        aiReviewService.LastInput.RiskSignals.Should().BeEquivalentTo(result.FinancialAnalysis.RiskSignals);
+        aiReviewService.LastInput.RiskEvidence.Should().BeEquivalentTo(result.FinancialAnalysis.RiskEvidence);
     }
 
     [Fact]
@@ -78,6 +94,10 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis!.Warnings.Should().Contain("Structured financial metrics were not available.");
         result.FinancialAnalysis.Limitations.Should().NotBeEmpty();
         result.FinancialAnalysis.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
+        result.FinancialAnalysis.AiReview.Should().NotBeNull();
+        result.FinancialAnalysis.AiReview!.UsedLlm.Should().BeFalse();
+        result.FinancialAnalysis.AiReview.UsedFallback.Should().BeTrue();
+        result.FinancialAnalysis.AiReview.FailureReason.Should().Be("structured_financial_metrics_missing");
         service.ComputeCalls.Should().Be(0);
     }
 
@@ -114,6 +134,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.Limitations.Should().Contain(
             "No financial ratios or period comparisons were computed because no structured metrics were available."
         );
+        result.FinancialAnalysis.AiReview.Should().NotBeNull();
+        result.FinancialAnalysis.AiReview!.Summary.Should().Be("AI review was not executed.");
+        result.FinancialAnalysis.AiReview.FailureReason.Should().Be("structured_financial_metrics_missing");
         service.ComputeCalls.Should().Be(0);
         publisher.PublishedEvents.Should().ContainSingle(e =>
             e.Type == "financial_metrics_required_missing" &&
@@ -270,6 +293,31 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_Should_not_modify_quantitative_outputs_when_ai_review_runs()
+    {
+        var provider = new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument());
+        var service = new FakePythonFinancialAnalysisService();
+        var aiReviewService = new FakeDataAgentAiReviewService();
+        var workflow = CreateWorkflow(
+            provider,
+            service,
+            aiReviewService: aiReviewService
+        );
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.FinancialAnalysis.Should().NotBeNull();
+        aiReviewService.LastInput.Should().NotBeNull();
+        result.FinancialAnalysis!.Ratios.Should().BeEquivalentTo(aiReviewService.LastInput!.Ratios);
+        result.FinancialAnalysis.Comparisons.Should().BeEquivalentTo(aiReviewService.LastInput.PeriodComparisons);
+        result.FinancialAnalysis.RiskSignals.Should().BeEquivalentTo(aiReviewService.LastInput.RiskSignals);
+        result.FinancialAnalysis.RiskEvidence.Should().BeEquivalentTo(aiReviewService.LastInput.RiskEvidence);
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_Should_not_turn_warnings_into_anomaly_evidence_when_no_risk_signals_exist()
     {
         var provider = new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument());
@@ -301,11 +349,13 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         FakeStructuredFinancialMetricsProvider provider,
         FakePythonFinancialAnalysisService service,
         FakeActivityEventPublisher? publisher = null,
-        DataAgentOptions? options = null)
+        DataAgentOptions? options = null,
+        FakeDataAgentAiReviewService? aiReviewService = null)
     {
         return new DataAgentFinancialAnalysisWorkflow(
             provider,
             service,
+            aiReviewService ?? new FakeDataAgentAiReviewService(),
             Options.Create(options ?? new DataAgentOptions()),
             publisher ?? new FakeActivityEventPublisher(),
             NullLogger<DataAgentFinancialAnalysisWorkflow>.Instance
@@ -555,6 +605,49 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                     Evidence: [evidence],
                     Warnings: []
                 )
+            ));
+        }
+    }
+
+    private sealed class FakeDataAgentAiReviewService : IDataAgentAiReviewService
+    {
+        public int Calls { get; private set; }
+
+        public FinancialAnalysisAiReviewInput? LastInput { get; private set; }
+
+        public Task<FinancialAnalysisAiReviewResult> ReviewAsync(
+            FinancialAnalysisAiReviewInput input,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            LastInput = input;
+
+            return Task.FromResult(new FinancialAnalysisAiReviewResult(
+                Summary: "Deterministic AI review summarized financial evidence.",
+                KeyFindings:
+                [
+                    new FinancialAnalysisAiKeyFinding(
+                        Title: "Leverage watch",
+                        Description: "Leverage should be reviewed.",
+                        Severity: "High",
+                        RelatedMetrics: ["net_debt_to_ebitda"]
+                    )
+                ],
+                RiskInterpretation: "Human review should focus on deterministic risk evidence.",
+                DataQualityNotes:
+                [
+                    new FinancialAnalysisAiDataQualityNote(
+                        Message: "Structured metrics were used.",
+                        Severity: "Info",
+                        RelatedFields: ["metricsInputSource"]
+                    )
+                ],
+                Limitations: ["AI review is advisory."],
+                UsedLlm: false,
+                UsedFallback: true,
+                Provider: null,
+                Model: null,
+                FailureReason: null
             ));
         }
     }

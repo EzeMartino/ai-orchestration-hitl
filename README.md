@@ -347,11 +347,12 @@ DataAgent
           -> CSnakesFinancialAnalysisService
           -> financial_analysis.py
           -> Pandas / NumPy
+          -> IDataAgentAiReviewService optional advisory review
           -> FinancialAnalysisContext
           -> DataAgentResult
 ```
 
-The DataAgent returns backward-compatible anomaly evidence, including metrics, thresholds, severity, and explanation. When structured financial analysis is enabled, it also exposes richer `financialAnalysis` context with ratios, period comparisons, risk signals, risk evidence, warnings, and limitations.
+The DataAgent returns backward-compatible anomaly evidence, including metrics, thresholds, severity, and explanation. When structured financial analysis is enabled, it also exposes richer `financialAnalysis` context with ratios, period comparisons, risk signals, risk evidence, warnings, limitations, and optional advisory `aiReview`.
 
 ### LegalAgent
 
@@ -534,9 +535,36 @@ DataAgent
           -> CSnakesFinancialAnalysisService
           -> financial_analysis.py
           -> Pandas / NumPy
+          -> IDataAgentAiReviewService optional advisory review
           -> FinancialAnalysisContext
           -> DataAgentResult
 ```
+
+### DataAgent Quantitative + AI Review
+
+Python/Pandas through CSnakes remains the authoritative quantitative engine. It computes ratios, period comparisons, risk signals, and quantitative evidence.
+
+`financialAnalysis.aiReview` is an advisory interpretation layer. It can run through Semantic Kernel/LLM when enabled, or through the deterministic fallback. It is persisted in `AnalysisSession.ContextJson` for reload/audit, but it does not recompute metrics, create new metrics, modify risk signals, modify risk evidence, provide investment advice, claim accounting correctness, or replace human review.
+
+Default:
+
+```text
+DataAgent__AiReviewEnabled=false
+```
+
+When `DataAgent__AiReviewEnabled=false`, the persisted AI review uses deterministic fallback metadata:
+
+```json
+{
+  "usedLlm": false,
+  "usedFallback": true,
+  "provider": null,
+  "model": null,
+  "failureReason": null
+}
+```
+
+When `DataAgent__AiReviewEnabled=true` and `Llm__Enabled=true`, Semantic Kernel attempts a JSON-only advisory review. Provider failures, empty output, invalid JSON, schema issues, or unsafe content fall back to the deterministic review with a safe `failureReason`.
 
 ### Financial Analysis Tools
 
@@ -985,6 +1013,7 @@ DataAgent__UsePythonFinancialAnalysis=true
 DataAgent__UseLegacyAnomalyDetectionFallback=true
 DataAgent__UseFixtureMetricsFallback=false
 DataAgent__RequireSessionFinancialMetrics=false
+DataAgent__AiReviewEnabled=false
 DataAgent__RiskThresholdProfile=default_oil_and_gas_equity_research
 DataAgent__StructuredMetricsFixturePath=<optional>
 ```

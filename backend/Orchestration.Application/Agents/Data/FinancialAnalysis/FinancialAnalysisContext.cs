@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public sealed record FinancialAnalysisContext(
@@ -11,5 +13,6 @@ public sealed record FinancialAnalysisContext(
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> Limitations,
     string MetricsInputSource = FinancialMetricsInputSources.Unknown,
-    StructuredFinancialMetricsProvenance? MetricsProvenance = null
+    StructuredFinancialMetricsProvenance? MetricsProvenance = null,
+    FinancialAnalysisAiReviewResult? AiReview = null
 );

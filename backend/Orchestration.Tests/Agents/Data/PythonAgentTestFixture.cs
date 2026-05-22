@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Tests.Agents;
@@ -39,6 +40,9 @@ public sealed class PythonAgentTestFixture : IDisposable
         services.AddScoped<ILegacyDataAgent>(provider =>
             provider.GetRequiredService<SemanticKernelDataAgent>());
         services.AddScoped<IStructuredFinancialMetricsProvider, FixtureStructuredFinancialMetricsProvider>();
+        services.AddScoped<DeterministicDataAgentAiReviewService>();
+        services.AddScoped<IDataAgentAiReviewService>(provider =>
+            provider.GetRequiredService<DeterministicDataAgentAiReviewService>());
         services.AddScoped<IActivityEventPublisher, FakeActivityEventPublisher>();
         services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
         services.AddScoped<IDataAgent, ConfigurableDataAgent>();

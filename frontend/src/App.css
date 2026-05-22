@@ -930,6 +930,79 @@ code {
   font-weight: 800;
 }
 
+.financialAiReview {
+  margin-top: 1rem;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+.financialAiReviewHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.financialAiReviewHeader strong {
+  color: #0f2747;
+}
+
+.financialAiReviewHeader p {
+  margin: 0.35rem 0 0;
+  color: #475569;
+}
+
+.aiReviewStatus {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.aiReviewMeta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  margin: 0.85rem 0 0;
+}
+
+.aiReviewMeta div {
+  min-width: 0;
+}
+
+.aiReviewMeta dt {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.aiReviewMeta dd {
+  margin: 0.25rem 0 0;
+  color: #0f172a;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+.aiReviewTextBlock {
+  margin-top: 0.9rem;
+}
+
+.aiReviewTextBlock strong {
+  color: #0f2747;
+}
+
+.aiReviewTextBlock p {
+  margin: 0.35rem 0 0;
+  color: #334155;
+}
+
 .financialEvidenceGrid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1489,6 +1562,7 @@ code {
   .evidenceHeader,
   .structuredMetricsHeader,
   .financialRiskHeader,
+  .financialAiReviewHeader,
   .complianceHeader,
   .metricsTemplateBox,
   .startReadinessPanel {
@@ -1502,6 +1576,7 @@ code {
   .evidenceGrid,
   .financialEvidenceGrid,
   .financialEvidenceMeta,
+  .aiReviewMeta,
   .financialReviewNotes,
   .csvMetaGrid,
   .ratioStrip {

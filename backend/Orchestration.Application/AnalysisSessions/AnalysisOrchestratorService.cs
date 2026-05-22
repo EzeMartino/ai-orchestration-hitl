@@ -415,6 +415,32 @@ namespace Orchestration.Application.AnalysisSessions
                                 contentHash = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.ContentHash,
                                 metricCount = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.MetricCount,
                                 warningCount = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance.WarningCount
+                            },
+                        aiReview = plannerResult.DataResult.FinancialAnalysis.AiReview is null
+                            ? null
+                            : new
+                            {
+                                summary = plannerResult.DataResult.FinancialAnalysis.AiReview.Summary,
+                                keyFindings = plannerResult.DataResult.FinancialAnalysis.AiReview.KeyFindings.Select(finding => new
+                                {
+                                    title = finding.Title,
+                                    description = finding.Description,
+                                    severity = finding.Severity,
+                                    relatedMetrics = finding.RelatedMetrics
+                                }),
+                                riskInterpretation = plannerResult.DataResult.FinancialAnalysis.AiReview.RiskInterpretation,
+                                dataQualityNotes = plannerResult.DataResult.FinancialAnalysis.AiReview.DataQualityNotes.Select(note => new
+                                {
+                                    message = note.Message,
+                                    severity = note.Severity,
+                                    relatedFields = note.RelatedFields
+                                }),
+                                limitations = plannerResult.DataResult.FinancialAnalysis.AiReview.Limitations,
+                                usedLlm = plannerResult.DataResult.FinancialAnalysis.AiReview.UsedLlm,
+                                usedFallback = plannerResult.DataResult.FinancialAnalysis.AiReview.UsedFallback,
+                                provider = plannerResult.DataResult.FinancialAnalysis.AiReview.Provider,
+                                model = plannerResult.DataResult.FinancialAnalysis.AiReview.Model,
+                                failureReason = plannerResult.DataResult.FinancialAnalysis.AiReview.FailureReason
                             }
                     },
                 compliance = new
