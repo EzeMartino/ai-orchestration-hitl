@@ -62,7 +62,7 @@ public class CnvRegulationStdioMcpClientTests
         client.IsConnected.Should().BeFalse();
         client.LastError.Should().NotBeNullOrEmpty();
         client.ColdStartCount.Should().Be(0); // Failed cold starts do not increment successful connection counts
-        
+
         // Let's dispose it and ensure no crash
         await client.DisposeAsync();
     }

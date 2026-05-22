@@ -91,6 +91,7 @@ public sealed class CnvRegulationStdioMcpClient(
             catch (Exception ex)
             {
                 var toolCallDuration = Stopwatch.GetElapsedTime(toolCallStart);
+                _lastError = ex.Message;
                 _logger.LogError(ex, "MCP tool call failed after {ToolCallMs} ms.", toolCallDuration.TotalMilliseconds);
 
                 // Check if it is a transport or protocol error to trigger a connection reset
@@ -99,7 +100,7 @@ public sealed class CnvRegulationStdioMcpClient(
                     var resetReason = (ex is OperationCanceledException && timeoutCts.IsCancellationRequested)
                         ? "Tool call timed out"
                         : "Transport or protocol error";
-                    
+
                     await ResetConnectionAsync(resetReason, ex);
                 }
 
@@ -119,12 +120,25 @@ public sealed class CnvRegulationStdioMcpClient(
 
             if (result.IsError == true)
             {
-                throw new InvalidOperationException(
-                    $"MCP tool returned an error: {ExtractText(result)}"
-                );
+                var errorMessage = GetToolErrorMessage(result);
+                _lastError = errorMessage;
+
+                throw new InvalidOperationException(errorMessage);
             }
 
-            var response = DeserializeResponse(result);
+            CnvRegulationSearchResponse? response;
+
+            try
+            {
+                response = DeserializeResponse(result);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _lastError = ex.Message;
+                throw;
+            }
+
+            _lastError = null;
 
             return response
                 ?? new CnvRegulationSearchResponse(
@@ -175,11 +189,12 @@ public sealed class CnvRegulationStdioMcpClient(
                 _transport,
                 cancellationToken: linkedCts.Token
             );
-            
+
+            _lastError = null;
             _coldStartCount++;
 
             var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-            
+
             // Structured log for cold start duration
             _logger.LogInformation(
                 "MCP client connection established successfully. mcp_cold_start_ms={ColdStartMs:F2}",
@@ -203,7 +218,8 @@ public sealed class CnvRegulationStdioMcpClient(
     private async Task ResetConnectionAsync(string reason, Exception? ex = null)
     {
         _resetCount++;
-        
+        _lastError = ex?.Message ?? reason;
+
         // Structured log for reset reason
         _logger.LogWarning(
             ex,
@@ -313,6 +329,18 @@ public sealed class CnvRegulationStdioMcpClient(
         }
 
         return text;
+    }
+
+    private static string GetToolErrorMessage(CallToolResult result)
+    {
+        try
+        {
+            return $"MCP tool returned an error: {ExtractText(result)}";
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"MCP tool returned an error, but its text content could not be read: {ex.Message}";
+        }
     }
 
     private static bool LooksLikeJson(string value)
