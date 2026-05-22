@@ -13,6 +13,7 @@ public sealed class DataAgentOptionsTests
 
         options.UseFixtureMetricsFallback.Should().BeFalse();
         options.RequireSessionFinancialMetrics.Should().BeFalse();
+        options.AiReviewEnabled.Should().BeFalse();
     }
 
     [Fact]
@@ -22,6 +23,7 @@ public sealed class DataAgentOptionsTests
 
         options.UseFixtureMetricsFallback.Should().BeFalse();
         options.RequireSessionFinancialMetrics.Should().BeFalse();
+        options.AiReviewEnabled.Should().BeFalse();
     }
 
     [Fact]
@@ -52,6 +54,20 @@ public sealed class DataAgentOptionsTests
         options.RequireSessionFinancialMetrics.Should().BeTrue();
     }
 
+    [Fact]
+    public void Explicit_config_Should_enable_ai_review()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DataAgent:AiReviewEnabled"] = "true"
+            })
+            .Build();
+        var options = LoadOptions(configuration);
+
+        options.AiReviewEnabled.Should().BeTrue();
+    }
+
     private static DataAgentOptions LoadOptions(
         string fileName)
     {
@@ -75,11 +91,16 @@ public sealed class DataAgentOptionsTests
             configuration["DataAgent:RequireSessionFinancialMetrics"],
             out var parsedRequired
         ) && parsedRequired;
+        var aiReviewEnabled = bool.TryParse(
+            configuration["DataAgent:AiReviewEnabled"],
+            out var parsedAiReviewEnabled
+        ) && parsedAiReviewEnabled;
 
         return new DataAgentOptions
         {
             UseFixtureMetricsFallback = useFixtureMetricsFallback,
-            RequireSessionFinancialMetrics = requireSessionFinancialMetrics
+            RequireSessionFinancialMetrics = requireSessionFinancialMetrics,
+            AiReviewEnabled = aiReviewEnabled
         };
     }
 

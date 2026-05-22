@@ -13,6 +13,7 @@ using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -62,7 +63,7 @@ builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
 );
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
-builder.Services.AddScoped<IDataAgentAiReviewService, DeterministicDataAgentAiReviewService>();
+builder.Services.AddDataAgentAiReview(builder.Configuration);
 builder.Services.AddScoped<SemanticKernelDataAgent>();
 builder.Services.AddScoped<ILegacyDataAgent>(provider =>
     provider.GetRequiredService<SemanticKernelDataAgent>());

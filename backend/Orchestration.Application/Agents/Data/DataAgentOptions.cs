@@ -14,6 +14,8 @@ public sealed class DataAgentOptions
 
     public bool RequireSessionFinancialMetrics { get; init; }
 
+    public bool AiReviewEnabled { get; init; }
+
     public string RiskThresholdProfile { get; init; } =
         "default_oil_and_gas_equity_research";
 
