@@ -6,6 +6,8 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
+using Orchestration.Application.Agents.Legal.AiReview;
+
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
@@ -124,6 +126,8 @@ else
 
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
+builder.Services.AddScoped<ILegalAnalysisReviewService, DeterministicLegalAnalysisReviewService>();
+
 
 // Persistence configuration
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
