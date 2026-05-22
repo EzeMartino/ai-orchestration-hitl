@@ -769,6 +769,28 @@ GET /api/analysis-sessions/{sessionId}/start-preflight
 
 to show start readiness before the user clicks `Start Session`. If the preflight says `canStart=false`, the UI disables the button and shows the missing input issue. This is only a UX guardrail; `POST /start` still enforces the same preflight server-side.
 
+### Production-like Start Readiness Flow
+
+In production-like mode, the backend preflight is the authority:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=true
+```
+
+The dashboard calls `GET /api/analysis-sessions/{sessionId}/start-preflight` to show readiness before the user clicks `Start Session`. Missing required metrics block the start request with `STRUCTURED_FINANCIAL_METRICS_REQUIRED`; no workflow state changes and no agents execute.
+
+![Start Readiness Blocked](docs/screenshots/start-readiness-blocked.png)
+
+After JSON or CSV metrics are attached to the session, readiness refreshes and `Start Session` becomes available.
+
+![Start Readiness Ready](docs/screenshots/start-readiness-ready.png)
+
+When the session starts, the DataAgent loads persisted session metrics first and records `financialAnalysis.metricsInputSource=session_context`.
+
+![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk-evidence-session-context.png)
+
 ### Structured Input Configuration
 
 `DataAgent__FinancialAnalysisToolsEnabled=false` remains the safe default.
@@ -885,6 +907,8 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 cd backend
 dotnet run --project Orchestration.AppHost
 ```
+
+Use `http://localhost:5173` for the frontend dev server. The default local CORS configuration targets `localhost`.
 
 Aspire starts:
 
