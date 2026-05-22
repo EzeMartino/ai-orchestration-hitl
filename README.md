@@ -372,6 +372,9 @@ LegalAgent
 
 The LegalAgent retrieves cited CNV regulatory evidence and warnings. It does not make legal conclusions.
 
+LegalAgent AI review contracts were added as preparation for reviewing DataAgent financial analysis against provided CNV/Infoleg evidence. The review is advisory and must not declare legal violations or provide legal advice.
+
+
 ## Workflow States
 
 The workflow is controlled by a strict state machine.
