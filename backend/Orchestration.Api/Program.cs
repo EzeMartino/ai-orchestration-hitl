@@ -116,6 +116,8 @@ var cnvMcpOptions = builder.Configuration
     .GetSection(CnvRegulationMcpOptions.SectionName)
     .Get<CnvRegulationMcpOptions>() ?? new CnvRegulationMcpOptions();
 
+builder.Services.AddSingleton<Orchestration.Application.Agents.Legal.Cnv.ILegalCnvQueryStrategy, Orchestration.Application.Agents.Legal.Cnv.FinancialAnalysisLegalCnvQueryStrategy>();
+
 if (cnvMcpOptions.Enabled)
 {
     builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();

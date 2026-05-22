@@ -372,6 +372,14 @@ LegalAgent
 
 LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is constrained to advisory review over provided FinancialAnalysis and CNV/Infoleg evidence. The deterministic fallback remains the safe default.
 
+#### LegalAgent CNV query strategy from FinancialAnalysis
+- **Derivation strategy**: The LegalAgent dynamically derives targeted CNV/Infoleg searches from the `DataAgent`'s financial risk signals and warning indicators via `ILegalCnvQueryStrategy`, rather than executing static queries.
+- **Evidence citations constraint**: Any retrieved CNV/Infoleg evidence must include valid regulatory citations to be recognized as strong support. Evidence without citations is ignored for regulatory findings mapping and generates warnings instead.
+- **Strict safety boundaries**:
+  - The LegalAgent **does not declare legal violations**.
+  - The LegalAgent **does not provide legal advice**.
+  - Legal AI review persistence and user interface presentation are deferred to a later block (Block 10.5).
+
 
 ## Workflow States
 

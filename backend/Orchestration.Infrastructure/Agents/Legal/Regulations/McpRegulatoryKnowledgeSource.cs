@@ -1,7 +1,17 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Orchestration.Application.Persistence;
+using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
@@ -9,17 +19,22 @@ namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
 public sealed class McpRegulatoryKnowledgeSource(
     ICnvRegulationMcpClient client,
     IOptions<CnvRegulationMcpOptions> options,
-    ILogger<McpRegulatoryKnowledgeSource> logger) : IRegulatoryKnowledgeSource
+    ILogger<McpRegulatoryKnowledgeSource> logger,
+    IOrchestrationDbContext? dbContext = null,
+    ILegalCnvQueryStrategy? queryStrategy = null,
+    IActivityEventPublisher? activityPublisher = null) : IRegulatoryKnowledgeSource
 {
     private readonly ICnvRegulationMcpClient _client = client;
     private readonly CnvRegulationMcpOptions _options = options.Value;
     private readonly ILogger<McpRegulatoryKnowledgeSource> _logger = logger;
+    private readonly IOrchestrationDbContext? _dbContext = dbContext;
+    private readonly ILegalCnvQueryStrategy _queryStrategy = queryStrategy ?? new FinancialAnalysisLegalCnvQueryStrategy();
+    private readonly IActivityEventPublisher? _activityPublisher = activityPublisher;
 
     private sealed record RegulatorySearchOutcome(
         List<RegulatoryFinding> Findings,
         List<string> Warnings
     );
-
 
     public async Task<RegulatoryReviewResult> ReviewAsync(
         FinancialReportContext report,
@@ -32,10 +47,56 @@ public sealed class McpRegulatoryKnowledgeSource(
 
         _logger.LogInformation("Starting regulatory review for report: {ReportName}", report.ReportName);
 
+        var financialAnalysis = await TryLoadFinancialAnalysisAsync(report.SessionId, cancellationToken);
+        var derivedQueries = _queryStrategy.BuildQueries(financialAnalysis);
+
+        string sourceStr = (financialAnalysis != null && financialAnalysis.RiskSignals != null && financialAnalysis.RiskSignals.Count > 0)
+            ? "financial_analysis"
+            : "fallback";
+
+        var audit = new LegalQueryStrategyAudit(
+            Source: sourceStr,
+            Queries: derivedQueries.Select(dq => new LegalCnvQueryAudit(
+                Query: dq.Query,
+                RegulationArea: dq.RegulationArea,
+                Reason: dq.Reason,
+                RelatedFinancialSignals: dq.RelatedFinancialSignals
+            )).ToList()
+        );
+
+        // Publish Activity Feed event if derived from financial analysis and publisher is available
+        if (_activityPublisher != null)
+        {
+            try
+            {
+                await _activityPublisher.PublishAsync(
+                    new ActivityEvent(
+                        report.SessionId,
+                        "legal_cnv_queries_derived",
+                        "LegalAgent",
+                        "LegalAgent derived CNV search queries from financial analysis risk signals.",
+                        DateTimeOffset.UtcNow
+                    ),
+                    cancellationToken
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish activity feed event for derived queries.");
+            }
+        }
+
         var outcome = await SearchFindingsAsync(
             report,
+            derivedQueries,
             cancellationToken
         );
+
+        var warnings = new List<string>(outcome.Warnings);
+        if (sourceStr == "fallback")
+        {
+            warnings.Add("No specific financial risk signals were available; using a general financial reporting query.");
+        }
 
         var findings = outcome.Findings;
         var hasRisk = findings.Count > 0;
@@ -50,22 +111,49 @@ public sealed class McpRegulatoryKnowledgeSource(
             Summary: summary,
             SourceEngine: "MCP CNV Regulation Server",
             Findings: findings,
-            Warnings: outcome.Warnings
+            Warnings: warnings.Distinct().ToList(),
+            QueryStrategy: audit
         );
     }
 
-    private static IReadOnlyList<string> BuildCandidateQueries(
-    FinancialReportContext report)
+    private async Task<FinancialAnalysisContext?> TryLoadFinancialAnalysisAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
     {
-        return
-        [
-        "agentes",
-        "fondos comunes",
-        "custodia",
-        "autorización",
-        "registro",
-        "régimen informativo"
-        ];
+        if (sessionId == Guid.Empty || _dbContext == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var session = await _dbContext.AnalysisSessions
+                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+
+            if (session is null || string.IsNullOrWhiteSpace(session.ContextJson))
+            {
+                return null;
+            }
+
+            var root = JsonNode.Parse(session.ContextJson) as JsonObject;
+            var node = root?["financialAnalysis"];
+            if (node is null)
+            {
+                return null;
+            }
+
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            return node.Deserialize<FinancialAnalysisContext>(options);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load FinancialAnalysisContext for session {SessionId}", sessionId);
+            return null;
+        }
     }
 
     private static IEnumerable<RegulatoryFinding> MapFindings(
@@ -109,55 +197,82 @@ public sealed class McpRegulatoryKnowledgeSource(
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
-    // Realiza búsquedas secuenciales. La latencia total es lineal acumulada en base al número de consultas.
     private async Task<RegulatorySearchOutcome> SearchFindingsAsync(
-    FinancialReportContext report,
-    CancellationToken cancellationToken)
+        FinancialReportContext report,
+        IReadOnlyList<LegalCnvQuery> queries,
+        CancellationToken cancellationToken)
     {
-        var queries = BuildCandidateQueries(report);
+        var allFindings = new List<RegulatoryFinding>();
         var warnings = new List<string>();
+        bool hasUncitedEvidence = false;
 
-        foreach (var query in queries)
+        foreach (var queryInfo in queries)
         {
             var request = new CnvRegulationSearchRequest(
-                Query: query,
-                Area: "Agentes",
+                Query: queryInfo.Query,
+                Area: queryInfo.RegulationArea ?? "Agentes",
                 Limit: _options.DefaultLimit,
                 RequiresReview: true
             );
 
-            var response = await _client.SearchAsync(
-                request,
-                cancellationToken
-            );
-
-            warnings.AddRange(response.Warnings);
-
-            var findings = response.Results
-                .Where(result => result.Citations.Count > 0)
-                .SelectMany(MapFindings)
-                .ToList();
-
-            if (findings.Count > 0)
+            try
             {
-                warnings.Add(
-                    "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+                var response = await _client.SearchAsync(
+                    request,
+                    cancellationToken
                 );
 
-                return new RegulatorySearchOutcome(
-                    findings,
-                    warnings.Distinct().ToList()
-                );
+                if (response.Warnings != null)
+                {
+                    warnings.AddRange(response.Warnings);
+                }
+
+                if (response.Results != null)
+                {
+                    foreach (var result in response.Results)
+                    {
+                        if (result.Citations == null || result.Citations.Count == 0)
+                        {
+                            hasUncitedEvidence = true;
+                        }
+                        else
+                        {
+                            var mapped = MapFindings(result);
+                            allFindings.AddRange(mapped);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "CNV MCP search failed for query: {Query}", queryInfo.Query);
+                warnings.Add($"Search failed for query '{queryInfo.Query}': {ex.Message}");
             }
         }
 
-        warnings.Add(
-            "No cited CNV regulatory evidence was found by the MCP search strategy."
-        );
+        if (hasUncitedEvidence)
+        {
+            warnings.Add("Some CNV/Infoleg search results were ignored as strong evidence because they did not include citations.");
+        }
+
+        // Deduplicate findings
+        var uniqueFindings = allFindings
+            .GroupBy(f => $"{f.Regulation}||{f.Section}||{f.Finding}||{f.Source}")
+            .Select(g => g.First())
+            .ToList();
+
+        if (uniqueFindings.Count > 0)
+        {
+            warnings.Add("Automated regulatory retrieval only. Human legal review is required before making operational decisions.");
+        }
+        else
+        {
+            warnings.Add("No cited CNV regulatory evidence was found by the MCP search strategy.");
+        }
 
         return new RegulatorySearchOutcome(
-            [],
-            warnings.Distinct().ToList()
+            Findings: uniqueFindings,
+            Warnings: warnings.Distinct().ToList()
         );
     }
 }

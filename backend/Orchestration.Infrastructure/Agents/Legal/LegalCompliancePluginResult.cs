@@ -1,4 +1,4 @@
-﻿namespace Orchestration.Infrastructure.Agents.Legal;
+namespace Orchestration.Infrastructure.Agents.Legal;
 
 public sealed record LegalCompliancePluginResult(
     bool HasComplianceRisk,
@@ -6,7 +6,8 @@ public sealed record LegalCompliancePluginResult(
     string Summary,
     string Engine,
     IReadOnlyList<LegalComplianceEvidenceResult> Evidence,
-    IReadOnlyList<string> Warnings
+    IReadOnlyList<string> Warnings,
+    object? QueryStrategy = null
 );
 
 public sealed record LegalComplianceEvidenceResult(

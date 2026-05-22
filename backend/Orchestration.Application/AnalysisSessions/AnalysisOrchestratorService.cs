@@ -450,6 +450,7 @@ namespace Orchestration.Application.AnalysisSessions
                     engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
                     warnings = plannerResult.LegalResult.Warnings,
+                    queryStrategy = plannerResult.LegalResult.QueryStrategy,
                     evidence = plannerResult.LegalResult.Evidence.Select(e => new
                     {
                         regulation = e.Regulation,

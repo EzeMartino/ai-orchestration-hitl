@@ -47,7 +47,8 @@ public sealed class LegalCompliancePlugin(
                     x.Source
                 ))
                 .ToList(),
-            Warnings: review.Warnings
+            Warnings: review.Warnings,
+            QueryStrategy: review.QueryStrategy
         );
     }
 }

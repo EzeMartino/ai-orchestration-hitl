@@ -1,6 +1,17 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Shared;
+using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Application.Persistence;
+using Orchestration.Tests.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Activity;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
@@ -246,5 +257,317 @@ public class McpRegulatoryKnowledgeSourceTests
             Url: "https://servicios.infoleg.gob.ar/",
             QuotedText: "Texto normativo citado."
         );
+    }
+
+    // ==========================================
+    // Phase 10 Block 10.4 Integration Tests
+    // ==========================================
+
+    private static McpRegulatoryKnowledgeSource CreateSource(
+        ICnvRegulationMcpClient client,
+        IOrchestrationDbContext dbContext,
+        ILegalCnvQueryStrategy? queryStrategy = null,
+        IActivityEventPublisher? activityPublisher = null)
+    {
+        var options = Options.Create(
+            new CnvRegulationMcpOptions
+            {
+                Enabled = true,
+                Command = "dotnet",
+                Args = [],
+                DefaultLimit = 5
+            }
+        );
+
+        return new McpRegulatoryKnowledgeSource(
+            client,
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
+            dbContext,
+            queryStrategy,
+            activityPublisher
+        );
+    }
+
+    private sealed class QueryTrackingCnvRegulationMcpClient : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public List<CnvRegulationSearchRequest> ReceivedRequests { get; } = [];
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            ReceivedRequests.Add(request);
+
+            IReadOnlyList<CnvRegulationSearchResult> results = Array.Empty<CnvRegulationSearchResult>();
+
+            if (request.Query.Contains("liquidez"))
+            {
+                results = new[]
+                {
+                    CreateResult("doc-liq", "Liquidez Title", "Snippet for liquidez.", new[]
+                    {
+                        new CnvRegulationCitation(
+                            Source: "Infoleg",
+                            DocumentType: "Resolucion General",
+                            ResolutionNumber: "622/2013",
+                            Title: "Resolución General 622/2013 - Liquidez",
+                            Chapter: "Capitulo I",
+                            Section: null,
+                            Article: "Articulo 1",
+                            PublicationDate: "2013-09-09",
+                            Url: "https://servicios.infoleg.gob.ar/",
+                            QuotedText: "Texto citado de liquidez."
+                        )
+                    })
+                };
+            }
+            else if (request.Query.Contains("endeudamiento"))
+            {
+                results = new[]
+                {
+                    CreateResult("doc-lev", "Leverage Title", "Snippet for leverage.", new[]
+                    {
+                        new CnvRegulationCitation(
+                            Source: "Infoleg",
+                            DocumentType: "Resolucion General",
+                            ResolutionNumber: "622/2013",
+                            Title: "Resolución General 622/2013 - Endeudamiento",
+                            Chapter: "Capitulo II",
+                            Section: null,
+                            Article: "Articulo 2",
+                            PublicationDate: "2013-09-09",
+                            Url: "https://servicios.infoleg.gob.ar/",
+                            QuotedText: "Texto citado de leverage."
+                        )
+                    })
+                };
+            }
+            else if (request.Query.Contains("resultados"))
+            {
+                // Uncited result
+                results = new[]
+                {
+                    CreateResult("doc-uncited", "Uncited Title", "Uncited Snippet.", Array.Empty<CnvRegulationCitation>())
+                };
+            }
+            else if (request.Query == "régimen informativo estados financieros emisoras")
+            {
+                results = new[]
+                {
+                    CreateResult("doc-fallback", "Fallback Title", "Snippet for fallback.", new[]
+                    {
+                        new CnvRegulationCitation(
+                            Source: "Infoleg",
+                            DocumentType: "Resolucion General",
+                            ResolutionNumber: "622/2013",
+                            Title: "Resolución General 622/2013 - Fallback",
+                            Chapter: "Capitulo III",
+                            Section: null,
+                            Article: "Articulo 3",
+                            PublicationDate: "2013-09-09",
+                            Url: "https://servicios.infoleg.gob.ar/",
+                            QuotedText: "Texto citado de fallback."
+                        )
+                    })
+                };
+            }
+
+            return Task.FromResult(new CnvRegulationSearchResponse(request.Query, results, Array.Empty<string>()));
+        }
+    }
+
+    private sealed class FakeActivityEventPublisher : IActivityEventPublisher
+    {
+        public List<ActivityEvent> PublishedEvents { get; } = [];
+
+        public Task PublishAsync(ActivityEvent @event, CancellationToken cancellationToken = default)
+        {
+            PublishedEvents.Add(@event);
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_use_queries_from_ILegalCnvQueryStrategy_and_pass_risk_signals()
+    {
+        // Arrange
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(client, dbContext, new FinancialAnalysisLegalCnvQueryStrategy(), publisher);
+
+        var signals = new[]
+        {
+            new FinancialRiskSignal("liquidity_risk", "High", "Q1", "Low current ratio", Array.Empty<RiskEvidenceItem>())
+        };
+
+        var financialAnalysis = new FinancialAnalysisContext(
+            Engine: "TestDataEngine",
+            DocumentId: "doc-123",
+            Company: "TestCorp",
+            Ratios: Array.Empty<FinancialRatio>(),
+            Comparisons: Array.Empty<FinancialPeriodComparison>(),
+            RiskSignals: signals,
+            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
+            Warnings: Array.Empty<string>(),
+            Limitations: Array.Empty<string>()
+        );
+
+        var session = AnalysisSession.Create();
+        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
+        
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+
+        var report = new FinancialReportContext(
+            SessionId: session.Id,
+            ReportName: "test-report",
+            TotalAmount: 1000m,
+            TransactionCount: 1,
+            SubmittedAt: DateTimeOffset.UtcNow
+        );
+
+        // Act
+        var result = await source.ReviewAsync(report, CancellationToken.None);
+
+        // Assert
+        result.HasComplianceRisk.Should().BeTrue();
+        result.Findings.Should().NotBeEmpty();
+        result.Findings.Any(f => f.Finding.Contains("liquidez")).Should().BeTrue();
+
+        client.ReceivedRequests.Should().NotBeEmpty();
+        client.ReceivedRequests.Any(r => r.Query.Contains("liquidez")).Should().BeTrue();
+
+        publisher.PublishedEvents.Should().ContainSingle();
+        publisher.PublishedEvents[0].Type.Should().Be("legal_cnv_queries_derived");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_combine_and_deduplicate_results_from_multiple_CNV_queries()
+    {
+        // Arrange
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var source = CreateSource(client, dbContext, new FinancialAnalysisLegalCnvQueryStrategy());
+
+        var signals = new[]
+        {
+            new FinancialRiskSignal("liquidity_risk", "High", "Q1", "Low current ratio", Array.Empty<RiskEvidenceItem>()),
+            new FinancialRiskSignal("leverage_warning", "High", "Q1", "High debt", Array.Empty<RiskEvidenceItem>())
+        };
+
+        var financialAnalysis = new FinancialAnalysisContext(
+            Engine: "TestDataEngine",
+            DocumentId: "doc-123",
+            Company: "TestCorp",
+            Ratios: Array.Empty<FinancialRatio>(),
+            Comparisons: Array.Empty<FinancialPeriodComparison>(),
+            RiskSignals: signals,
+            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
+            Warnings: Array.Empty<string>(),
+            Limitations: Array.Empty<string>()
+        );
+
+        var session = AnalysisSession.Create();
+        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
+        
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+
+        var report = new FinancialReportContext(
+            SessionId: session.Id,
+            ReportName: "test-report",
+            TotalAmount: 1000m,
+            TransactionCount: 1,
+            SubmittedAt: DateTimeOffset.UtcNow
+        );
+
+        // Act
+        var result = await source.ReviewAsync(report, CancellationToken.None);
+
+        // Assert
+        result.HasComplianceRisk.Should().BeTrue();
+        // Should contain findings from both queries (liquidez and leverage)
+        result.Findings.Should().Contain(f => f.Finding.Contains("liquidez"));
+        result.Findings.Should().Contain(f => f.Finding.Contains("leverage"));
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_warn_and_ignore_uncited_evidence_as_strong_support()
+    {
+        // Arrange
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var source = CreateSource(client, dbContext, new FinancialAnalysisLegalCnvQueryStrategy());
+
+        var signals = new[]
+        {
+            new FinancialRiskSignal("margin_deterioration", "High", "Q1", "Low profit", Array.Empty<RiskEvidenceItem>())
+        };
+
+        var financialAnalysis = new FinancialAnalysisContext(
+            Engine: "TestDataEngine",
+            DocumentId: "doc-123",
+            Company: "TestCorp",
+            Ratios: Array.Empty<FinancialRatio>(),
+            Comparisons: Array.Empty<FinancialPeriodComparison>(),
+            RiskSignals: signals,
+            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
+            Warnings: Array.Empty<string>(),
+            Limitations: Array.Empty<string>()
+        );
+
+        var session = AnalysisSession.Create();
+        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
+        
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+
+        var report = new FinancialReportContext(
+            SessionId: session.Id,
+            ReportName: "test-report",
+            TotalAmount: 1000m,
+            TransactionCount: 1,
+            SubmittedAt: DateTimeOffset.UtcNow
+        );
+
+        // Act
+        var result = await source.ReviewAsync(report, CancellationToken.None);
+
+        // Assert
+        // Margins map to "resultados", which returns uncited result
+        result.Findings.Should().NotContain(f => f.Finding.Contains("uncited"));
+        result.Warnings.Should().Contain(w => w.Contains("Some CNV/Infoleg search results were ignored as strong evidence because they did not include citations."));
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_still_work_with_fallback_when_financialAnalysis_missing()
+    {
+        // Arrange
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var source = CreateSource(client, dbContext, new FinancialAnalysisLegalCnvQueryStrategy());
+
+        var report = new FinancialReportContext(
+            SessionId: Guid.NewGuid(), // Not in DB
+            ReportName: "test-report",
+            TotalAmount: 1000m,
+            TransactionCount: 1,
+            SubmittedAt: DateTimeOffset.UtcNow
+        );
+
+        // Act
+        var result = await source.ReviewAsync(report, CancellationToken.None);
+
+        // Assert
+        result.HasComplianceRisk.Should().BeTrue();
+        result.Findings.Should().Contain(f => f.Finding.Contains("fallback"));
+        result.Warnings.Should().Contain(w => w.Contains("No specific financial risk signals were available; using a general financial reporting query."));
     }
 }

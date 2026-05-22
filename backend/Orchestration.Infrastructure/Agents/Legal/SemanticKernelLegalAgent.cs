@@ -54,7 +54,8 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
                     x.Source
                 ))
                 .ToList(),
-            Warnings: pluginResult.Warnings
+            Warnings: pluginResult.Warnings,
+            QueryStrategy: pluginResult.QueryStrategy
         );
     }
 }

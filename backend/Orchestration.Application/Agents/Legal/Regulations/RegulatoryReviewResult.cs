@@ -1,4 +1,4 @@
-﻿namespace Orchestration.Application.Agents.Legal.Regulations;
+namespace Orchestration.Application.Agents.Legal.Regulations;
 
 public sealed record RegulatoryReviewResult(
     bool HasComplianceRisk,
@@ -6,5 +6,6 @@ public sealed record RegulatoryReviewResult(
     string Summary,
     string SourceEngine,
     IReadOnlyList<RegulatoryFinding> Findings,
-    IReadOnlyList<string> Warnings
+    IReadOnlyList<string> Warnings,
+    object? QueryStrategy = null
 );

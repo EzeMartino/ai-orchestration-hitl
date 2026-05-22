@@ -21,7 +21,7 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
         ReceivedQueries.Add(request.Query);
 
-        if (request.Query != "agentes")
+        if (request.Query != "régimen informativo estados financieros emisoras")
         {
             return Task.FromResult(
                 new CnvRegulationSearchResponse(
@@ -109,7 +109,7 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
             "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
         );
 
-        client.ReceivedQueries.Should().Contain("agentes");
+        client.ReceivedQueries.Should().Contain("régimen informativo estados financieros emisoras");
 
         result.Findings
             .Should()
