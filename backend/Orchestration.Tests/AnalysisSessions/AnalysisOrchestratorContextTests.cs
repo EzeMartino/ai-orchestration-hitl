@@ -211,7 +211,13 @@ public class AnalysisOrchestratorContextTests
                             Unit: "x",
                             Interpretation: "Current ratio below 1.0 may indicate liquidity pressure."
                         )
-                    ]
+                    ],
+                    Metric: "current_ratio",
+                    Value: 0.67m,
+                    ThresholdCode: "LOW_CURRENT_RATIO",
+                    ThresholdOperator: "<",
+                    ThresholdValue: 1.0m,
+                    Reason: "current_ratio 0.67 crossed the configured threshold < 1.0."
                 )
             ],
             RiskEvidence:
@@ -289,6 +295,12 @@ public class AnalysisOrchestratorContextTests
         financialAnalysis.GetProperty("comparisons")[0].GetProperty("metricName").GetString().Should().Be("revenue");
         financialAnalysis.GetProperty("riskSignals")[0].GetProperty("code").GetString().Should().Be("LOW_CURRENT_RATIO");
         financialAnalysis.GetProperty("riskSignals")[0].GetProperty("severity").GetString().Should().Be("High");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("metric").GetString().Should().Be("current_ratio");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("value").GetDecimal().Should().Be(0.67m);
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("thresholdCode").GetString().Should().Be("LOW_CURRENT_RATIO");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("thresholdOperator").GetString().Should().Be("<");
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("thresholdValue").GetDecimal().Should().Be(1.0m);
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("reason").GetString().Should().Be("current_ratio 0.67 crossed the configured threshold < 1.0.");
         financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("severity").GetString().Should().Be("High");
         financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("engine").GetString().Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
         financialAnalysis.GetProperty("warnings")[0].GetString().Should().Be("Structured metrics only.");

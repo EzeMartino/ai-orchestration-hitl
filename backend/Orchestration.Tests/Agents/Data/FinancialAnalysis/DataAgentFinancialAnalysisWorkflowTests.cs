@@ -53,6 +53,15 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.Ratios.Should().ContainSingle();
         result.FinancialAnalysis.Comparisons.Should().ContainSingle();
         result.FinancialAnalysis.RiskSignals.Should().HaveCount(2);
+        result.FinancialAnalysis.RiskSignals.Should().Contain(signal =>
+            signal.Name == "HIGH_NET_DEBT_TO_EBITDA" &&
+            signal.Metric == "net_debt_to_ebitda" &&
+            signal.Value == 3.75m &&
+            signal.ThresholdCode == "HIGH_NET_DEBT_TO_EBITDA" &&
+            signal.ThresholdOperator == ">=" &&
+            signal.ThresholdValue == 3.0m &&
+            signal.Reason == "net_debt_to_ebitda 3.75 crossed the configured threshold >= 3.0."
+        );
         result.FinancialAnalysis.RiskEvidence.Should().Contain(evidence =>
             evidence.MetricName == "net_debt_to_ebitda"
         );
@@ -543,14 +552,26 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                     Severity: "Medium",
                     Period: "2025E",
                     Summary: "Liquidity should be reviewed.",
-                    Evidence: [liquidityEvidence]
+                    Evidence: [liquidityEvidence],
+                    Metric: "current_ratio",
+                    Value: 0.8m,
+                    ThresholdCode: "LOW_CURRENT_RATIO",
+                    ThresholdOperator: "<",
+                    ThresholdValue: 1.0m,
+                    Reason: "current_ratio 0.8 crossed the configured threshold < 1.0."
                 ),
                 new FinancialRiskSignal(
                     Name: "HIGH_NET_DEBT_TO_EBITDA",
                     Severity: "High",
                     Period: "2025E",
                     Summary: "Leverage should be reviewed.",
-                    Evidence: [leverageEvidence]
+                    Evidence: [leverageEvidence],
+                    Metric: "net_debt_to_ebitda",
+                    Value: 3.75m,
+                    ThresholdCode: "HIGH_NET_DEBT_TO_EBITDA",
+                    ThresholdOperator: ">=",
+                    ThresholdValue: 3.0m,
+                    Reason: "net_debt_to_ebitda 3.75 crossed the configured threshold >= 3.0."
                 )
             };
 

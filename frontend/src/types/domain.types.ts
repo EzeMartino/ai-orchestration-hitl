@@ -160,6 +160,10 @@ export type FinancialRiskSignalContext = {
   period: string;
   value?: number | null;
   threshold?: number | null;
+  thresholdCode?: string | null;
+  thresholdOperator?: string | null;
+  thresholdValue?: number | null;
+  reason?: string | null;
   explanation: string;
   sourcePage?: number | null;
   confidence?: number;

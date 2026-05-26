@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
@@ -173,6 +174,58 @@ public class PlannerAgentTests
                 x.Type == "planner_reasoning_fallback_used" &&
                 x.Agent == "PlannerAgent" &&
                 x.Message == "LLM reasoning failed; deterministic fallback was used.");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_pass_financial_analysis_context_to_legal_agent()
+    {
+        var financialAnalysis = new FinancialAnalysisContext(
+            Engine: "Test financial engine",
+            DocumentId: "financial-doc",
+            Company: "Financial Co",
+            Ratios: [],
+            Comparisons: [],
+            RiskSignals:
+            [
+                new FinancialRiskSignal(
+                    Name: "liquidity_risk",
+                    Severity: "High",
+                    Period: "2025E",
+                    Summary: "Low current ratio",
+                    Evidence: []
+                )
+            ],
+            RiskEvidence: [],
+            Warnings: [],
+            Limitations: [],
+            MetricsInputSource: FinancialMetricsInputSources.SessionContext
+        );
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var dataResult = CreateDataResult(hasAnomaly: true) with
+        {
+            FinancialAnalysis = financialAnalysis
+        };
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(dataResult),
+            legalAgent,
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
+        );
+
+        await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        legalAgent.ReceivedReport.Should().NotBeNull();
+        legalAgent.ReceivedReport!.FinancialAnalysis.Should().BeSameAs(financialAnalysis);
     }
 
     [Fact]
@@ -652,6 +705,7 @@ public class PlannerAgentTests
         private readonly LegalAgentResult _result;
 
         public bool WasCalled { get; private set; }
+        public FinancialReportContext? ReceivedReport { get; private set; }
 
         public FakeLegalAgent(LegalAgentResult result)
         {
@@ -663,6 +717,7 @@ public class PlannerAgentTests
             CancellationToken cancellationToken)
         {
             WasCalled = true;
+            ReceivedReport = report;
 
             return Task.FromResult(_result);
         }

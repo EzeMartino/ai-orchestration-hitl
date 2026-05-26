@@ -815,6 +815,39 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
+    public async Task StartSession_Should_not_pass_request_cancellation_to_orchestrator_after_preflight()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new FakePlannerAgent();
+        var controller = CreateController(
+            dbContext,
+            publisher: publisher,
+            dataAgentOptions: RequiredMetricsOptions(),
+            orchestrator: CreateOrchestrator(dbContext, publisher, planner)
+        );
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            CancellationToken.None
+        );
+        using var requestCancellation = new CancellationTokenSource();
+
+        var result = await controller.StartSession(
+            session.Id,
+            requestCancellation.Token
+        );
+
+        result.Should().BeOfType<OkObjectResult>();
+        planner.RunCalls.Should().Be(1);
+        planner.LastCancellationTokenCanBeCanceled.Should().BeFalse();
+        session.Status.Should().Be(AnalysisSessionStatus.Completed);
+    }
+
+    [Fact]
     public async Task StartSession_Should_allow_demo_mode_without_session_metrics()
     {
         await using var dbContext = CreateDbContext();
@@ -943,12 +976,14 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     private sealed class FakePlannerAgent : IPlannerAgent
     {
         public int RunCalls { get; private set; }
+        public bool? LastCancellationTokenCanBeCanceled { get; private set; }
 
         public Task<PlannerAgentResult> RunAsync(
             AnalysisSession session,
             CancellationToken cancellationToken)
         {
             RunCalls++;
+            LastCancellationTokenCanBeCanceled = cancellationToken.CanBeCanceled;
 
             return Task.FromResult(new PlannerAgentResult(
                 RequiresHumanApproval: false,

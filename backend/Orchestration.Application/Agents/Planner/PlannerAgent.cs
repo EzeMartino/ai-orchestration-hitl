@@ -241,8 +241,12 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
+        var legalReport = dataResult.FinancialAnalysis is null
+            ? report
+            : report with { FinancialAnalysis = dataResult.FinancialAnalysis };
+
         var legalResult = await _legalAgent.ReviewAsync(
-            report,
+            legalReport,
             cancellationToken
         );
 

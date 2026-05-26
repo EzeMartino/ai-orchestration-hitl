@@ -1,4 +1,5 @@
 using Microsoft.SemanticKernel;
+using System.Text.Json;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Shared;
 
@@ -8,6 +9,7 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
 {
     private const string PluginName = "LegalCompliance";
     private const string FunctionName = "review_financial_compliance";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly Kernel _kernel = BuildKernel(plugin);
 
@@ -28,7 +30,10 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
             ["reportName"] = report.ReportName,
             ["totalAmount"] = Convert.ToDouble(report.TotalAmount),
             ["transactionCount"] = report.TransactionCount,
-            ["sessionId"] = report.SessionId.ToString()
+            ["sessionId"] = report.SessionId.ToString(),
+            ["financialAnalysisJson"] = report.FinancialAnalysis is null
+                ? null
+                : JsonSerializer.Serialize(report.FinancialAnalysis, JsonOptions)
         };
 
         var pluginResult = await _kernel.InvokeAsync<LegalCompliancePluginResult>(

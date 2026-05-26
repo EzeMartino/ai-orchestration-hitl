@@ -53,7 +53,8 @@ public sealed class McpRegulatoryKnowledgeSource(
 
         _logger.LogInformation("Starting regulatory review for report: {ReportName}", report.ReportName);
 
-        var financialAnalysis = await TryLoadFinancialAnalysisAsync(report.SessionId, cancellationToken);
+        var financialAnalysis = report.FinancialAnalysis
+            ?? await TryLoadFinancialAnalysisAsync(report.SessionId, cancellationToken);
         var derivedQueries = _queryStrategy.BuildQueries(financialAnalysis);
 
         string sourceStr = (financialAnalysis != null && financialAnalysis.RiskSignals != null && financialAnalysis.RiskSignals.Count > 0)
@@ -70,8 +71,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             )).ToList()
         );
 
-        // Publish Activity Feed event if derived from financial analysis and publisher is available
-        if (_activityPublisher != null)
+        // Publish this event only when the query strategy actually used financial analysis signals.
+        if (_activityPublisher != null && sourceStr == "financial_analysis")
         {
             try
             {
@@ -345,7 +346,7 @@ public sealed class McpRegulatoryKnowledgeSource(
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "CNV MCP search failed for query: {Query}", queryInfo.Query);
-                warnings.Add($"Search failed for query '{queryInfo.Query}': {ex.Message}");
+                warnings.Add("CNV MCP search failed for one query. See application logs for details.");
             }
         }
 

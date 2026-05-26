@@ -398,6 +398,21 @@ public class McpRegulatoryKnowledgeSourceTests
         }
     }
 
+    private sealed class ThrowingCnvRegulationMcpClient : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("transport failed at C:\\sensitive\\cnv\\server.log");
+        }
+    }
+
     [Fact]
     public async Task ReviewAsync_Should_use_queries_from_ILegalCnvQueryStrategy_and_pass_risk_signals()
     {
@@ -451,6 +466,50 @@ public class McpRegulatoryKnowledgeSourceTests
 
         publisher.PublishedEvents.Should().Contain(e => e.Type == "legal_cnv_queries_derived");
         publisher.PublishedEvents.Should().Contain(e => e.Type == "legal_agent_ai_review_completed");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_not_publish_derived_query_event_when_using_fallback_queries()
+    {
+        // Arrange
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(client, dbContext, new FinancialAnalysisLegalCnvQueryStrategy(), publisher);
+
+        var report = new FinancialReportContext(
+            SessionId: Guid.NewGuid(),
+            ReportName: "test-report",
+            TotalAmount: 1000m,
+            TransactionCount: 1,
+            SubmittedAt: DateTimeOffset.UtcNow
+        );
+
+        // Act
+        var result = await source.ReviewAsync(report, CancellationToken.None);
+
+        // Assert
+        result.QueryStrategy.Should().BeOfType<LegalQueryStrategyAudit>().Which.Source.Should().Be("fallback");
+        publisher.PublishedEvents.Should().NotContain(e => e.Type == "legal_cnv_queries_derived");
+        publisher.PublishedEvents.Should().Contain(e => e.Type == "legal_agent_ai_review_completed");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_use_safe_warning_when_mcp_search_throws()
+    {
+        // Arrange
+        var source = CreateSource(new ThrowingCnvRegulationMcpClient());
+
+        // Act
+        var result = await source.ReviewAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        // Assert
+        result.Warnings.Should().Contain("CNV MCP search failed for one query. See application logs for details.");
+        result.Warnings.Should().NotContain(w => w.Contains("transport failed"));
+        result.Warnings.Should().NotContain(w => w.Contains("C:\\sensitive"));
     }
 
     [Fact]

@@ -188,4 +188,26 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         var query = result.First(q => q.Query.Contains("liquidez"));
         query.RelatedFinancialSignals.Should().Contain("liquidity_signal");
     }
+
+    [Fact]
+    public void BuildQueries_Should_use_enriched_metric_fields_before_text_fallback()
+    {
+        var signals = new[]
+        {
+            new FinancialRiskSignal(
+                Name: "threshold_crossed",
+                Severity: "Medium",
+                Period: "Q1",
+                Summary: "Configured threshold crossed.",
+                Evidence: Array.Empty<RiskEvidenceItem>(),
+                Metric: "current_ratio",
+                ThresholdCode: "LOW_CURRENT_RATIO"
+            )
+        };
+        var context = CreateContext(signals);
+
+        var result = _strategy.BuildQueries(context);
+
+        result.Should().Contain(q => q.Query.Contains("liquidez", StringComparison.OrdinalIgnoreCase));
+    }
 }

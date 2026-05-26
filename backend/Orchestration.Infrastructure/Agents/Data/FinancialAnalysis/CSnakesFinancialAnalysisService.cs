@@ -169,7 +169,13 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 Severity: GetString(signal, "severity", defaultValue: "Info"),
                 Period: GetString(signal, "period"),
                 Summary: GetString(signal, "summary"),
-                Evidence: evidence
+                Evidence: evidence,
+                Metric: GetNullableString(signal, "metric"),
+                Value: GetNullableDecimal(signal, "value"),
+                ThresholdCode: GetNullableString(signal, "thresholdCode"),
+                ThresholdOperator: GetNullableString(signal, "thresholdOperator"),
+                ThresholdValue: GetNullableDecimal(signal, "thresholdValue"),
+                Reason: GetNullableString(signal, "reason")
             ));
         }
 
@@ -416,6 +422,25 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         }
 
         return defaultValue;
+    }
+
+    private static string? GetNullableString(
+        JsonElement element,
+        params string[] propertyNames)
+    {
+        if (!TryGetProperty(element, propertyNames, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        var value = property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value;
     }
 
     private static decimal GetDecimal(

@@ -75,7 +75,13 @@ public class FinancialAnalysisContractsSerializationTests
             Severity: "Low",
             Period: "2025E",
             Summary: "Leverage should be monitored.",
-            Evidence: [evidence]
+            Evidence: [evidence],
+            Metric: "net_debt_to_ebitda",
+            Value: 1.16m,
+            ThresholdCode: "HIGH_NET_DEBT_TO_EBITDA",
+            ThresholdOperator: ">=",
+            ThresholdValue: 2.5m,
+            Reason: "net_debt_to_ebitda 1.16 did not cross the configured threshold >= 2.5."
         );
         var result = new FinancialAnalysisToolResult(
             HasRiskSignals: true,
@@ -117,6 +123,38 @@ public class FinancialAnalysisContractsSerializationTests
         json.Should().Contain("\"summary\"");
         json.Should().Contain("\"hasRiskSignals\":true");
         json.Should().Contain("net_debt_to_ebitda");
+        json.Should().Contain("\"thresholdCode\":\"HIGH_NET_DEBT_TO_EBITDA\"");
+        json.Should().Contain("\"thresholdOperator\":\"\\u003E=\"");
+        json.Should().Contain("\"thresholdValue\":2.5");
+        json.Should().Contain("\"reason\"");
+    }
+
+    [Fact]
+    public void FinancialRiskSignal_Should_deserialize_old_json_without_explainability_fields()
+    {
+        const string json = """
+        {
+          "name": "LOW_CURRENT_RATIO",
+          "severity": "High",
+          "period": "2025E",
+          "summary": "Current ratio below threshold.",
+          "evidence": []
+        }
+        """;
+
+        var signal = JsonSerializer.Deserialize<FinancialRiskSignal>(
+            json,
+            JsonOptions
+        );
+
+        signal.Should().NotBeNull();
+        signal!.Name.Should().Be("LOW_CURRENT_RATIO");
+        signal.Metric.Should().BeNull();
+        signal.Value.Should().BeNull();
+        signal.ThresholdCode.Should().BeNull();
+        signal.ThresholdOperator.Should().BeNull();
+        signal.ThresholdValue.Should().BeNull();
+        signal.Reason.Should().BeNull();
     }
 
     [Fact]

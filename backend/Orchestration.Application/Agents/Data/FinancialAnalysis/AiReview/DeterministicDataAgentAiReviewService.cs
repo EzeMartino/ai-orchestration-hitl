@@ -74,6 +74,11 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
 
     private static string BuildFindingDescription(FinancialRiskSignal signal)
     {
+        if (!string.IsNullOrWhiteSpace(signal.Reason))
+        {
+            return signal.Reason;
+        }
+
         if (!string.IsNullOrWhiteSpace(signal.Summary))
         {
             return signal.Summary;
@@ -88,7 +93,9 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
     {
         return (signal.Evidence ?? [])
             .Select(evidence => evidence.MetricName)
+            .Append(signal.Metric)
             .Where(metric => !string.IsNullOrWhiteSpace(metric))
+            .Select(metric => metric!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }

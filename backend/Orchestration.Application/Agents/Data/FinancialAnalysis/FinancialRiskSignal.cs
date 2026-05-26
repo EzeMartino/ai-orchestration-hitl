@@ -5,5 +5,11 @@ public sealed record FinancialRiskSignal(
     string Severity,
     string Period,
     string Summary,
-    IReadOnlyList<RiskEvidenceItem> Evidence
+    IReadOnlyList<RiskEvidenceItem> Evidence,
+    string? Metric = null,
+    decimal? Value = null,
+    string? ThresholdCode = null,
+    string? ThresholdOperator = null,
+    decimal? ThresholdValue = null,
+    string? Reason = null
 );

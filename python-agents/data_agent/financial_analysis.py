@@ -175,23 +175,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
     request = _loads(request_json)
     metrics = request.get("metrics", [])
     ratios = request.get("ratios", [])
-    
-    thresholds = request.get("thresholds") or []
-    threshold_limits: dict[str, float] = {}
-    for t in thresholds:
-        metric = t.get("metric")
-        val = t.get("value")
-        if metric and val is not None:
-            if metric == "current_ratio":
-                threshold_limits["currentRatioMin"] = float(val)
-            elif metric == "quick_ratio":
-                threshold_limits["quickRatioMin"] = float(val)
-            elif metric == "net_debt_to_ebitda":
-                threshold_limits["netDebtToEbitdaMax"] = float(val)
-            elif metric == "debt_to_equity":
-                threshold_limits["debtToEquityMax"] = float(val)
-            elif metric == "interest_coverage":
-                threshold_limits["interestCoverageMin"] = float(val)
+    threshold_rules = _threshold_rules(request.get("thresholds") or [])
 
     warnings: list[str] = []
     limitations: list[str] = []
@@ -207,52 +191,35 @@ def detect_financial_risk_signals(request_json: str) -> str:
         evidence,
         ratio_index,
         "current_ratio",
-        threshold_limits.get("currentRatioMin", 1.0),
-        "LOW_CURRENT_RATIO",
-        "Current ratio is below 1.0. Human review recommended.",
-        "Medium",
+        threshold_rules["current_ratio"],
     )
     _add_ratio_threshold_signal(
         signals,
         evidence,
         ratio_index,
         "quick_ratio",
-        threshold_limits.get("quickRatioMin", 0.8),
-        "LOW_QUICK_RATIO",
-        "Quick ratio is below 0.8. Liquidity should be reviewed.",
-        "Medium",
+        threshold_rules["quick_ratio"],
     )
     _add_ratio_threshold_signal(
         signals,
         evidence,
         ratio_index,
         "net_debt_to_ebitda",
-        threshold_limits.get("netDebtToEbitdaMax", 3.0),
-        "HIGH_NET_DEBT_TO_EBITDA",
-        "Net debt to EBITDA is above the configured threshold.",
-        "High",
-        greater_than=True,
+        threshold_rules["net_debt_to_ebitda"],
     )
     _add_ratio_threshold_signal(
         signals,
         evidence,
         ratio_index,
         "debt_to_equity",
-        threshold_limits.get("debtToEquityMax", 2.0),
-        "HIGH_DEBT_TO_EQUITY",
-        "Debt to equity is above the configured threshold.",
-        "High",
-        greater_than=True,
+        threshold_rules["debt_to_equity"],
     )
     _add_ratio_threshold_signal(
         signals,
         evidence,
         ratio_index,
         "interest_coverage",
-        threshold_limits.get("interestCoverageMin", 2.0),
-        "LOW_INTEREST_COVERAGE",
-        "Interest coverage is below the configured threshold.",
-        "High",
+        threshold_rules["interest_coverage"],
     )
 
     for (metric_name, period), metric in metric_index.items():
@@ -260,6 +227,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
         if value is None:
             continue
         if metric_name == "free_cash_flow" and value < 0:
+            reason = _threshold_reason("free_cash_flow", value, "<", 0)
             _append_signal(
                 signals,
                 evidence,
@@ -275,9 +243,15 @@ def detect_financial_risk_signals(request_json: str) -> str:
                         0,
                         metric.get("unit") or "",
                         "High",
-                        "Free cash flow turned negative.",
+                        reason,
                     )
                 ],
+                metric="free_cash_flow",
+                value=value,
+                threshold_code="NEGATIVE_FREE_CASH_FLOW",
+                threshold_operator="<",
+                threshold_value=0,
+                reason=reason,
             )
 
     if len(periods) < 2:
@@ -582,26 +556,131 @@ def _comparison_explanation(
     )
 
 
+def _threshold_rule(
+    code: str,
+    metric: str,
+    operator: str,
+    value: float,
+    severity: str,
+    summary: str,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "metric": metric,
+        "operator": operator,
+        "value": value,
+        "severity": severity,
+        "summary": summary,
+    }
+
+
+def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    rules = {
+        "current_ratio": _threshold_rule(
+            "LOW_CURRENT_RATIO",
+            "current_ratio",
+            "<",
+            1.0,
+            "Medium",
+            "Current ratio is below 1.0. Human review recommended.",
+        ),
+        "quick_ratio": _threshold_rule(
+            "LOW_QUICK_RATIO",
+            "quick_ratio",
+            "<",
+            0.8,
+            "Medium",
+            "Quick ratio is below 0.8. Liquidity should be reviewed.",
+        ),
+        "net_debt_to_ebitda": _threshold_rule(
+            "HIGH_NET_DEBT_TO_EBITDA",
+            "net_debt_to_ebitda",
+            ">=",
+            3.0,
+            "High",
+            "Net debt to EBITDA is above the configured threshold.",
+        ),
+        "debt_to_equity": _threshold_rule(
+            "HIGH_DEBT_TO_EQUITY",
+            "debt_to_equity",
+            ">=",
+            2.0,
+            "High",
+            "Debt to equity is above the configured threshold.",
+        ),
+        "interest_coverage": _threshold_rule(
+            "LOW_INTEREST_COVERAGE",
+            "interest_coverage",
+            "<",
+            2.0,
+            "High",
+            "Interest coverage is below the configured threshold.",
+        ),
+    }
+
+    for threshold in thresholds:
+        metric = threshold.get("metric")
+        value = _number(threshold.get("value"))
+        if metric not in rules or value is None:
+            continue
+
+        existing = dict(rules[metric])
+        existing["code"] = str(threshold.get("code") or existing["code"])
+        existing["operator"] = str(threshold.get("operator") or existing["operator"])
+        existing["value"] = value
+        existing["severity"] = str(threshold.get("severity") or existing["severity"])
+        existing["summary"] = str(threshold.get("description") or existing["summary"])
+        rules[metric] = existing
+
+    return rules
+
+
+def _threshold_crossed(value: float, operator: str, threshold: float) -> bool:
+    if operator == "<":
+        return value < threshold
+    if operator == "<=":
+        return value <= threshold
+    if operator == ">":
+        return value > threshold
+    if operator == ">=":
+        return value >= threshold
+    return value > threshold
+
+
+def _threshold_reason(
+    metric_name: str,
+    value: float,
+    operator: str,
+    threshold: float,
+) -> str:
+    return (
+        f"{metric_name} {_round(value)} crossed the configured threshold "
+        f"{operator} {_round(threshold)}."
+    )
+
+
 def _add_ratio_threshold_signal(
     signals: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
     ratio_index: dict[tuple[str, str], dict[str, Any]],
     ratio_name: str,
-    threshold: float,
-    signal_name: str,
-    summary: str,
-    severity: str,
-    greater_than: bool = False,
+    threshold_rule: dict[str, Any],
 ) -> None:
+    threshold = float(threshold_rule["value"])
+    operator = str(threshold_rule["operator"])
+    signal_name = str(threshold_rule["code"])
+    summary = str(threshold_rule["summary"])
+    severity = str(threshold_rule["severity"])
+
     for (_, period), ratio in ratio_index.items():
         if ratio.get("name") != ratio_name:
             continue
         value = _number(ratio.get("value"))
         if value is None:
             continue
-        is_triggered = value > threshold if greater_than else value < threshold
-        if not is_triggered:
+        if not _threshold_crossed(value, operator, threshold):
             continue
+        reason = _threshold_reason(ratio_name, value, operator, threshold)
         item = _evidence_item(
             ratio_name,
             period,
@@ -609,9 +688,23 @@ def _add_ratio_threshold_signal(
             threshold,
             ratio.get("unit") or "",
             severity,
-            summary,
+            reason,
         )
-        _append_signal(signals, evidence, signal_name, severity, period, summary, [item])
+        _append_signal(
+            signals,
+            evidence,
+            signal_name,
+            severity,
+            period,
+            summary,
+            [item],
+            metric=ratio_name,
+            value=value,
+            threshold_code=signal_name,
+            threshold_operator=operator,
+            threshold_value=threshold,
+            reason=reason,
+        )
 
 
 def _detect_margin_compression(
@@ -639,23 +732,32 @@ def _detect_margin_compression(
     decline = previous_value - current_value
     if decline > 0.05:
         severity = "High" if decline > 0.10 else "Medium"
+        period = str(current.get("period"))
+        threshold = previous_value - 0.05
+        reason = _threshold_reason("ebitda_margin", current_value, "<", threshold)
         item = _evidence_item(
             "ebitda_margin",
-            str(current.get("period")),
+            period,
             current_value,
-            previous_value - 0.05,
+            threshold,
             "ratio",
             severity,
-            "EBITDA margin declined by more than five percentage points.",
+            reason,
         )
         _append_signal(
             signals,
             evidence,
             "MARGIN_COMPRESSION",
             severity,
-            str(current.get("period")),
+            period,
             "EBITDA margin compression requires review.",
             [item],
+            metric="ebitda_margin",
+            value=current_value,
+            threshold_code="MARGIN_COMPRESSION",
+            threshold_operator="<",
+            threshold_value=threshold,
+            reason=reason,
         )
 
 
@@ -695,14 +797,16 @@ def _detect_capex_spike(
     increase = (current - previous) / previous
     if increase > 0.25:
         period = str(capex_metrics[-1].get("period"))
+        threshold = previous * 1.25
+        reason = _threshold_reason("capex", current, ">", threshold)
         item = _evidence_item(
             "capex",
             period,
             current,
-            previous * 1.25,
+            threshold,
             capex_metrics[-1].get("unit") or "",
             "Medium",
-            "Capex increased by more than 25%.",
+            reason,
         )
         _append_signal(
             signals,
@@ -712,6 +816,12 @@ def _detect_capex_spike(
             period,
             "Capex spike should be reviewed against the investment plan.",
             [item],
+            metric="capex",
+            value=current,
+            threshold_code="CAPEX_SPIKE",
+            threshold_operator=">",
+            threshold_value=threshold,
+            reason=reason,
         )
 
 
@@ -732,10 +842,11 @@ def _detect_forecast_dependency(
     }
     if len(forecast_periods) >= 2 and actual_periods:
         period = sorted(forecast_periods)[-1]
+        value = float(len(forecast_periods))
         item = _evidence_item(
             "forecast_periods",
             period,
-            float(len(forecast_periods)),
+            value,
             None,
             "count",
             "Info",
@@ -749,6 +860,10 @@ def _detect_forecast_dependency(
             period,
             "Quantitative analysis depends on forecast periods. Human review recommended.",
             [item],
+            metric="forecast_periods",
+            value=value,
+            threshold_code="FORECAST_DEPENDENCY",
+            reason="Analysis includes multiple forecast periods. Forecast assumptions require review.",
         )
 
 
@@ -776,16 +891,32 @@ def _detect_drop_signal(
     decline = (previous - current) / abs(previous)
     if decline > threshold:
         period = str(metrics[-1].get("period"))
+        threshold_value = previous * (1 - threshold)
+        reason = _threshold_reason(metric_name, current, "<", threshold_value)
         item = _evidence_item(
             metric_name,
             period,
             current,
-            previous * (1 - threshold),
+            threshold_value,
             metrics[-1].get("unit") or "",
             "High",
-            summary,
+            reason,
         )
-        _append_signal(signals, evidence, signal_name, "High", period, summary, [item])
+        _append_signal(
+            signals,
+            evidence,
+            signal_name,
+            "High",
+            period,
+            summary,
+            [item],
+            metric=metric_name,
+            value=current,
+            threshold_code=signal_name,
+            threshold_operator="<",
+            threshold_value=threshold_value,
+            reason=reason,
+        )
 
 
 def _append_signal(
@@ -796,7 +927,15 @@ def _append_signal(
     period: str,
     summary: str,
     items: list[dict[str, Any]],
+    metric: str | None = None,
+    value: Any = None,
+    threshold_code: str | None = None,
+    threshold_operator: str | None = None,
+    threshold_value: Any = None,
+    reason: str | None = None,
 ) -> None:
+    primary = items[0] if items else {}
+
     signals.append(
         {
             "code": name,
@@ -805,6 +944,18 @@ def _append_signal(
             "period": period,
             "summary": summary,
             "evidence": items,
+            "metric": metric or primary.get("metricName"),
+            "value": _round(_number(value if value is not None else primary.get("value"))),
+            "thresholdCode": threshold_code,
+            "thresholdOperator": threshold_operator,
+            "thresholdValue": _round(
+                _number(
+                    threshold_value
+                    if threshold_value is not None
+                    else primary.get("threshold")
+                )
+            ),
+            "reason": reason or summary,
         }
     )
     evidence.extend(items)

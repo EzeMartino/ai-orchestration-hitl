@@ -124,6 +124,30 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
     }
 
     [Fact]
+    public async Task ReviewAsync_Should_use_enriched_signal_metric_and_reason()
+    {
+        var service = new DeterministicDataAgentAiReviewService();
+        var signal = new FinancialRiskSignal(
+            Name: "LOW_CURRENT_RATIO",
+            Severity: "High",
+            Period: "2025E",
+            Summary: "Current ratio is below threshold.",
+            Evidence: [],
+            Metric: "current_ratio",
+            Reason: "current_ratio 0.67 crossed the configured threshold < 1.0."
+        );
+
+        var result = await service.ReviewAsync(
+            CreateInput(riskSignals: [signal]),
+            CancellationToken.None
+        );
+
+        var finding = result.KeyFindings.Should().ContainSingle().Subject;
+        finding.RelatedMetrics.Should().BeEquivalentTo(["current_ratio"]);
+        finding.Description.Should().Be("current_ratio 0.67 crossed the configured threshold < 1.0.");
+    }
+
+    [Fact]
     public async Task ReviewAsync_Should_include_warnings_as_data_quality_notes()
     {
         var service = new DeterministicDataAgentAiReviewService();

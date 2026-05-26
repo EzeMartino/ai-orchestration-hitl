@@ -281,6 +281,13 @@ public sealed class CSnakesFinancialAnalysisServiceTests
         demoResponse.Signals.Should().Contain(s => s.Name == "HIGH_NET_DEBT_TO_EBITDA");
         var triggeredSignal = demoResponse.Signals.First(s => s.Name == "HIGH_NET_DEBT_TO_EBITDA");
         triggeredSignal.Evidence.Should().ContainSingle(e => e.MetricName == "net_debt_to_ebitda" && e.Threshold == 0.5m && e.Value == 0.625m);
+        triggeredSignal.Metric.Should().Be("net_debt_to_ebitda");
+        triggeredSignal.Value.Should().Be(0.625m);
+        triggeredSignal.ThresholdCode.Should().Be("HIGH_NET_DEBT_TO_EBITDA");
+        triggeredSignal.ThresholdOperator.Should().Be(">=");
+        triggeredSignal.ThresholdValue.Should().Be(0.5m);
+        triggeredSignal.Reason.Should().Contain("net_debt_to_ebitda");
+        triggeredSignal.Reason.Should().Contain(">= 0.5");
     }
 
     [Fact]

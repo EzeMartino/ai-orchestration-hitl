@@ -142,7 +142,8 @@ public class AnalysisSessionsController(
 
         try
         {
-            var result = await _orchestrator.StartAnalysisAsync(id, cancellationToken);
+            // Once preflight passes, the workflow must finish even if the browser disconnects.
+            var result = await _orchestrator.StartAnalysisAsync(id, CancellationToken.None);
 
             if (result is null)
             {

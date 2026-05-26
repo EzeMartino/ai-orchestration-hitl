@@ -181,6 +181,18 @@ class FinancialAnalysisRiskSignalTests(unittest.TestCase):
         self.assertIn("HIGH_NET_DEBT_TO_EBITDA", codes)
         self.assertIn("NEGATIVE_FREE_CASH_FLOW", codes)
 
+        low_current_ratio = next(
+            signal for signal in response["signals"] if signal["code"] == "LOW_CURRENT_RATIO"
+        )
+        self.assertEqual(low_current_ratio["metric"], "current_ratio")
+        self.assertEqual(low_current_ratio["period"], "2025E")
+        self.assertAlmostEqual(low_current_ratio["value"], 0.777778)
+        self.assertEqual(low_current_ratio["thresholdCode"], "LOW_CURRENT_RATIO")
+        self.assertEqual(low_current_ratio["thresholdOperator"], "<")
+        self.assertEqual(low_current_ratio["thresholdValue"], 1.0)
+        self.assertIn("current_ratio", low_current_ratio["reason"])
+        self.assertIn("< 1.0", low_current_ratio["reason"])
+
     def test_does_not_flag_healthy_values(self):
         ratios = call(
             financial_analysis.compute_financial_ratios,
@@ -203,6 +215,51 @@ class FinancialAnalysisRiskSignalTests(unittest.TestCase):
         )
 
         self.assertEqual(response["signals"], [])
+
+    def test_respects_configured_threshold_metadata(self):
+        ratios = [
+            {
+                "name": "net_debt_to_ebitda",
+                "period": "2025E",
+                "value": 0.625,
+                "unit": "x",
+            }
+        ]
+
+        response = call(
+            financial_analysis.detect_financial_risk_signals,
+            {
+                "metrics": healthy_metrics(),
+                "ratios": ratios,
+                "thresholds": [
+                    {
+                        "code": "CUSTOM_HIGH_NET_DEBT_TO_EBITDA",
+                        "metric": "net_debt_to_ebitda",
+                        "operator": ">=",
+                        "value": 0.5,
+                        "severity": "High",
+                        "description": "Custom leverage threshold.",
+                    }
+                ],
+            },
+        )
+
+        signal = response["signals"][0]
+        self.assertEqual(signal["code"], "CUSTOM_HIGH_NET_DEBT_TO_EBITDA")
+        self.assertEqual(signal["metric"], "net_debt_to_ebitda")
+        self.assertEqual(signal["thresholdCode"], "CUSTOM_HIGH_NET_DEBT_TO_EBITDA")
+        self.assertEqual(signal["thresholdOperator"], ">=")
+        self.assertEqual(signal["thresholdValue"], 0.5)
+        self.assertIn(">= 0.5", signal["reason"])
+
+    def test_missing_metric_inputs_do_not_crash_risk_detection(self):
+        response = call(
+            financial_analysis.detect_financial_risk_signals,
+            {"metrics": [metric("revenue", "2024A", 100)], "ratios": []},
+        )
+
+        self.assertEqual(response["signals"], [])
+        self.assertTrue(response["limitations"])
 
 
 class FinancialAnalysisEvidenceSummaryTests(unittest.TestCase):

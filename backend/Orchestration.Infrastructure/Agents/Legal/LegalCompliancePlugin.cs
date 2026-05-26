@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.SemanticKernel;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 
@@ -9,6 +11,11 @@ public sealed class LegalCompliancePlugin(
     IRegulatoryKnowledgeSource regulatoryKnowledgeSource)
 {
     private readonly IRegulatoryKnowledgeSource _regulatoryKnowledgeSource = regulatoryKnowledgeSource;
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true
+        };
 
     [KernelFunction("review_financial_compliance")]
     [Description("Reviews a financial report summary against compliance rules.")]
@@ -21,6 +28,8 @@ public sealed class LegalCompliancePlugin(
         int transactionCount,
         [Description("Unique ID of the active analysis session")]
         string? sessionId = null,
+        [Description("Optional serialized financial analysis context produced by DataAgent in the current run.")]
+        string? financialAnalysisJson = null,
         CancellationToken cancellationToken = default)
     {
         var parsedSessionId = Guid.Empty;
@@ -34,7 +43,8 @@ public sealed class LegalCompliancePlugin(
             ReportName: reportName,
             TotalAmount: Convert.ToDecimal(totalAmount),
             TransactionCount: transactionCount,
-            SubmittedAt: DateTimeOffset.UtcNow
+            SubmittedAt: DateTimeOffset.UtcNow,
+            FinancialAnalysis: DeserializeFinancialAnalysis(financialAnalysisJson)
         );
 
         var review = await _regulatoryKnowledgeSource.ReviewAsync(
@@ -59,5 +69,26 @@ public sealed class LegalCompliancePlugin(
             QueryStrategy: review.QueryStrategy,
             LegalReview: review.LegalReview
         );
+    }
+
+    private static FinancialAnalysisContext? DeserializeFinancialAnalysis(
+        string? financialAnalysisJson)
+    {
+        if (string.IsNullOrWhiteSpace(financialAnalysisJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<FinancialAnalysisContext>(
+                financialAnalysisJson,
+                JsonOptions
+            );
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }

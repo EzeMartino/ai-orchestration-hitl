@@ -152,13 +152,19 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
 
     private static IEnumerable<(string Query, string RegulationArea, string Reason)> MapSignalToQueries(FinancialRiskSignal signal)
     {
-        var nameLower = (signal.Name ?? string.Empty).ToLowerInvariant();
-        var summaryLower = (signal.Summary ?? string.Empty).ToLowerInvariant();
+        var signalText = string.Join(
+            " ",
+            signal.Name,
+            signal.Summary,
+            signal.Metric,
+            signal.ThresholdCode,
+            signal.Reason
+        ).ToLowerInvariant();
         var severityLower = (signal.Severity ?? string.Empty).ToLowerInvariant();
 
         // 1. High Severity / Material Deterioration
         if (severityLower == "high" || severityLower == "critical" || severityLower == "severe" ||
-            nameLower.Contains("material deterioration") || summaryLower.Contains("material deterioration"))
+            signalText.Contains("material deterioration"))
         {
             yield return (
                 "hecho relevante información al mercado emisoras",
@@ -168,8 +174,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         }
 
         // 2. Liquidity
-        if (nameLower.Contains("liquidity") || nameLower.Contains("current_ratio") || nameLower.Contains("working_capital") ||
-            summaryLower.Contains("liquidity") || summaryLower.Contains("current_ratio") || summaryLower.Contains("working_capital"))
+        if (signalText.Contains("liquidity") || signalText.Contains("current_ratio") || signalText.Contains("working_capital"))
         {
             yield return (
                 "régimen informativo estados financieros liquidez",
@@ -184,8 +189,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         }
 
         // 3. Leverage
-        if (nameLower.Contains("leverage") || nameLower.Contains("debt") || nameLower.Contains("net_debt") || nameLower.Contains("indebtedness") ||
-            summaryLower.Contains("leverage") || summaryLower.Contains("debt") || summaryLower.Contains("net_debt") || summaryLower.Contains("indebtedness"))
+        if (signalText.Contains("leverage") || signalText.Contains("debt") || signalText.Contains("net_debt") || signalText.Contains("indebtedness"))
         {
             yield return (
                 "endeudamiento información al mercado estados financieros",
@@ -200,8 +204,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         }
 
         // 4. Margin / Profitability
-        if (nameLower.Contains("margin") || nameLower.Contains("profitability") || nameLower.Contains("ebitda") || nameLower.Contains("gross_margin") || nameLower.Contains("deterioration") ||
-            summaryLower.Contains("margin") || summaryLower.Contains("profitability") || summaryLower.Contains("ebitda") || summaryLower.Contains("gross_margin") || summaryLower.Contains("deterioration"))
+        if (signalText.Contains("margin") || signalText.Contains("profitability") || signalText.Contains("ebitda") || signalText.Contains("gross_margin") || signalText.Contains("deterioration"))
         {
             yield return (
                 "resultados estados financieros información periódica emisoras",
@@ -216,8 +219,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         }
 
         // 5. Cash Flow
-        if (nameLower.Contains("cash_flow") || nameLower.Contains("free_cash_flow") ||
-            summaryLower.Contains("cash_flow") || summaryLower.Contains("free_cash_flow"))
+        if (signalText.Contains("cash_flow") || signalText.Contains("free_cash_flow"))
         {
             yield return (
                 "flujo de fondos estados financieros régimen informativo",
@@ -232,8 +234,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         }
 
         // 6. Missing Metrics / Data Quality / Warnings
-        if (nameLower.Contains("missing metrics") || nameLower.Contains("data quality") || nameLower.Contains("warning") ||
-            summaryLower.Contains("missing metrics") || summaryLower.Contains("data quality") || summaryLower.Contains("warning"))
+        if (signalText.Contains("missing metrics") || signalText.Contains("data quality") || signalText.Contains("warning"))
         {
             yield return (
                 "deberes informativos emisoras información periódica",

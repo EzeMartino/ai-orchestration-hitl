@@ -78,6 +78,14 @@ function formatAiReviewStatus(
   return "Deterministic fallback";
 }
 
+function formatThreshold(signal: FinancialAnalysisContext["riskSignals"][number]) {
+  if (signal.thresholdOperator && signal.thresholdValue != null) {
+    return `${signal.thresholdOperator} ${formatNumber(signal.thresholdValue)}`;
+  }
+
+  return formatNumber(signal.threshold);
+}
+
 export function FinancialRiskEvidencePanel({
   financialAnalysis,
 }: FinancialRiskEvidencePanelProps) {
@@ -323,11 +331,25 @@ export function FinancialRiskEvidencePanel({
                 <div>
                   <strong>{formatSignalTitle(signal.code)}</strong>
                   <p>{signal.explanation}</p>
-                  <small>
-                    {signal.metric} · {signal.period} · Value{" "}
-                    {formatNumber(signal.value)} · Threshold{" "}
-                    {formatNumber(signal.threshold)}
-                  </small>
+                  <dl className="financialEvidenceMeta">
+                    <div>
+                      <dt>Metric</dt>
+                      <dd>{signal.metric ?? "-"}</dd>
+                    </div>
+                    <div>
+                      <dt>Period</dt>
+                      <dd>{signal.period ?? "-"}</dd>
+                    </div>
+                    <div>
+                      <dt>Observed value</dt>
+                      <dd>{formatNumber(signal.value)}</dd>
+                    </div>
+                    <div>
+                      <dt>Threshold</dt>
+                      <dd>{formatThreshold(signal)}</dd>
+                    </div>
+                  </dl>
+                  {signal.reason && <small>Reason: {signal.reason}</small>}
                 </div>
               </article>
             ))}

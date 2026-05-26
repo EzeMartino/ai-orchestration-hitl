@@ -892,6 +892,27 @@ To change the active profile locally, use the environment variable:
 DataAgent__RiskThresholdProfile=oil_and_gas
 ```
 
+### Financial Risk Signal Explainability
+
+Each financial risk signal can include the metric, period, observed value, threshold code, threshold operator, threshold value, and deterministic reason that produced the signal.
+
+Example persisted fields:
+
+```json
+{
+  "code": "HIGH_NET_DEBT_TO_EBITDA",
+  "metric": "net_debt_to_ebitda",
+  "period": "2025E",
+  "value": 3.4,
+  "thresholdCode": "HIGH_NET_DEBT_TO_EBITDA",
+  "thresholdOperator": ">=",
+  "thresholdValue": 3.0,
+  "reason": "net_debt_to_ebitda 3.4 crossed the configured threshold >= 3.0."
+}
+```
+
+These fields make threshold decisions easier to audit in the dashboard and safer to interpret in the DataAgent and LegalAgent advisory review layers. Thresholds remain heuristic review criteria. Signals are not investment advice and do not confirm accounting correctness.
+
 ### Structured Input Limitations
 
 This phase does not include:
