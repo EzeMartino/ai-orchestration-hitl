@@ -121,6 +121,70 @@ public sealed class ProductionLikeWorkflowE2ETests
     }
 
     [Fact]
+    public async Task ProductionLikeWorkflow_Should_execute_tool_plan_in_plan_driven_mode_and_complete_after_human_approval()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var cnvClient = new FakeProductionCnvRegulationMcpClient();
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            cnvClient,
+            ToolCallingExecutionMode.PlanDriven
+        );
+
+        var createResult = await controller.CreateSession(CancellationToken.None);
+        createResult.Should().BeOfType<CreatedAtActionResult>();
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+
+        var saveResult = await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None
+        );
+        saveResult.Should().BeOfType<OkObjectResult>();
+
+        var startResult = await controller.StartSession(
+            session.Id,
+            CancellationToken.None
+        );
+        startResult.Should().BeOfType<OkObjectResult>();
+
+        var startedSession = await dbContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        startedSession.Status.Should().Be(AnalysisSessionStatus.AwaitingHumanApproval);
+
+        using var startedContext = JsonDocument.Parse(startedSession.ContextJson);
+        AssertPlanDrivenContext(startedContext.RootElement);
+        AssertPlanDrivenActivityFeed(activityPublisher.PublishedEvents);
+        cnvClient.ReceivedRequests.Should().ContainSingle()
+            .Which.Query.Should().Be("agentes");
+
+        var approveResult = await controller.ApproveSession(
+            session.Id,
+            new HumanDecisionDto("Reviewed plan-driven controlled tool execution evidence."),
+            CancellationToken.None
+        );
+        approveResult.Should().BeOfType<OkObjectResult>();
+
+        var reloadedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.Id);
+        reloadedSession.Status.Should().Be(AnalysisSessionStatus.Completed);
+
+        using var reloadedContext = JsonDocument.Parse(reloadedSession.ContextJson);
+        AssertPlanDrivenContext(reloadedContext.RootElement);
+        var persistedEvents = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(evt => evt.SessionId == session.Id)
+            .ToListAsync();
+        persistedEvents.Select(evt => evt.Type).Should().Contain("analysis_completed");
+        persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
+    }
+
+
+    [Fact]
     public async Task ProductionLikeWorkflow_Should_preserve_context_and_activity_after_human_rejection()
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
@@ -202,7 +266,8 @@ public sealed class ProductionLikeWorkflowE2ETests
         OrchestrationDbContext dbContext,
         PersistingActivityEventPublisher activityPublisher,
         IPythonFinancialAnalysisService pythonService,
-        ICnvRegulationMcpClient cnvClient)
+        ICnvRegulationMcpClient cnvClient,
+        ToolCallingExecutionMode executionMode = ToolCallingExecutionMode.Shadow)
     {
         var dataAgentOptions = new DataAgentOptions
         {
@@ -217,7 +282,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         var toolCallingOptions = new ToolCallingOptions
         {
             Enabled = true,
-            ExecutionMode = ToolCallingExecutionMode.Shadow,
+            ExecutionMode = executionMode,
             FinancialAnalysisToolsEnabled = true
         };
         var metricsSessionService = CreateMetricsSessionService(dbContext, activityPublisher);
@@ -264,7 +329,14 @@ public sealed class ProductionLikeWorkflowE2ETests
             new ToolPlanNormalizer(),
             new ToolPlanValidator(toolCallingOptions),
             new ToolExecutionPolicy(),
-            new ThrowingControlledToolExecutor(),
+            executionMode == ToolCallingExecutionMode.PlanDriven
+                ? new ControlledToolExecutor(
+                    dataAgent,
+                    pythonService,
+                    cnvClient,
+                    NullLogger<ControlledToolExecutor>.Instance
+                )
+                : new ThrowingControlledToolExecutor(),
             new ToolExecutionResultMapper(),
             toolCallingOptions
         );
@@ -406,6 +478,44 @@ public sealed class ProductionLikeWorkflowE2ETests
             .OnlyContain(call => call.GetProperty("status").GetString() == "SkippedAlreadySatisfied");
     }
 
+    private static void AssertPlanDrivenContext(JsonElement root)
+    {
+        root.TryGetProperty("structuredFinancialMetrics", out var structuredMetrics).Should().BeTrue();
+        structuredMetrics.GetProperty("documentId").GetString().Should().Be("production-like-json-metrics");
+
+        var financialAnalysis = root.GetProperty("financialAnalysis");
+        financialAnalysis.GetProperty("documentId").GetString().Should().Be("production-like-json-metrics");
+        financialAnalysis.GetProperty("metricsInputSource").GetString().Should().Be(FinancialMetricsInputSources.SessionContext);
+        financialAnalysis.GetProperty("riskSignals").GetArrayLength().Should().BeGreaterThan(0);
+
+        var anomalyEvidence = root.GetProperty("anomaly").GetProperty("evidence").EnumerateArray().ToArray();
+        anomalyEvidence.Select(evidence => evidence.GetProperty("metric").GetString())
+            .Should()
+            .NotContain(["TransactionAmountZScore", "VelocityScore"]);
+
+        var compliance = root.GetProperty("compliance");
+        compliance.GetProperty("riskDetected").GetBoolean().Should().BeTrue();
+        compliance.GetProperty("evidence").GetArrayLength().Should().BeGreaterThan(0);
+
+        var toolPlan = root.GetProperty("toolPlan");
+        toolPlan.GetProperty("proposedCalls").GetArrayLength().Should().Be(2);
+        toolPlan.GetProperty("approvedCalls").GetArrayLength().Should().Be(2);
+        toolPlan.GetProperty("rejectedCalls").GetArrayLength().Should().Be(0);
+        var executedCalls = toolPlan.GetProperty("executedCalls").EnumerateArray().ToArray();
+        executedCalls.Should().HaveCount(2);
+        executedCalls.Should().OnlyContain(call =>
+            call.GetProperty("status").GetString() == "Executed" &&
+            call.GetProperty("succeeded").GetBoolean()
+        );
+        executedCalls.All(DoesNotHaveOutputJson).Should().BeTrue();
+    }
+
+    private static bool DoesNotHaveOutputJson(
+        JsonElement call)
+    {
+        return !call.TryGetProperty("outputJson", out _);
+    }
+
     private static void AssertLegalReviewUsesOnlyProvidedCitations(JsonElement legalReview)
     {
         foreach (var area in legalReview.GetProperty("possibleRegulatoryReviewAreas").EnumerateArray())
@@ -502,6 +612,25 @@ public sealed class ProductionLikeWorkflowE2ETests
             evt.Type == "state_changed" &&
             evt.Message.Contains("Completed", StringComparison.OrdinalIgnoreCase)
         );
+    }
+
+    private static void AssertPlanDrivenActivityFeed(
+        IReadOnlyList<ActivityEvent> events)
+    {
+        var eventTypes = events.Select(evt => evt.Type).ToArray();
+
+        eventTypes.Should().Contain("structured_financial_metrics_attached");
+        eventTypes.Should().Contain("state_transition_requested");
+        eventTypes.Should().Contain("state_changed");
+        eventTypes.Should().Contain("agent_started");
+        eventTypes.Should().Contain("tool_plan_proposed");
+        eventTypes.Should().Contain("tool_plan_validated");
+        eventTypes.Should().Contain("tool_call_executed");
+        eventTypes.Should().Contain("planner_reasoning_completed");
+        eventTypes.Should().Contain("human_approval_required");
+        eventTypes.Should().NotContain("tool_call_skipped");
+        eventTypes.Should().NotContain("tool_execution_fallback_used");
+        eventTypes.Should().NotContain("analysis_completed");
     }
 
     private sealed class PersistingActivityEventPublisher : IActivityEventPublisher

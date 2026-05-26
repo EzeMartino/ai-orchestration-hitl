@@ -1085,6 +1085,8 @@ ToolCalling__ExecutionMode=PlanDriven
 
 In `PlanDriven` mode, approved allowlisted calls execute through `ControlledToolExecutor`.
 
+Regression coverage validates both `Shadow` and `PlanDriven` modes, deny-by-default rejection for unsafe or unknown tools, read-only allowlisted execution, and persisted `toolPlan` audit data without storing raw `OutputJson` payloads in `ContextJson`.
+
 Use with LLM planner/tool proposal:
 
 ```text
