@@ -381,6 +381,33 @@ LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is co
   - Legal AI review persistence and user interface presentation are deferred to a later block (Block 10.5).
 
 
+#### Production-like E2E validated flow
+
+Backend E2E coverage validates the production-like flow without external services:
+
+```text
+Create Analysis Session
+  -> Attach JSON structured metrics
+  -> Start Session preflight passes
+  -> DataAgent uses session_context metrics
+  -> quantitative financialAnalysis + aiReview are persisted
+  -> LegalAgent derives CNV queries from financial risk signals
+  -> cited CNV evidence + legalReview are persisted
+  -> Planner review + toolPlan audit are persisted
+  -> AwaitingHumanApproval
+  -> Approve
+  -> Completed
+  -> Reload with ContextJson and Activity Feed preserved
+```
+
+The production-like mode keeps fixture fallback disabled and requires session-attached structured metrics:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=true
+```
+
 ## Workflow States
 
 The workflow is controlled by a strict state machine.
