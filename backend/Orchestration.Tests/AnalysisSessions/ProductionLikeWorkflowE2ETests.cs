@@ -120,6 +120,84 @@ public sealed class ProductionLikeWorkflowE2ETests
         persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
     }
 
+    [Fact]
+    public async Task ProductionLikeWorkflow_Should_preserve_context_and_activity_after_human_rejection()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            new FakeProductionCnvRegulationMcpClient()
+        );
+
+        var createResult = await controller.CreateSession(CancellationToken.None);
+        createResult.Should().BeOfType<CreatedAtActionResult>();
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+
+        var saveResult = await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None
+        );
+        saveResult.Should().BeOfType<OkObjectResult>();
+
+        var startResult = await controller.StartSession(
+            session.Id,
+            CancellationToken.None
+        );
+        startResult.Should().BeOfType<OkObjectResult>();
+
+        var awaitingSession = await dbContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        awaitingSession.Status.Should().Be(AnalysisSessionStatus.AwaitingHumanApproval);
+
+        using var awaitingContext = JsonDocument.Parse(awaitingSession.ContextJson);
+        AssertProductionLikeContext(awaitingContext.RootElement);
+
+        var rejectResult = await controller.RejectSession(
+            session.Id,
+            new HumanDecisionDto("Rejected after reviewing production-like E2E evidence."),
+            CancellationToken.None
+        );
+        rejectResult.Should().BeOfType<OkObjectResult>();
+
+        var rejectedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.Id);
+        rejectedSession.Status.Should().Be(AnalysisSessionStatus.Failed);
+        rejectedSession.CurrentAgent.Should().BeNull();
+        rejectedSession.FailureReason.Should().Be("Rejected after reviewing production-like E2E evidence.");
+
+        using var rejectedContext = JsonDocument.Parse(rejectedSession.ContextJson);
+        AssertProductionLikeContext(rejectedContext.RootElement);
+        AssertRejectionActivityFeed(activityPublisher.PublishedEvents);
+
+        var eventCountAfterReject = activityPublisher.PublishedEvents.Count;
+        var approveAfterReject = await controller.ApproveSession(
+            session.Id,
+            new HumanDecisionDto("Invalid second approval attempt."),
+            CancellationToken.None
+        );
+        approveAfterReject.Should().BeOfType<ConflictObjectResult>();
+
+        var afterSecondDecision = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == session.Id);
+        afterSecondDecision.Status.Should().Be(AnalysisSessionStatus.Failed);
+        afterSecondDecision.FailureReason.Should().Be("Rejected after reviewing production-like E2E evidence.");
+        activityPublisher.PublishedEvents.Count.Should().Be(eventCountAfterReject);
+
+        var persistedEvents = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(evt => evt.SessionId == session.Id)
+            .ToListAsync();
+        persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
+        persistedEvents.Select(evt => evt.Type).Should().Contain("analysis_rejected");
+        persistedEvents.Select(evt => evt.Type).Should().NotContain("analysis_completed");
+    }
+
     private static AnalysisSessionsController CreateController(
         OrchestrationDbContext dbContext,
         PersistingActivityEventPublisher activityPublisher,
@@ -402,6 +480,28 @@ public sealed class ProductionLikeWorkflowE2ETests
 
         eventTypes.Should().Contain("human_decision_received");
         eventTypes.Should().Contain("analysis_completed");
+    }
+
+    private static void AssertRejectionActivityFeed(
+        IReadOnlyList<ActivityEvent> events)
+    {
+        var eventTypes = events.Select(evt => evt.Type).ToArray();
+
+        eventTypes.Should().Contain("structured_financial_metrics_attached");
+        eventTypes.Should().Contain("state_transition_requested");
+        eventTypes.Should().Contain("state_changed");
+        eventTypes.Should().Contain("agent_started");
+        eventTypes.Should().Contain("legal_cnv_queries_derived");
+        eventTypes.Should().Contain("legal_agent_ai_review_completed");
+        eventTypes.Should().Contain("planner_reasoning_completed");
+        eventTypes.Should().Contain("human_approval_required");
+        eventTypes.Should().Contain("human_decision_received");
+        eventTypes.Should().Contain("analysis_rejected");
+        eventTypes.Should().NotContain("analysis_completed");
+        events.Should().NotContain(evt =>
+            evt.Type == "state_changed" &&
+            evt.Message.Contains("Completed", StringComparison.OrdinalIgnoreCase)
+        );
     }
 
     private sealed class PersistingActivityEventPublisher : IActivityEventPublisher

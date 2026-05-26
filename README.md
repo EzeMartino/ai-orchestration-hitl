@@ -408,6 +408,8 @@ DataAgent__UseFixtureMetricsFallback=false
 DataAgent__RequireSessionFinancialMetrics=true
 ```
 
+The HITL rejection path is also covered by E2E tests. Human rejection moves the session to the existing failure state, preserves analysis evidence and legal review context, keeps Activity Feed history for auditability, and does not emit the approval/completion path.
+
 ## Workflow States
 
 The workflow is controlled by a strict state machine.
