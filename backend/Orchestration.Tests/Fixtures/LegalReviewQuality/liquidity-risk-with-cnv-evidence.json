@@ -1,0 +1,41 @@
+{
+  "id": "liquidity-risk-with-cnv-evidence",
+  "company": "Quality Fixture Co",
+  "documentId": "quality-liquidity-doc",
+  "financialRiskSignals": [
+    {
+      "name": "LOW_CURRENT_RATIO",
+      "severity": "High",
+      "period": "2025E",
+      "summary": "Current ratio crossed a liquidity review threshold.",
+      "evidence": [
+        {
+          "metricName": "current_ratio",
+          "period": "2025E",
+          "value": 0.67,
+          "threshold": 1.0,
+          "unit": "x",
+          "interpretation": "current_ratio 0.67 crossed the configured threshold < 1.0."
+        }
+      ],
+      "metric": "current_ratio",
+      "value": 0.67,
+      "thresholdCode": "LOW_CURRENT_RATIO",
+      "thresholdOperator": "<",
+      "thresholdValue": 1.0,
+      "reason": "current_ratio 0.67 crossed the configured threshold < 1.0."
+    }
+  ],
+  "cnvEvidence": [
+    {
+      "source": "CNV test fixture",
+      "title": "Test CNV disclosure evidence",
+      "url": "https://example.test/cnv/liquidity",
+      "citation": "TEST-CNV-LIQ-001",
+      "snippet": "Test fixture excerpt for periodic financial disclosure review.",
+      "regulationArea": "financial_reporting",
+      "score": 0.91
+    }
+  ],
+  "expectedCitations": [ "TEST-CNV-LIQ-001" ]
+}

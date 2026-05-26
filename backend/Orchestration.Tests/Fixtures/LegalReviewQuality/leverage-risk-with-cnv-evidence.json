@@ -1,0 +1,41 @@
+{
+  "id": "leverage-risk-with-cnv-evidence",
+  "company": "Quality Fixture Co",
+  "documentId": "quality-leverage-doc",
+  "financialRiskSignals": [
+    {
+      "name": "HIGH_NET_DEBT_TO_EBITDA",
+      "severity": "High",
+      "period": "2025E",
+      "summary": "Net debt to EBITDA crossed a leverage review threshold.",
+      "evidence": [
+        {
+          "metricName": "net_debt_to_ebitda",
+          "period": "2025E",
+          "value": 3.75,
+          "threshold": 3.0,
+          "unit": "x",
+          "interpretation": "net_debt_to_ebitda 3.75 crossed the configured threshold >= 3.0."
+        }
+      ],
+      "metric": "net_debt_to_ebitda",
+      "value": 3.75,
+      "thresholdCode": "HIGH_NET_DEBT_TO_EBITDA",
+      "thresholdOperator": ">=",
+      "thresholdValue": 3.0,
+      "reason": "net_debt_to_ebitda 3.75 crossed the configured threshold >= 3.0."
+    }
+  ],
+  "cnvEvidence": [
+    {
+      "source": "CNV test fixture",
+      "title": "Test CNV indebtedness disclosure evidence",
+      "url": "https://example.test/cnv/leverage",
+      "citation": "TEST-CNV-LEV-001",
+      "snippet": "Test fixture excerpt for indebtedness and market information review.",
+      "regulationArea": "debt_leverage",
+      "score": 0.89
+    }
+  ],
+  "expectedCitations": [ "TEST-CNV-LEV-001" ]
+}

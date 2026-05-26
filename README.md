@@ -380,6 +380,20 @@ LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is co
   - The LegalAgent **does not provide legal advice**.
   - Legal AI review persistence and user interface presentation are deferred to a later block (Block 10.5).
 
+#### LegalAgent quality cases
+
+Curated LegalAgent quality tests cover liquidity and leverage financial risk signals with cited CNV/Infoleg evidence, missing citations, no relevant cited evidence, and deterministic/LLM fallback behavior.
+
+The tests assert that:
+
+- possible review areas only use provided citations,
+- uncited MCP evidence is ignored as strong support and produces warnings,
+- missing or irrelevant evidence stays safe with warnings/limitations,
+- LLM output with invented citations is pruned,
+- forbidden legal language falls back to deterministic review,
+- the LegalAgent does not declare legal violations or provide legal advice.
+
+The CNV/Infoleg citations used in these tests are explicit test fixtures and are not represented as real legal conclusions.
 
 #### Production-like E2E validated flow
 
@@ -409,6 +423,7 @@ DataAgent__RequireSessionFinancialMetrics=true
 ```
 
 The HITL rejection path is also covered by E2E tests. Human rejection moves the session to the existing failure state, preserves analysis evidence and legal review context, keeps Activity Feed history for auditability, and does not emit the approval/completion path.
+
 
 ## Workflow States
 

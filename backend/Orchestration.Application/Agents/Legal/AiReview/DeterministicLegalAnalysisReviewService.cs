@@ -71,7 +71,14 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
     private static string MapSignalToAreaTitle(FinancialRiskSignal signal)
     {
-        var textToSearch = $"{signal.Name} {signal.Summary}".ToLowerInvariant();
+        var textToSearch = string.Join(
+            " ",
+            signal.Name,
+            signal.Summary,
+            signal.Metric,
+            signal.ThresholdCode,
+            signal.Reason
+        ).ToLowerInvariant();
         var metrics = (signal.Evidence ?? Array.Empty<RiskEvidenceItem>())
             .Select(e => e.MetricName ?? "")
             .ToList();

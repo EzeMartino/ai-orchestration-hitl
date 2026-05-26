@@ -1,0 +1,41 @@
+{
+  "id": "missing-citations",
+  "company": "Quality Fixture Co",
+  "documentId": "quality-missing-citations-doc",
+  "financialRiskSignals": [
+    {
+      "name": "LOW_CURRENT_RATIO",
+      "severity": "Medium",
+      "period": "2025E",
+      "summary": "Current ratio crossed a liquidity review threshold.",
+      "evidence": [
+        {
+          "metricName": "current_ratio",
+          "period": "2025E",
+          "value": 0.72,
+          "threshold": 1.0,
+          "unit": "x",
+          "interpretation": "current_ratio 0.72 crossed the configured threshold < 1.0."
+        }
+      ],
+      "metric": "current_ratio",
+      "value": 0.72,
+      "thresholdCode": "LOW_CURRENT_RATIO",
+      "thresholdOperator": "<",
+      "thresholdValue": 1.0,
+      "reason": "current_ratio 0.72 crossed the configured threshold < 1.0."
+    }
+  ],
+  "cnvEvidence": [
+    {
+      "source": "CNV test fixture",
+      "title": "Uncited test evidence",
+      "url": "https://example.test/cnv/uncited",
+      "citation": "",
+      "snippet": "This fixture intentionally has no citation.",
+      "regulationArea": "financial_reporting",
+      "score": 0.5
+    }
+  ],
+  "expectedCitations": []
+}

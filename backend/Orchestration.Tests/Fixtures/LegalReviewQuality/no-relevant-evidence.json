@@ -1,0 +1,31 @@
+{
+  "id": "no-relevant-evidence",
+  "company": "Quality Fixture Co",
+  "documentId": "quality-no-evidence-doc",
+  "financialRiskSignals": [
+    {
+      "name": "HIGH_DEBT_TO_EQUITY",
+      "severity": "High",
+      "period": "2025E",
+      "summary": "Debt to equity crossed a leverage review threshold.",
+      "evidence": [
+        {
+          "metricName": "debt_to_equity",
+          "period": "2025E",
+          "value": 2.5,
+          "threshold": 2.0,
+          "unit": "x",
+          "interpretation": "debt_to_equity 2.5 crossed the configured threshold >= 2.0."
+        }
+      ],
+      "metric": "debt_to_equity",
+      "value": 2.5,
+      "thresholdCode": "HIGH_DEBT_TO_EQUITY",
+      "thresholdOperator": ">=",
+      "thresholdValue": 2.0,
+      "reason": "debt_to_equity 2.5 crossed the configured threshold >= 2.0."
+    }
+  ],
+  "cnvEvidence": [],
+  "expectedCitations": []
+}

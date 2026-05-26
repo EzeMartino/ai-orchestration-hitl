@@ -608,6 +608,10 @@ public class McpRegulatoryKnowledgeSourceTests
         // Margins map to "resultados", which returns uncited result
         result.Findings.Should().NotContain(f => f.Finding.Contains("uncited"));
         result.Warnings.Should().Contain(w => w.Contains("Some CNV/Infoleg search results were ignored as strong evidence because they did not include citations."));
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
+        result.LegalReview.EvidenceReferences.Should().BeEmpty();
+        result.LegalReview.Warnings.Should().Contain("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
     }
 
     [Fact]
@@ -633,5 +637,9 @@ public class McpRegulatoryKnowledgeSourceTests
         result.HasComplianceRisk.Should().BeTrue();
         result.Findings.Should().Contain(f => f.Finding.Contains("fallback"));
         result.Warnings.Should().Contain(w => w.Contains("No specific financial risk signals were available; using a general financial reporting query."));
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.UsedLlm.Should().BeFalse();
+        result.LegalReview.UsedFallback.Should().BeTrue();
+        result.LegalReview.FailureReason.Should().Be("financial_analysis_missing");
     }
 }
