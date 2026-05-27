@@ -14,6 +14,10 @@ The `LegalAgent` derives CNV/Infoleg search queries from financial risk signals 
 
 The `PlannerAgent` coordinates reasoning and controlled tool plans, but the State Machine remains the workflow authority. LLMs can summarize evidence or propose read-only tools under guardrails; they cannot approve, reject, complete, fail, or otherwise transition a session.
 
+## Demo Script
+
+A step-by-step production-like demo is available in [docs/demo-script.md](docs/demo-script.md).
+
 ## Current AI Status
 
 This project now supports **optional controlled LLM-assisted planner reasoning** and **controlled tool calling**.
