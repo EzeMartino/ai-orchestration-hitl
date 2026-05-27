@@ -138,6 +138,7 @@ builder.Services.AddLegalAgentAiReview(builder.Configuration);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
+builder.Services.AddHostedService<IdentityDataSeeder>();
 
 
 builder.Services.AddCors(options =>

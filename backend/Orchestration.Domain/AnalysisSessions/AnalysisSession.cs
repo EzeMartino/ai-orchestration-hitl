@@ -47,7 +47,7 @@ public class AnalysisSession
         };
     }
 
-    [Obsolete("Use Create(Guid userId) instead.")]
+    [Obsolete("Use Create(Guid userId) instead. Invoking this sets UserId to Guid.Empty, which violates database foreign key constraints on persistence.")]
     public static AnalysisSession Create()
     {
         var now = DateTimeOffset.UtcNow;
