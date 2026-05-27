@@ -1,4 +1,5 @@
 using CSnakes.Runtime;
+using Microsoft.AspNetCore.Identity;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
@@ -138,6 +139,8 @@ builder.Services.AddLegalAgentAiReview(builder.Configuration);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
+builder.Services.AddIdentityApiEndpoints<IdentityUser<Guid>>()
+    .AddEntityFrameworkStores<OrchestrationDbContext>();
 builder.Services.AddHostedService<IdentityDataSeeder>();
 
 

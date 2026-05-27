@@ -1,0 +1,19 @@
+<h2>Identity & JWT Database Architecture</h2>
+<p class="subtitle">Selected: Microsoft Identity + JWT Token Authentication</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Integrated DbContext (Recommended)</h3>
+      <p>Inherit <code>OrchestrationDbContext</code> from <code>IdentityDbContext</code>. All tables (Users, Roles, AnalysisSessions, ActivityEvents) reside in the same PostgreSQL database. Simple transactions, unified migrations, easy querying.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Separate DbContext / Database</h3>
+      <p>Create a separate <code>AppIdentityDbContext</code> for identity tables, potentially in a separate database. Keeps the analysis domain isolated from user management, but requires cross-context queries/coordination.</p>
+    </div>
+  </div>
+</div>

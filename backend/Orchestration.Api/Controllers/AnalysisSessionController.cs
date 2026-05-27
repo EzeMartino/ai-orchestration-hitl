@@ -59,7 +59,7 @@ public class AnalysisSessionsController(
     [HttpPost]
     public async Task<IActionResult> CreateSession(CancellationToken cancellationToken)
     {
-        var session = AnalysisSession.Create();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
 
         _dbContext.AnalysisSessions.Add(session);
 

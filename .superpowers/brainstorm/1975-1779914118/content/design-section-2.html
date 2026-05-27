@@ -1,0 +1,39 @@
+<h2>Section 2: API Authentication & Identity Endpoints</h2>
+<p class="subtitle">Mapping built-in Microsoft Identity APIs & JWT Token configuration</p>
+
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">Backend Service Pipeline (Program.cs)</div>
+  <div class="mockup-body" style="padding: 1.5rem; background: #0f172a; font-family: monospace; font-size: 0.85rem; color: #f1f5f9; line-height: 1.4;">
+    
+    <div style="color: #64748b; margin-bottom: 0.5rem;">// 1. Add Identity & Database Services</div>
+    builder.Services.AddIdentityApiEndpoints&lt;IdentityUser&lt;Guid&gt;&gt;()<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;.AddEntityFrameworkStores&lt;OrchestrationDbContext&gt;();<br><br>
+
+    <div style="color: #64748b; margin-bottom: 0.5rem;">// 2. Configure JWT options in appsettings.json</div>
+    "Authentication": {<br>
+    &nbsp;&nbsp;"Schemes": {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;"Bearer": {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"ValidAudience": "http://localhost:5148",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"ValidIssuer": "http://localhost:5148",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"SigningKeys": [ { "Issuer": "http://localhost:5148", "Value": "YOUR_SUPER_SECRET_KEY..." } ]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+    &nbsp;&nbsp;}<br>
+    }<br><br>
+
+    <div style="color: #64748b; margin-bottom: 0.5rem;">// 3. Map Endpoints in Middleware Pipeline</div>
+    app.UseAuthentication();<br>
+    app.UseAuthorization();<br><br>
+    
+    <span style="color: #38bdf8;">app.MapGroup("/api/auth").MapIdentityApi&lt;IdentityUser&lt;Guid&gt;&gt;();</span>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top: 1.5rem;">
+  <div class="mockup-header">Automatic Admin Seeding Service</div>
+  <div class="mockup-body" style="padding: 1rem; background: rgba(56, 189, 248, 0.1); border: 1px dashed #38bdf8; border-radius: 6px; font-size: 0.85rem; line-height: 1.5;">
+    <strong>IdentityDataSeeder (IHostedService):</strong> Runs automatically at application startup. Checks if the database contains the admin user (<code>admin@ezemartino.com</code>). If not:<br>
+    1. Creates the user with the specified GUID so that legacy analysis records are successfully resolved.<br>
+    2. Hashes and sets the default password (e.g. <code>AdminPass123!</code>).<br>
+    3. (Optional) Adds the user to the "Administrator" role.
+  </div>
+</div>

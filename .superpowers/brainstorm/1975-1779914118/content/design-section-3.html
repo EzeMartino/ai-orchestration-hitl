@@ -1,0 +1,48 @@
+<h2>Section 3: Controller Security & User Filtering</h2>
+<p class="subtitle">Enforcing the Authorize attribute and isolating queries per logged-in user</p>
+
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">AnalysisSessionsController.cs (Security Architecture)</div>
+  <div class="mockup-body" style="padding: 1.5rem; background: #0f172a; font-family: monospace; font-size: 0.85rem; color: #f1f5f9; line-height: 1.4;">
+    
+    <span style="color: #38bdf8;">[Authorize]</span><br>
+    [ApiController]<br>
+    [Route("api/analysis-sessions")]<br>
+    public class AnalysisSessionsController(...) : ControllerBase<br>
+    {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<div style="color: #64748b;">// Helper property to extract current authenticated User's Guid</div>
+    &nbsp;&nbsp;&nbsp;&nbsp;private Guid CurrentUserId => Guid.Parse(<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;User.FindFirstValue(ClaimTypes.NameIdentifier)!<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;);<br><br>
+
+    &nbsp;&nbsp;&nbsp;&nbsp;[HttpGet]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;public async Task&lt;IActionResult&gt; GetSessions(CancellationToken token)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var sessions = await _dbContext.AnalysisSessions<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #4ade80;">.Where(x => x.UserId == CurrentUserId)</span> <div style="color: #64748b; display: inline;">// Strict isolation filter</div><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.OrderByDescending(x => x.CreatedAt)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.ToListAsync(token);<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return Ok(sessions);<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}<br><br>
+    
+    &nbsp;&nbsp;&nbsp;&nbsp;[HttpGet("{id:guid}")]<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;public async Task&lt;IActionResult&gt; GetSession(Guid id, CancellationToken token)<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;var session = await _dbContext.AnalysisSessions<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color: #4ade80;">.FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, token);</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if (session is null) return NotFound(); <div style="color: #64748b; display: inline;">// Prevents user enumeration</div><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return Ok(session);<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+    }
+  </div>
+</div>
+
+<div class="mockup" style="margin-top: 1.5rem;">
+  <div class="mockup-header">Security Hardening and Edge Cases</div>
+  <div class="mockup-body" style="padding: 1rem; background: rgba(239, 68, 68, 0.1); border: 1px dashed #ef4444; border-radius: 6px; font-size: 0.85rem; line-height: 1.5;">
+    <strong>Crucial Protections:</strong><br>
+    - Any attempt to view, start, approve, reject, or upload metrics to a session by its GUID will be checked against the logged-in user's <code>UserId</code>.<br>
+    - If a session belongs to a different user, the API will return a <code>404 NotFound</code> immediately, preventing external parties from discovering if a session exists (enumeration protection).<br>
+    - Background orchestrator services work within the system context, but user decisions (approvals/rejections) are verified for the current caller.
+  </div>
+</div>

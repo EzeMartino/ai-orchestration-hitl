@@ -1,0 +1,40 @@
+<h2>Proposed Architectural Approaches</h2>
+<p class="subtitle">Selected Option C: Microsoft Identity + JWT Token Authentication</p>
+
+<div class="options">
+  <div class="option" data-choice="approach1" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Built-in ASP.NET Identity Endpoints (Recommended)</h3>
+      <p>Uses <code>.MapIdentityApi&lt;IdentityUser&lt;Guid&gt;&gt;()</code>. Automatically exposes standard `/register`, `/login`, and `/refresh` endpoints using built-in high-security controllers.</p>
+      <div class="pros-cons" style="margin-top: 0.5rem; font-size: 0.8rem;">
+        <span style="color:#4ade80;">✔ Easy setup, zero boilerplate, Microsoft maintained, secure refresh tokens.</span><br>
+        <span style="color:#f87171;">✘ Fixed JSON request/response formats.</span>
+      </div>
+    </div>
+  </div>
+  
+  <div class="option" data-choice="approach2" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Custom AuthController & JWT Services</h3>
+      <p>Write our own <code>AuthController</code> utilizing <code>UserManager</code> and generate JWTs manually using <code>JwtSecurityTokenHandler</code>.</p>
+      <div class="pros-cons" style="margin-top: 0.5rem; font-size: 0.8rem;">
+        <span style="color:#4ade80;">✔ Full customizability of requests, responses, and token claims.</span><br>
+        <span style="color:#f87171;">✘ Writing security-sensitive token logic, more code to maintain.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="approach3" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>External Identity Provider (Auth0 / Keycloak)</h3>
+      <p>Delegate authentication entirely to an external service using OpenID Connect (OIDC) protocols.</p>
+      <div class="pros-cons" style="margin-top: 0.5rem; font-size: 0.8rem;">
+        <span style="color:#4ade80;">✔ Absolute isolation of credentials, professional-grade SSO.</span><br>
+        <span style="color:#f87171;">✘ Heavy infrastructure dependency, config complexity, potential subscription cost.</span>
+      </div>
+    </div>
+  </div>
+</div>
