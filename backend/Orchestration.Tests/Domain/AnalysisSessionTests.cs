@@ -12,4 +12,11 @@ public class AnalysisSessionTests
         var session = AnalysisSession.Create(userId);
         Assert.Equal(userId, session.UserId);
     }
+
+    [Fact]
+    public void Create_Should_Throw_ArgumentException_When_UserId_Is_Empty()
+    {
+        var action = () => AnalysisSession.Create(Guid.Empty);
+        Assert.Throws<ArgumentException>(action);
+    }
 }

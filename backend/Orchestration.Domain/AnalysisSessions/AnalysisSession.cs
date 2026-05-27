@@ -29,6 +29,11 @@ public class AnalysisSession
 
     public static AnalysisSession Create(Guid userId)
     {
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("User ID cannot be empty.", nameof(userId));
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         return new AnalysisSession
@@ -45,7 +50,17 @@ public class AnalysisSession
     [Obsolete("Use Create(Guid userId) instead.")]
     public static AnalysisSession Create()
     {
-        return Create(Guid.Empty);
+        var now = DateTimeOffset.UtcNow;
+
+        return new AnalysisSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.Empty,
+            Status = AnalysisSessionStatus.Pending,
+            ContextJson = "{}",
+            CreatedAt = now,
+            UpdatedAt = now
+        };
     }
 
     public void SetStatus(AnalysisSessionStatus status)
