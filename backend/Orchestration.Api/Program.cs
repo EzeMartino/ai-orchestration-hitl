@@ -139,6 +139,8 @@ builder.Services.AddLegalAgentAiReview(builder.Configuration);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
+builder.Services.AddAuthentication();
+builder.Services.AddAuthorization();
 builder.Services.AddIdentityApiEndpoints<IdentityUser<Guid>>()
     .AddEntityFrameworkStores<OrchestrationDbContext>();
 builder.Services.AddHostedService<IdentityDataSeeder>();
@@ -169,6 +171,13 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("Frontend");
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGroup("/api/auth")
+    .MapIdentityApi<IdentityUser<Guid>>()
+    .WithTags("Authentication");
 
 app.MapControllers();
 

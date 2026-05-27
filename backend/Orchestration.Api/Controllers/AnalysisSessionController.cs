@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,7 @@ using Orchestration.Application.Persistence;
 
 namespace Orchestration.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/analysis-sessions")]
 public class AnalysisSessionsController(
