@@ -8,12 +8,34 @@ import type {
   StructuredFinancialMetricsInput,
   StructuredFinancialMetricsCsvInput,
   StructuredFinancialMetricsFileMetadata,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
 } from "../types/domain.types";
 
 export const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
 
+const getAuthToken = (): string | null => localStorage.getItem("auth_token");
+
+async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+  };
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    localStorage.removeItem("auth_token");
+    window.location.reload();
+  }
+  return response;
+}
+
 export async function loadSessionEvents(sessionId: string): Promise<ActivityEvent[]> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`);
   if (!response.ok) {
     throw new Error("Failed to load session events.");
   }
@@ -21,7 +43,7 @@ export async function loadSessionEvents(sessionId: string): Promise<ActivityEven
 }
 
 export async function loadSavedSessions(): Promise<AnalysisSessionSummary[]> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions`);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions`);
   if (!response.ok) {
     throw new Error("Failed to load saved analysis sessions.");
   }
@@ -29,7 +51,7 @@ export async function loadSavedSessions(): Promise<AnalysisSessionSummary[]> {
 }
 
 export async function loadSessionDetails(sessionId: string): Promise<AnalysisSessionResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}`);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}`);
   if (!response.ok) {
     throw new Error("Failed to load analysis session.");
   }
@@ -37,7 +59,7 @@ export async function loadSessionDetails(sessionId: string): Promise<AnalysisSes
 }
 
 export async function loadStructuredFinancialMetrics(sessionId: string): Promise<GetFinancialMetricsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`);
   if (!response.ok) {
     throw new Error("Failed to load structured financial metrics.");
   }
@@ -45,7 +67,7 @@ export async function loadStructuredFinancialMetrics(sessionId: string): Promise
 }
 
 export async function getStartPreflight(sessionId: string): Promise<AnalysisSessionStartPreflightResult> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/start-preflight`);
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/start-preflight`);
   if (!response.ok) {
     throw new Error("Failed to check start readiness.");
   }
@@ -53,7 +75,7 @@ export async function getStartPreflight(sessionId: string): Promise<AnalysisSess
 }
 
 export async function createSession(): Promise<AnalysisSessionResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -63,7 +85,7 @@ export async function createSession(): Promise<AnalysisSessionResponse> {
 }
 
 export async function startSession(sessionId: string): Promise<Response> {
-  return await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/start`, {
+  return await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/start`, {
     method: "POST",
   });
 }
@@ -73,11 +95,8 @@ export async function submitHumanDecision(
   decision: "approve" | "reject",
   reason: string
 ): Promise<AnalysisSessionResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/${decision}`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/${decision}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ reason }),
   });
   if (!response.ok) {
@@ -90,11 +109,8 @@ export async function saveJsonMetrics(
   sessionId: string,
   input: StructuredFinancialMetricsInput
 ): Promise<SaveFinancialMetricsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(input),
   });
   if (!response.ok) {
@@ -107,11 +123,8 @@ export async function saveCsvMetrics(
   sessionId: string,
   input: StructuredFinancialMetricsCsvInput
 ): Promise<SaveFinancialMetricsResponse> {
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/csv`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/csv`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify(input),
   });
   if (!response.ok) {
@@ -141,7 +154,7 @@ export async function uploadFinancialMetricsFile(
     formData.append("unit", metadata.unit.trim());
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/file`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/file`, {
     method: "POST",
     body: formData,
   });
@@ -154,4 +167,33 @@ export async function uploadFinancialMetricsFile(
   }
 
   return (await response.json()) as SaveFinancialMetricsResponse;
+}
+
+export async function login(request: LoginRequest): Promise<LoginResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error("Invalid email or password.");
+  }
+  return (await response.json()) as LoginResponse;
+}
+
+export async function registerUser(request: RegisterRequest): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const errors = errorData.errors ? Object.values(errorData.errors).flat().join(" ") : "Registration failed.";
+    throw new Error(errors);
+  }
 }
