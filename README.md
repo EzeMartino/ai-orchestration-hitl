@@ -1,8 +1,18 @@
 # Financial Analysis Control Room
 
-Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, controlled tool calling, Python-based anomaly detection, structured financial analysis, MCP regulatory retrieval, real-time telemetry, and human approval gates.
+AI-ready orchestration platform for supervised financial analysis workflows, combining deterministic agents, controlled LLM advisory layers, structured Python/Pandas analytics, regulatory evidence retrieval, controlled tool calling, real-time telemetry, and human-in-the-loop approval.
 
 This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
+
+## Project Overview
+
+The platform models a financial analysis workflow where specialized agents collect quantitative and regulatory evidence, persist every decision-relevant artifact, and pause before completion for human review. It is built around `AnalysisSession` records, deterministic state transitions, `ContextJson` audit snapshots, and an Activity Feed that can be restored when previous sessions are loaded.
+
+The `DataAgent` computes quantitative financial evidence from structured metrics using CSnakes and Python/Pandas. Optional DataAgent AI review can interpret the already-computed evidence, but it cannot recompute ratios, create metrics, provide investment advice, or confirm accounting correctness.
+
+The `LegalAgent` derives CNV/Infoleg search queries from financial risk signals and maps only cited regulatory retrieval results into review evidence. Optional LegalAgent AI review identifies possible regulatory review areas, but it does not provide legal advice, declare violations, or invent citations.
+
+The `PlannerAgent` coordinates reasoning and controlled tool plans, but the State Machine remains the workflow authority. LLMs can summarize evidence or propose read-only tools under guardrails; they cannot approve, reject, complete, fail, or otherwise transition a session.
 
 ## Current AI Status
 
@@ -220,6 +230,37 @@ The human auditor remains responsible for approval or rejection.
 
 ## Architecture Overview
 
+```mermaid
+flowchart TB
+    UI["React UI"]
+    API["Orchestration API"]
+    SM["AnalysisSession State Machine"]
+    HITL["Human-in-the-loop approval"]
+    DB["PostgreSQL: ContextJson + Activity Feed"]
+    Planner["PlannerAgent"]
+    Data["DataAgent"]
+    Py["CSnakes + Python/Pandas"]
+    DataAI["DataAgent AI Review"]
+    Legal["LegalAgent"]
+    MCP["CNV MCP / Infoleg evidence"]
+    LegalAI["LegalAgent AI Review"]
+
+    UI --> API
+    API --> SM
+    API --> Planner
+    API --> HITL
+    API --> DB
+    Planner --> Data
+    Data --> Py
+    Data --> DataAI
+    Planner --> Legal
+    Legal --> MCP
+    Legal --> LegalAI
+    Planner --> DB
+    SM --> HITL
+    HITL --> SM
+```
+
 ```text
 React Dashboard
   | HTTP + SignalR
@@ -288,8 +329,9 @@ Responsibilities:
 - generates a planner reasoning summary,
 - proposes, normalizes, validates, and audits controlled tool calls when enabled,
 - executes approved read-only tools only in `PlanDriven` mode,
-- decides whether human approval is required through deterministic rules,
-- updates workflow state.
+- returns whether human approval is required through deterministic rules.
+
+The Orchestrator applies State Machine transitions. Planner reasoning does not control workflow state.
 
 Current reasoning behavior:
 
@@ -378,7 +420,8 @@ LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is co
 - **Strict safety boundaries**:
   - The LegalAgent **does not declare legal violations**.
   - The LegalAgent **does not provide legal advice**.
-  - Legal AI review persistence and user interface presentation are deferred to a later block (Block 10.5).
+  - The LegalAgent **does not invent citations or regulations**.
+  - The LegalAgent identifies possible regulatory review areas for human review.
 
 #### LegalAgent quality cases
 
@@ -889,13 +932,23 @@ For local development, copy the development example to the ignored local setting
 Copy-Item backend/Orchestration.Api/appsettings.Development.example.json backend/Orchestration.Api/appsettings.Development.json
 ```
 
-### Financial Analysis Mode Matrix
+## Configuration Modes
 
-| Mode | FinancialAnalysisToolsEnabled | UseFixtureMetricsFallback | RequireSessionFinancialMetrics | Behavior |
+| Mode | `DataAgent__FinancialAnalysisToolsEnabled` | `DataAgent__UseFixtureMetricsFallback` | `DataAgent__RequireSessionFinancialMetrics` | Behavior |
 | --- | --- | --- | --- | --- |
-| Default | `false` | `false` | `false` | Uses the legacy anomaly-detection path. |
-| Demo | `true` | `true` | `false` | Uses session metrics first and fixture fallback if missing. |
-| Production-like | `true` | `false` | `true` | Requires session metrics and returns a safe review-required result if missing. |
+| Default | `false` | `false` | `false` | Legacy anomaly path. Structured financial analysis is disabled. |
+| Demo | `true` | `true` | `false` | Uses session metrics first and fixture fallback if missing. Fixture fallback is visibly marked. |
+| Production-like | `true` | `false` | `true` | Requires session metrics. Missing metrics block Start Session through preflight. |
+
+Optional AI/tooling settings:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `DataAgent__AiReviewEnabled` | `false` | Enables Semantic Kernel DataAgent AI review when `Llm__Enabled=true`; deterministic fallback remains available. |
+| `LegalAgent__AiReviewEnabled` | `false` | Enables Semantic Kernel LegalAgent AI review when `Llm__Enabled=true`; deterministic fallback remains available. |
+| `Llm__Enabled` | `false` | Enables configured LLM provider for advisory reviews/reasoning. |
+| `ToolCalling__Enabled` | `false` | Enables controlled tool-plan proposal, validation, and audit. |
+| `ToolCalling__ExecutionMode` | `Shadow` | `Shadow` audits proposals; `PlanDriven` executes approved read-only calls through `ControlledToolExecutor`. |
 
 Development configuration for structured financial analysis:
 
@@ -915,7 +968,7 @@ StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
 StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
 ```
 
-### Financial Risk Threshold Profiles
+## Financial Risk Threshold Profiles
 
 To customize risk heuristic sensitivity, you can configure the active risk threshold profile:
 
@@ -924,7 +977,7 @@ To customize risk heuristic sensitivity, you can configure the active risk thres
 - `strict`: Conservative risk settings enforcing highly safe liquidity and low leverage levels.
 - `demo`: Sensitive and aggressive thresholds tailored specifically for demonstrations and testing.
 
-#### Core Principles & Architecture
+### Core Principles & Architecture
 1. **C# as Single Source of Truth**: Profile limits, operators, and severity ratings are fully declared in C# (`InMemoryFinancialRiskThresholdProfileProvider`).
 2. **Dynamic Mappings**: The C# workflow passes resolved profile limits dynamically to Python's CSnakes agent (`financial_analysis.py`).
 3. **No Drift / Legacy Alias Fallback**: Direct tests and legacy profiles are mapped gracefully. If an invalid profile name is requested, the provider automatically falls back to `default` with a resolution warning.
@@ -936,7 +989,7 @@ To change the active profile locally, use the environment variable:
 DataAgent__RiskThresholdProfile=oil_and_gas
 ```
 
-### Financial Risk Signal Explainability
+## Financial Risk Signal Explainability
 
 Each financial risk signal can include the metric, period, observed value, threshold code, threshold operator, threshold value, and deterministic reason that produced the signal.
 
@@ -957,7 +1010,7 @@ Example persisted fields:
 
 These fields make threshold decisions easier to audit in the dashboard and safer to interpret in the DataAgent and LegalAgent advisory review layers. Thresholds remain heuristic review criteria. Signals are not investment advice and do not confirm accounting correctness.
 
-### Structured Input Limitations
+## Structured Input Limitations
 
 This phase does not include:
 
@@ -997,6 +1050,18 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 ### Structured Metrics File Upload
 
 ![Structured Metrics File Upload](docs/screenshots/structured-metrics-file-upload.png)
+
+### Start Readiness Blocked
+
+![Start Readiness Blocked](docs/screenshots/start-readiness-blocked.png)
+
+### Start Readiness Ready
+
+![Start Readiness Ready](docs/screenshots/start-readiness-ready.png)
+
+### Financial Risk Evidence from Session Context
+
+![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk-evidence-session-context.png)
 
 ### Financial Risk Evidence from Structured Input
 
@@ -1195,15 +1260,25 @@ VITE_API_URL
 
 ## Tests
 
-Run backend tests:
+Run the full validation set:
+
+```bash
+python -m unittest discover -s python-agents\tests
+```
 
 ```bash
 cd backend
+dotnet build
 dotnet test
 ```
 
-Latest validated backend suite: 210 tests.
-Latest validated Python financial-analysis suite: 11 tests.
+```bash
+cd frontend
+npm run build
+```
+
+Latest validated backend suite: 379 tests.
+Latest validated Python financial-analysis suite: 13 tests.
 
 Current test coverage includes:
 
@@ -1244,12 +1319,22 @@ Current test coverage includes:
 - cited-result filtering,
 - warning propagation.
 
-Run frontend build:
+## Limitations
 
-```bash
-cd frontend
-npm run build
-```
+This project intentionally does not provide:
+
+- PDF/OCR extraction,
+- visual table extraction from reports,
+- LLM-based financial metric extraction,
+- investment advice,
+- legal advice,
+- final regulatory determinations,
+- accounting correctness guarantees,
+- automatic workflow completion by an LLM,
+- unrestricted or autonomous tool execution,
+- raw uploaded file persistence.
+
+Structured metrics may be pasted, uploaded, or manually provided. The system validates structure and computes advisory risk signals, but it does not verify that source documents were transcribed correctly.
 
 ## Safety Notes
 
