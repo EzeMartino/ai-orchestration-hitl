@@ -358,7 +358,7 @@ export type AnalysisContext = {
 
 export type LoginRequest = {
   email: string;
-  password?: string;
+  password: string;
 };
 
 export type LoginResponse = {
@@ -370,5 +370,5 @@ export type LoginResponse = {
 
 export type RegisterRequest = {
   email: string;
-  password?: string;
+  password: string;
 };
