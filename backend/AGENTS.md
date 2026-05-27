@@ -31,6 +31,24 @@
 - Keep generated artifacts out of commits, especially `bin/`, `obj/`, `.vs/`, local settings, CNV reports, and downloaded data.
 - Add or update focused tests when touching state transitions, planner reasoning, tool validation, MCP mapping, or persisted DTO shape.
 
+## Development Insights
+- When adding a runtime flag, propagate it through `Orchestration.AppHost/AppHost.cs` as well as API config. Missing AppHost env wiring has broken production-like demos before.
+- Production-like mode is:
+  `DataAgent__FinancialAnalysisToolsEnabled=true`,
+  `DataAgent__UseFixtureMetricsFallback=false`,
+  `DataAgent__RequireSessionFinancialMetrics=true`.
+  In this mode, missing session metrics should fail start preflight, not fall back silently.
+- `DataAgent__AiReviewEnabled`, `LegalAgent__AiReviewEnabled`, `ToolCalling__Enabled`, `ToolCalling__ExecutionMode`, and financial-tool flags must be checked at the API process that AppHost launches, not only in the parent shell.
+- Structured metrics flow is append-only/auditable: validate, normalize, persist under `ContextJson.structuredFinancialMetrics`, preserve prior blocks, never start analysis automatically, never store raw upload content.
+- DataAgent quantitative evidence comes from CSnakes/Python/Pandas. DataAgent AI review only interprets existing ratios, comparisons, risk signals, evidence, warnings, and limitations.
+- Fixture fallback is demo-only. If it is used, `financialAnalysis.metricsInputSource` and UI/warnings must make that visible.
+- `financialAnalysis` should record `metricsInputSource`, provenance, threshold profile, thresholds used, explainable risk signals, and optional `aiReview` without overwriting `structuredFinancialMetrics`.
+- Risk signals should carry explainability fields when available: metric, period, value, threshold code/operator/value, reason, severity, and evidence.
+- LegalAgent query/audit text must distinguish financial-signal-derived queries from general fallback queries. Do not claim queries came from risk signals when source is fallback.
+- Persistible warnings should be safe. Log technical MCP/provider exception details, but avoid storing raw `ex.Message` if it may include paths, URLs, transport internals, or secrets.
+- Publish human decision/activity events only after the state transition is validated. Invalid second decisions must return conflict without contaminating the audit trail.
+- Controlled Tool Calling is deny-by-default. Shadow mode audits/skips execution; PlanDriven mode executes only allowlisted read-only tools through `ControlledToolExecutor`; do not persist raw `OutputJson`.
+
 ## References
 - `../README.md`: architecture, local run, LLM safety model, screenshots.
 - `Orchestration.Api/Program.cs`: runtime registrations and CORS.
