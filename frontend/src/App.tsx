@@ -1,7 +1,11 @@
+import { useState } from "react";
 import "./App.css";
 
 // Types
 import type { AnalysisContext } from "./types/domain.types";
+
+// Components
+import AuthPage from "./components/Auth/AuthPage";
 
 // Hooks
 import { useSignalRConnection } from "./hooks/useSignalRConnection";
@@ -86,7 +90,7 @@ function getEventTone(type: string) {
   return "event-neutral";
 }
 
-function App() {
+function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => void }) {
   const {
     session,
     events,
@@ -142,8 +146,37 @@ function App() {
             </p>
           </div>
 
-          <div className={`connectionBadge ${connectionStatus.toLowerCase()}`}>
-            SignalR: <strong>{connectionStatus}</strong>
+          <div className="headerRight">
+            <div className="userProfileContainer">
+              <div className="userAvatarBadge">
+                {parseJwt(token)?.email?.charAt(0).toUpperCase() || "U"}
+              </div>
+              <div className="userProfileInfo">
+                <span className="userProfileEmail">
+                  {parseJwt(token)?.email || "User"}
+                </span>
+                <button className="userLogoutBtn" onClick={onLogout} title="Logout">
+                  <svg
+                    className="userLogoutIcon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  <span>Logout</span>
+                </button>
+              </div>
+            </div>
+
+            <div className={`connectionBadge ${connectionStatus.toLowerCase()}`}>
+              SignalR: <strong>{connectionStatus}</strong>
+            </div>
           </div>
         </header>
 
@@ -363,6 +396,38 @@ function App() {
       </section>
     </main>
   );
+}
+
+function parseJwt(token: string) {
+  try {
+    const base64Url = token.split(".")[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+function App() {
+  const [token, setToken] = useState<string | null>(localStorage.getItem("auth_token"));
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth_token");
+    setToken(null);
+    window.location.reload();
+  };
+
+  if (!token) {
+    return <AuthPage onLoginSuccess={(t) => setToken(t)} />;
+  }
+
+  return <AuthenticatedApp token={token} onLogout={handleLogout} />;
 }
 
 export default App;
