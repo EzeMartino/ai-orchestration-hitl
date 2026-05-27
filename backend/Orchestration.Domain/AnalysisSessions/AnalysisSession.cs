@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -25,18 +25,27 @@ public class AnalysisSession
     {
     }
 
-    public static AnalysisSession Create()
+    public Guid UserId { get; private set; }
+
+    public static AnalysisSession Create(Guid userId)
     {
         var now = DateTimeOffset.UtcNow;
 
         return new AnalysisSession
         {
             Id = Guid.NewGuid(),
+            UserId = userId,
             Status = AnalysisSessionStatus.Pending,
             ContextJson = "{}",
             CreatedAt = now,
             UpdatedAt = now
         };
+    }
+
+    [Obsolete("Use Create(Guid userId) instead.")]
+    public static AnalysisSession Create()
+    {
+        return Create(Guid.Empty);
     }
 
     public void SetStatus(AnalysisSessionStatus status)
