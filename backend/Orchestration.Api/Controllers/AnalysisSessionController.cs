@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -33,6 +34,11 @@ public class AnalysisSessionsController(
     private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser = financialMetricsCsvParser;
     private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions = fileUploadOptions.Value;
 
+    private Guid CurrentUserId => Guid.Parse(
+        User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        ?? throw new InvalidOperationException("User ID claim is missing.")
+    );
+
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web)
         {
@@ -43,6 +49,7 @@ public class AnalysisSessionsController(
     public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
     {
         var sessions = await _dbContext.AnalysisSessions
+            .Where(x => x.UserId == CurrentUserId)
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new
             {
@@ -61,7 +68,7 @@ public class AnalysisSessionsController(
     [HttpPost]
     public async Task<IActionResult> CreateSession(CancellationToken cancellationToken)
     {
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(CurrentUserId);
 
         _dbContext.AnalysisSessions.Add(session);
 
@@ -88,7 +95,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -114,7 +121,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -169,7 +176,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -190,6 +197,14 @@ public class AnalysisSessionsController(
         [FromBody] HumanDecisionDto request,
         CancellationToken cancellationToken)
     {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
         try
         {
             var result = await _orchestrator.ApproveAsync(
@@ -220,6 +235,14 @@ public class AnalysisSessionsController(
         [FromBody] HumanDecisionDto request,
         CancellationToken cancellationToken)
     {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
         try
         {
             var result = await _orchestrator.RejectAsync(
@@ -250,7 +273,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {
@@ -282,6 +305,14 @@ public class AnalysisSessionsController(
         if (input is null)
         {
             return BadRequest();
+        }
+
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
         }
 
         var result = await _financialMetricsSessionService.SaveAsync(
@@ -332,6 +363,14 @@ public class AnalysisSessionsController(
         [FromForm] StructuredFinancialMetricsFileUploadRequest request,
         CancellationToken cancellationToken)
     {
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
+        }
+
         var fileValidationResult = ValidateUploadedFile(request?.File);
 
         if (fileValidationResult is not null)
@@ -362,7 +401,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {
@@ -488,7 +527,7 @@ public class AnalysisSessionsController(
         StructuredFinancialMetricsProvenanceInput? provenance = null)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {

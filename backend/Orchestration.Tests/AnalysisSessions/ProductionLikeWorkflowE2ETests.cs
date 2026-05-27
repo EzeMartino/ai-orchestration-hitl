@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -347,7 +349,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             planner
         );
 
-        return new AnalysisSessionsController(
+        var controller = new AnalysisSessionsController(
             dbContext,
             orchestrator,
             new AnalysisSessionStartPreflightValidator(Options.Create(dataAgentOptions)),
@@ -356,6 +358,19 @@ public sealed class ProductionLikeWorkflowE2ETests
             new StructuredFinancialMetricsCsvParser(),
             Options.Create(new StructuredFinancialMetricsFileUploadOptions())
         );
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
+            new(ClaimTypes.Name, "admin@ezemartino.com")
+        };
+        var identity = new ClaimsIdentity(claims, "TestAuthType");
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+        };
+
+        return controller;
     }
 
     private static StructuredFinancialMetricsSessionService CreateMetricsSessionService(
