@@ -291,10 +291,12 @@ public sealed class StructuredFinancialMetricsTextParserTests
     [InlineData("Cash", "cash")]
     [InlineData("Short Term Investments", "short_term_investments")]
     [InlineData("Receivables", "receivables")]
+    [InlineData("Total Debt", "total_debt")]
     [InlineData("Equity", "equity")]
     [InlineData("FCF", "free_cash_flow")]
     [InlineData("Capex", "capex")]
     [InlineData("Capital Expenditures", "capex")]
+    [InlineData("Interest Expense", "interest_expense")]
     public void Parse_Should_map_required_aliases(
         string alias,
         string expectedName)
