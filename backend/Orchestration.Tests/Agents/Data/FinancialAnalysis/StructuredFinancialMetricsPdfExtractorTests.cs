@@ -131,6 +131,127 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_Should_fallback_to_ocr_when_native_text_has_no_metrics()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: """
+                    This annual report contains a long narrative section and notes.
+                    The financial statements are embedded as scanned images below,
+                    so selectable text alone does not include supported metric rows.
+                    """)
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 5,
+                Text: """
+                    Metric 2024A
+                    Revenue 4,200
+                    """,
+                OcrConfidence: 0.73m)
+        ]);
+        var extractor = CreateExtractor(nativeExtractor, ocrExtractor);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.UsedOcr.Should().BeTrue();
+        ocrExtractor.CallCount.Should().Be(1);
+        result.Input!.Metrics.Should().ContainSingle(metric =>
+            metric.Name == "revenue" &&
+            metric.Value == 4200m &&
+            metric.Source == "pdf_ocr");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Should_filter_metrics_below_minimum_confidence()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: "")
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 2,
+                Text: """
+                    Metric 2024A
+                    Revenue 6,000
+                    """,
+                OcrConfidence: 0.42m),
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 3,
+                Text: """
+                    Metric 2024A
+                    Total Debt 1,200
+                    """,
+                OcrConfidence: 0.91m)
+        ]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            minimumMetricConfidence: 0.8m);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.Input!.Metrics.Should().ContainSingle(metric =>
+            metric.Name == "total_debt" &&
+            metric.Confidence == 0.91m);
+        result.Input.Metrics.Should().NotContain(metric => metric.Name == "revenue");
+        result.Warnings.Should().Contain(issue =>
+            issue.Code == "PDF_METRIC_CONFIDENCE_BELOW_THRESHOLD");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Should_return_invalid_when_all_metrics_are_below_minimum_confidence()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: "")
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 2,
+                Text: """
+                    Metric 2024A
+                    Revenue 6,000
+                    """,
+                OcrConfidence: 0.42m)
+        ]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            minimumMetricConfidence: 0.8m);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.Input.Should().BeNull();
+        result.Errors.Should().ContainSingle(issue =>
+            issue.Code == "PDF_METRICS_BELOW_CONFIDENCE_THRESHOLD");
+        result.Warnings.Should().Contain(issue =>
+            issue.Code == "PDF_METRIC_CONFIDENCE_BELOW_THRESHOLD");
+    }
+
+    [Fact]
     public async Task ExtractAsync_Should_fallback_to_ocr_when_native_text_is_only_whitespace_above_threshold()
     {
         var nativeExtractor = new FakePdfTextExtractor(
@@ -303,7 +424,8 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
         IPdfTextExtractor nativeExtractor,
         IOcrTextExtractor ocrExtractor,
         int nativeTextMinimumCharacters = 50,
-        int maxPages = 3)
+        int maxPages = 3,
+        decimal minimumMetricConfidence = 0.5m)
     {
         return new StructuredFinancialMetricsPdfExtractor(
             nativeExtractor,
@@ -312,7 +434,8 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             Options.Create(new StructuredFinancialMetricsPdfExtractionOptions
             {
                 NativeTextMinimumCharacters = nativeTextMinimumCharacters,
-                MaxPages = maxPages
+                MaxPages = maxPages,
+                MinimumMetricConfidence = minimumMetricConfidence
             }),
             NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance);
     }

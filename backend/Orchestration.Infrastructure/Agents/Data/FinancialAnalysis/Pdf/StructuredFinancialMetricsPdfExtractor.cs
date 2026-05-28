@@ -54,7 +54,12 @@ public sealed class StructuredFinancialMetricsPdfExtractor
 
         if (GetTextLength(nativePages) >= _options.NativeTextMinimumCharacters)
         {
-            return Parse(request, nativePages, NativePdfSource);
+            var nativeResult = Parse(request, nativePages, NativePdfSource);
+
+            if (nativeResult.IsValid)
+            {
+                return nativeResult;
+            }
         }
 
         seekablePdf.Position = 0;
@@ -94,7 +99,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
         IReadOnlyList<StructuredFinancialMetricsExtractedPage> pages,
         string source)
     {
-        return _textParser.Parse(
+        var result = _textParser.Parse(
             new StructuredFinancialMetricsTextParseRequest(
                 DocumentId: GetDocumentId(request),
                 Company: request.Company,
@@ -102,6 +107,63 @@ public sealed class StructuredFinancialMetricsPdfExtractor
                 Unit: request.Unit,
                 Pages: pages,
                 Source: source));
+
+        return ApplyMinimumMetricConfidence(result);
+    }
+
+    private StructuredFinancialMetricsPdfExtractionResult ApplyMinimumMetricConfidence(
+        StructuredFinancialMetricsPdfExtractionResult result)
+    {
+        if (!result.IsValid || result.Input is null)
+        {
+            return result;
+        }
+
+        var acceptedMetrics = result.Input.Metrics
+            .Where(metric => (metric.Confidence ?? 0m) >= _options.MinimumMetricConfidence)
+            .ToArray();
+
+        if (acceptedMetrics.Length == result.Input.Metrics.Count)
+        {
+            return result;
+        }
+
+        var warnings = result.Warnings
+            .Append(new FinancialMetricsValidationIssue(
+                Code: "PDF_METRIC_CONFIDENCE_BELOW_THRESHOLD",
+                Message: "One or more PDF metrics were ignored because confidence was below the configured threshold.",
+                MetricName: null,
+                Period: null,
+                Severity: "Warning"))
+            .ToArray();
+
+        if (acceptedMetrics.Length == 0)
+        {
+            return result with
+            {
+                IsValid = false,
+                Input = null,
+                Errors =
+                [
+                    new FinancialMetricsValidationIssue(
+                        Code: "PDF_METRICS_BELOW_CONFIDENCE_THRESHOLD",
+                        Message: "No supported financial metrics met the configured confidence threshold.",
+                        MetricName: null,
+                        Period: null,
+                        Severity: "Error")
+                ],
+                Warnings = warnings
+            };
+        }
+
+        return result with
+        {
+            Input = result.Input with
+            {
+                Metrics = acceptedMetrics
+            },
+            Warnings = warnings
+        };
     }
 
     private static int GetTextLength(
