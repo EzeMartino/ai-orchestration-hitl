@@ -19,6 +19,7 @@ using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -66,6 +67,9 @@ builder.Services.Configure<DataAgentOptions>(
 builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
     builder.Configuration.GetSection(StructuredFinancialMetricsFileUploadOptions.SectionName)
 );
+builder.Services.Configure<StructuredFinancialMetricsPdfExtractionOptions>(
+    builder.Configuration.GetSection(StructuredFinancialMetricsPdfExtractionOptions.SectionName)
+);
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
@@ -76,6 +80,10 @@ builder.Services.AddScoped<ILegacyDataAgent>(provider =>
 builder.Services.AddScoped<IStructuredFinancialMetricsValidator, StructuredFinancialMetricsValidator>();
 builder.Services.AddScoped<IFinancialMetricInputMapper, FinancialMetricInputMapper>();
 builder.Services.AddScoped<IStructuredFinancialMetricsCsvParser, StructuredFinancialMetricsCsvParser>();
+builder.Services.AddScoped<IStructuredFinancialMetricsTextParser, StructuredFinancialMetricsTextParser>();
+builder.Services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
+builder.Services.AddScoped<IOcrTextExtractor, LocalOcrTextExtractor>();
+builder.Services.AddScoped<IStructuredFinancialMetricsPdfExtractor, StructuredFinancialMetricsPdfExtractor>();
 builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
 builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();

@@ -438,6 +438,127 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
+    public async Task SaveFinancialMetricsFile_Should_persist_valid_pdf_file()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            PdfResult.Valid(new StructuredFinancialMetricsInput(
+                DocumentId: "pdf-file-input",
+                Company: "PDF File Co",
+                Currency: "USD",
+                Unit: "USD_thousand",
+                Metrics:
+                [
+                    new StructuredFinancialMetricInput(
+                        Name: "Revenue",
+                        Period: "2024A",
+                        Value: 1647768m,
+                        Unit: "USD_thousand",
+                        Currency: "USD",
+                        Source: "pdf_extraction",
+                        SourcePage: 18,
+                        Confidence: 0.9m
+                    )
+                ]
+            ))
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                "%PDF test content",
+                documentId: "form-pdf-document",
+                company: "Form PDF Co",
+                currency: "USD",
+                unit: "USD_thousand"
+            ),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeTrue();
+        response.FileName.Should().Be("report.pdf");
+        response.FileType.Should().Be("pdf");
+        response.Context.Should().NotBeNull();
+        response.Context!.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.IngestionMethod.Should().Be("pdf_file");
+        response.Context.Provenance.OriginalFileName.Should().Be("report.pdf");
+        response.Context.Metrics.Should().ContainSingle(metric =>
+            metric.Name == "revenue" &&
+            metric.Source == "pdf_extraction" &&
+            metric.SourcePage == 18
+        );
+        pdfExtractor.LastRequest.Should().NotBeNull();
+        pdfExtractor.LastRequest!.DocumentId.Should().Be("form-pdf-document");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_pdf_without_metrics()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            PdfResult.Invalid("PDF_METRICS_NOT_FOUND", "No financial metrics were found.")
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                "%PDF test content",
+                documentId: "form-pdf-document"
+            ),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Context.Should().BeNull();
+        response.Errors.Should().ContainSingle(issue => issue.Code == "PDF_METRICS_NOT_FOUND");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_ocr_is_not_configured()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            PdfResult.Invalid("PDF_OCR_NOT_CONFIGURED", "OCR is not configured.")
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                "%PDF test content",
+                documentId: "form-pdf-document"
+            ),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<BadRequestObjectResult>()
+            .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
+            .Subject;
+        response.Error.Should().Be("PDF OCR dependencies are not configured.");
+    }
+
+    [Fact]
     public async Task SaveFinancialMetricsFile_Should_persist_valid_csv_file()
     {
         await using var dbContext = CreateDbContext();
@@ -884,7 +1005,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         StructuredFinancialMetricsFileUploadOptions? fileUploadOptions = null,
         FakeActivityEventPublisher? publisher = null,
         DataAgentOptions? dataAgentOptions = null,
-        AnalysisOrchestratorService? orchestrator = null)
+        AnalysisOrchestratorService? orchestrator = null,
+        IStructuredFinancialMetricsPdfExtractor? pdfExtractor = null)
     {
         publisher ??= new FakeActivityEventPublisher();
 
@@ -897,6 +1019,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
+            pdfExtractor ?? new FakeStructuredFinancialMetricsPdfExtractor(PdfResult.Invalid("PDF_NOT_CONFIGURED", "PDF extractor was not configured.")),
             Options.Create(fileUploadOptions ?? new StructuredFinancialMetricsFileUploadOptions())
         );
 
@@ -1031,6 +1154,59 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 ),
                 ToolPlan: ToolPlanAuditResult.Empty
             ));
+        }
+    }
+
+    private sealed class FakeStructuredFinancialMetricsPdfExtractor(
+        StructuredFinancialMetricsPdfExtractionResult result) : IStructuredFinancialMetricsPdfExtractor
+    {
+        public StructuredFinancialMetricsPdfExtractionRequest? LastRequest { get; private set; }
+
+        public Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
+            Stream pdf,
+            StructuredFinancialMetricsPdfExtractionRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+
+            return Task.FromResult(result);
+        }
+    }
+
+    private static class PdfResult
+    {
+        public static StructuredFinancialMetricsPdfExtractionResult Valid(
+            StructuredFinancialMetricsInput input)
+        {
+            return new StructuredFinancialMetricsPdfExtractionResult(
+                IsValid: true,
+                Input: input,
+                Errors: [],
+                Warnings: [],
+                UsedOcr: false
+            );
+        }
+
+        public static StructuredFinancialMetricsPdfExtractionResult Invalid(
+            string code,
+            string message)
+        {
+            return new StructuredFinancialMetricsPdfExtractionResult(
+                IsValid: false,
+                Input: null,
+                Errors:
+                [
+                    new FinancialMetricsValidationIssue(
+                        Code: code,
+                        Message: message,
+                        MetricName: null,
+                        Period: null,
+                        Severity: "error"
+                    )
+                ],
+                Warnings: [],
+                UsedOcr: false
+            );
         }
     }
 }
