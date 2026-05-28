@@ -40,6 +40,11 @@ public sealed class StructuredFinancialMetricsTextParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
+    private static readonly Regex InlinePeriodValueRegex = new(
+        @"\b(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?\b\s+(?<value>\(?-?\d[\d,]*(?:\.\d+)?\)?)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase
+    );
+
     public StructuredFinancialMetricsPdfExtractionResult Parse(
         StructuredFinancialMetricsTextParseRequest request)
     {
@@ -111,7 +116,7 @@ public sealed class StructuredFinancialMetricsTextParser
                 continue;
             }
 
-            if (periods.Length == 0)
+            if (periods.Length == 0 && linePeriods.Count == 0)
             {
                 continue;
             }
@@ -124,15 +129,16 @@ public sealed class StructuredFinancialMetricsTextParser
             }
 
             var valuesText = trimmedLine[aliasMatch.Value.Alias.Length..];
-            var values = ExtractValues(valuesText);
-            var count = Math.Min(periods.Length, values.Count);
+            var metricValues = linePeriods.Count > 0
+                ? ExtractInlinePeriodValues(valuesText)
+                : PairPeriodsAndValues(periods, ExtractValues(valuesText));
 
-            for (var index = 0; index < count; index++)
+            foreach (var metricValue in metricValues)
             {
                 var metric = new StructuredFinancialMetricInput(
                     Name: aliasMatch.Value.Name,
-                    Period: periods[index],
-                    Value: values[index],
+                    Period: metricValue.Period,
+                    Value: metricValue.Value,
                     Unit: request.Unit,
                     Currency: request.Currency,
                     Source: request.Source,
@@ -199,6 +205,37 @@ public sealed class StructuredFinancialMetricsTextParser
             .Where(value => value.HasValue)
             .Select(value => value!.Value)
             .ToArray();
+    }
+
+    private static IReadOnlyList<(string Period, decimal Value)> ExtractInlinePeriodValues(
+        string text)
+    {
+        return InlinePeriodValueRegex.Matches(text)
+            .Select(match => (
+                Period: NormalizePeriod(
+                    match.Groups["year"].Value,
+                    match.Groups["suffix"].Value
+                ),
+                Value: ParseValue(match.Groups["value"].Value)
+            ))
+            .Where(item => item.Value.HasValue)
+            .Select(item => (item.Period, item.Value!.Value))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<(string Period, decimal Value)> PairPeriodsAndValues(
+        IReadOnlyList<string> periods,
+        IReadOnlyList<decimal> values)
+    {
+        var count = Math.Min(periods.Count, values.Count);
+        var pairs = new List<(string Period, decimal Value)>(count);
+
+        for (var index = 0; index < count; index++)
+        {
+            pairs.Add((periods[index], values[index]));
+        }
+
+        return pairs;
     }
 
     private static decimal? ParseValue(
