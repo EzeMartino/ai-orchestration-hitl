@@ -18,6 +18,7 @@ using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
 using Orchestration.Tests.Agents.Data.FinancialAnalysis;
+using UglyToad.PdfPig.Core;
 
 namespace Orchestration.Tests.Api;
 
@@ -507,7 +508,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            exception: new InvalidDataException("PDF payload is corrupt.")
+            exception: new PdfDocumentFormatException("PDF payload is corrupt.")
         );
         var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
 

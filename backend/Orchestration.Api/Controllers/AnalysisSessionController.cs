@@ -12,6 +12,7 @@ using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
+using UglyToad.PdfPig.Core;
 
 namespace Orchestration.Api.Controllers;
 
@@ -548,6 +549,10 @@ public class AnalysisSessionsController(
             ));
         }
         catch (InvalidDataException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+        }
+        catch (PdfDocumentFormatException)
         {
             return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
         }
