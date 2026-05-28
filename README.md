@@ -220,7 +220,7 @@ This project does **not** currently include:
 - unrestricted tool execution,
 - LLM-controlled workflow transitions,
 - autonomous legal interpretation,
-- universal PDF extraction, OCR, or visual table parsing,
+- universal visual table parsing,
 - LLM-based financial metric extraction,
 - natural language report understanding,
 - automatic financial decision-making,
@@ -620,7 +620,7 @@ Current capabilities:
 - summarize quantitative evidence,
 - expose financial risk evidence in the dashboard.
 
-The current implementation expects structured financial metrics. It does not perform universal PDF extraction, OCR, visual table extraction, or LLM-based financial data extraction yet.
+The current implementation expects structured financial metrics. JSON and CSV inputs are already structured; PDF ingestion is a deterministic preprocessing path that extracts supported metric rows from native PDF text or local OCR output before persisting the same structured metrics contract. It does not perform universal visual table extraction or LLM-based financial data extraction.
 
 Financial-analysis architecture:
 
@@ -679,9 +679,7 @@ These tools are read-only, auditable, and cannot modify workflow state, approve 
 
 This phase does not include:
 
-- OCR,
-- visual PDF parsing,
-- table extraction from PDFs,
+- universal visual PDF table parsing,
 - LLM-based metric extraction,
 - production-grade accounting validation,
 - legal or investment advice.
@@ -690,7 +688,7 @@ The financial analysis pipeline currently uses structured financial metrics, inc
 
 ## Structured Financial Metrics Input
 
-The platform supports structured financial metrics input through pasted JSON, pasted CSV, or uploaded `.json` / `.csv` files.
+The platform supports structured financial metrics input through pasted JSON, pasted CSV, uploaded `.json` / `.csv` files, or uploaded `.pdf` financial analysis reports.
 
 The input is validated, normalized, persisted in the analysis session context, and later consumed by the DataAgent financial workflow.
 
@@ -698,7 +696,7 @@ Current flow:
 
 ```text
 Create Analysis Session
-  -> Attach pasted JSON, pasted CSV, or uploaded JSON/CSV structured metrics
+  -> Attach pasted JSON, pasted CSV, uploaded JSON/CSV metrics, or uploaded PDF metrics
   -> Validate and persist metrics in ContextJson
   -> Start Session
   -> DataAgent loads persisted metrics first
@@ -713,7 +711,7 @@ Supported dashboard input modes:
 
 - Paste JSON,
 - Paste CSV,
-- Upload JSON/CSV file.
+- Upload JSON/CSV/PDF file.
 
 Sample templates are available from the dashboard:
 
@@ -730,7 +728,7 @@ structuredFinancialMetrics
 
 The persisted block includes audit provenance:
 
-- ingestion method (`json_paste`, `csv_paste`, `json_file`, or `csv_file`),
+- ingestion method (`json_paste`, `csv_paste`, `json_file`, `csv_file`, or `pdf_file`),
 - metric count,
 - validation warning count,
 - upload timestamp,
@@ -792,6 +790,16 @@ CSV input is parsed deterministically without PDF/OCR or LLM extraction.
 
 Invalid headers, invalid numbers, invalid source pages, malformed quotes, and missing required values are reported as safe validation errors.
 
+### PDF Metrics Input
+
+PDF upload extracts supported financial metric rows into the same structured metrics contract used by JSON and CSV. Native text extraction runs first. If native text is too sparse, or native text is present but no supported metrics are found, the extractor falls back to local OCR.
+
+Local OCR uses configured `pdftoppm` and `tesseract` executables. No external OCR service, hosted document AI, or LLM is required.
+
+Supported PDF metric aliases currently include revenue/sales, gross profit, operating income, EBITDA, EBIT, net income, cash, short-term investments, receivables, inventory, current assets, current liabilities, total debt, net debt, equity, capex, free cash flow, interest expense, and shares.
+
+OCR metrics below `StructuredFinancialMetricsPdfExtraction__MinimumMetricConfidence` are ignored. If no extracted metric meets the threshold, the PDF upload returns a validation error instead of persisting low-confidence data.
+
 ### Structured Metrics Endpoints
 
 ```http
@@ -806,7 +814,7 @@ The validation endpoint does not persist data. The session endpoints attach or r
 
 ### Structured Metrics File Upload
 
-The dashboard and API support uploading structured `.json` and `.csv` files.
+The dashboard and API support uploading `.json`, `.csv`, and `.pdf` files.
 
 ```http
 POST /api/analysis-sessions/{sessionId}/financial-metrics/file
@@ -820,8 +828,8 @@ multipart/form-data
 
 Form fields:
 
-- `file`: required `.json` or `.csv` file,
-- `documentId`: optional for JSON, required for CSV,
+- `file`: required `.json`, `.csv`, or `.pdf` file,
+- `documentId`: optional for JSON/PDF, required for CSV,
 - `company`: optional,
 - `currency`: optional,
 - `unit`: optional.
@@ -834,12 +842,13 @@ Supported formats:
 
 - `.json`
 - `.csv`
+- `.pdf`
 
-The default upload size limit is 1 MB.
+The default upload size limit is 10 MB.
 
 The file upload path uses the same validation, normalization, and session persistence flow as pasted JSON or CSV input. Analysis still starts only when the user clicks `Start Session`.
 
-This is not PDF parsing, OCR, Excel ingestion, or LLM extraction.
+This is not Excel ingestion, LLM extraction, source-document verification, or universal visual table parsing.
 
 ### Metrics Provider Order
 
@@ -887,7 +896,7 @@ If metrics are missing, `POST /api/analysis-sessions/{sessionId}/start` returns 
 }
 ```
 
-The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON/CSV metrics, then start the session again.
+The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON, CSV, or PDF metrics, then start the session again.
 
 The dashboard also calls:
 
@@ -911,7 +920,7 @@ The dashboard calls `GET /api/analysis-sessions/{sessionId}/start-preflight` to 
 
 ![Start Readiness Blocked](docs/screenshots/start-readiness-blocked.png)
 
-After JSON or CSV metrics are attached to the session, readiness refreshes and `Start Session` becomes available.
+After JSON, CSV, or PDF metrics are attached to the session, readiness refreshes and `Start Session` becomes available.
 
 ![Start Readiness Ready](docs/screenshots/start-readiness-ready.png)
 
@@ -967,9 +976,18 @@ DataAgent__RequireSessionFinancialMetrics=false
 Structured file upload defaults:
 
 ```text
-StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=1048576
+StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=10485760
 StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
 StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
+StructuredFinancialMetricsFileUpload__AllowedExtensions__2=.pdf
+StructuredFinancialMetricsPdfExtraction__NativeTextMinimumCharacters=200
+StructuredFinancialMetricsPdfExtraction__MaxPages=20
+StructuredFinancialMetricsPdfExtraction__OcrDpi=200
+StructuredFinancialMetricsPdfExtraction__OcrTimeoutSeconds=60
+StructuredFinancialMetricsPdfExtraction__MinimumMetricConfidence=0.5
+StructuredFinancialMetricsPdfExtraction__PdfToPpmPath=pdftoppm
+StructuredFinancialMetricsPdfExtraction__TesseractPath=tesseract
+StructuredFinancialMetricsPdfExtraction__TesseractLanguage=eng
 ```
 
 ## Financial Risk Threshold Profiles
@@ -1019,13 +1037,11 @@ These fields make threshold decisions easier to audit in the dashboard and safer
 This phase does not include:
 
 - Excel ingestion,
-- PDF parsing,
-- OCR,
-- table extraction from visual reports,
+- universal table extraction from visual reports,
 - LLM-based financial metric extraction,
 - accounting correctness guarantees.
 
-The system validates structure and computes advisory risk signals. It does not verify that the source document was transcribed correctly.
+The system validates structure and computes advisory risk signals. PDF text/OCR extraction is deterministic and limited to supported metric aliases; it does not verify that the source document was transcribed correctly.
 
 Structured metrics may be incomplete or manually provided. Missing data produces warnings or limitations instead of invented values.
 
@@ -1281,7 +1297,7 @@ cd frontend
 npm run build
 ```
 
-Latest validated backend suite: 379 tests.
+Latest validated backend suite: 439 tests.
 Latest validated Python financial-analysis suite: 13 tests.
 
 Current test coverage includes:
@@ -1312,7 +1328,9 @@ Current test coverage includes:
 - structured financial metrics validation,
 - structured JSON metrics persistence,
 - structured CSV metrics ingestion,
-- structured JSON/CSV metrics file upload,
+- structured JSON/CSV/PDF metrics file upload,
+- native PDF text metrics extraction,
+- local OCR fallback for image-only or hybrid PDFs,
 - session metrics provider ordering,
 - structured metrics input UI compatibility,
 - frontend build compatibility,
@@ -1327,8 +1345,7 @@ Current test coverage includes:
 
 This project intentionally does not provide:
 
-- PDF/OCR extraction,
-- visual table extraction from reports,
+- universal visual table extraction from reports,
 - LLM-based financial metric extraction,
 - investment advice,
 - legal advice,
@@ -1368,13 +1385,13 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ### Next: Structured Financial Input Hardening and Extraction
 
-The structured financial-analysis workflow can now consume pasted JSON, pasted CSV, uploaded JSON files, or uploaded CSV files persisted in the session context.
+The structured financial-analysis workflow can now consume pasted JSON, pasted CSV, uploaded JSON files, uploaded CSV files, or uploaded PDF reports persisted in the session context.
 
 Planned upgrades:
 
 - add client-side preview before persistence,
 - add stronger financial consistency validation,
-- later evaluate PDF table extraction or OCR,
+- later evaluate richer PDF table extraction,
 - later evaluate LLM-assisted metric extraction with human review.
 
 The LLM must not bypass the state machine or human approval flow.
