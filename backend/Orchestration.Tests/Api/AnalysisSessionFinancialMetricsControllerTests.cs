@@ -500,6 +500,130 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
+    public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_extractor_rejects_invalid_file()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            exception: new InvalidDataException("PDF payload is corrupt.")
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                "%PDF corrupt content",
+                documentId: "form-pdf-document"
+            ),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<BadRequestObjectResult>()
+            .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
+            .Subject;
+        response.Error.Should().Be("Invalid PDF file.");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_pass_pdf_bytes_to_extractor_unmodified()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        byte[] pdfBytes = [0x25, 0x50, 0x44, 0x46, 0x00, 0x80, 0xff, 0x0a];
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            PdfResult.Valid(new StructuredFinancialMetricsInput(
+                DocumentId: "pdf-file-input",
+                Company: "PDF File Co",
+                Currency: "USD",
+                Unit: "USD_thousand",
+                Metrics:
+                [
+                    new StructuredFinancialMetricInput(
+                        Name: "Revenue",
+                        Period: "2024A",
+                        Value: 1647768m,
+                        Unit: null,
+                        Currency: null,
+                        Source: null,
+                        SourcePage: null,
+                        Confidence: null
+                    )
+                ]
+            )),
+            expectedBytes: pdfBytes
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                pdfBytes,
+                documentId: "form-pdf-document"
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>();
+        pdfExtractor.AssertedStreamBytes.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_hash_pdf_provenance_from_original_bytes()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        byte[] pdfBytes = [0x25, 0x50, 0x44, 0x46, 0x00, 0x80, 0xff, 0x0a];
+        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+            PdfResult.Valid(new StructuredFinancialMetricsInput(
+                DocumentId: "pdf-file-input",
+                Company: "PDF File Co",
+                Currency: "USD",
+                Unit: "USD_thousand",
+                Metrics:
+                [
+                    new StructuredFinancialMetricInput(
+                        Name: "Revenue",
+                        Period: "2024A",
+                        Value: 1647768m,
+                        Unit: null,
+                        Currency: null,
+                        Source: null,
+                        SourcePage: null,
+                        Confidence: null
+                    )
+                ]
+            ))
+        );
+        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "report.pdf",
+                pdfBytes,
+                documentId: "form-pdf-document"
+            ),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.Context.Should().NotBeNull();
+        response.Context!.Provenance.Should().NotBeNull();
+        response.Context.Provenance!.ContentHash.Should().Be(ComputeSha256(pdfBytes));
+    }
+
+    [Fact]
     public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_pdf_without_metrics()
     {
         await using var dbContext = CreateDbContext();
@@ -1090,6 +1214,29 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? unit = null)
     {
         var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+    }
+
+    private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
+        string fileName,
+        byte[] content,
+        string? documentId = null,
+        string? company = null,
+        string? currency = null,
+        string? unit = null)
+    {
+        var stream = new MemoryStream(content);
+        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+    }
+
+    private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
+        string fileName,
+        MemoryStream stream,
+        string? documentId,
+        string? company,
+        string? currency,
+        string? unit)
+    {
         var file = new FormFile(stream, 0, stream.Length, "file", fileName);
 
         return new StructuredFinancialMetricsFileUploadRequest
@@ -1106,6 +1253,14 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string content)
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string ComputeSha256(
+        byte[] content)
+    {
+        var hash = SHA256.HashData(content);
 
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
@@ -1158,18 +1313,34 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     private sealed class FakeStructuredFinancialMetricsPdfExtractor(
-        StructuredFinancialMetricsPdfExtractionResult result) : IStructuredFinancialMetricsPdfExtractor
+        StructuredFinancialMetricsPdfExtractionResult? result = null,
+        byte[]? expectedBytes = null,
+        Exception? exception = null) : IStructuredFinancialMetricsPdfExtractor
     {
         public StructuredFinancialMetricsPdfExtractionRequest? LastRequest { get; private set; }
+        public bool AssertedStreamBytes { get; private set; }
 
-        public Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
+        public async Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
             Stream pdf,
             StructuredFinancialMetricsPdfExtractionRequest request,
             CancellationToken cancellationToken)
         {
             LastRequest = request;
 
-            return Task.FromResult(result);
+            if (expectedBytes is not null)
+            {
+                using var buffer = new MemoryStream();
+                await pdf.CopyToAsync(buffer, cancellationToken);
+                buffer.ToArray().Should().Equal(expectedBytes);
+                AssertedStreamBytes = true;
+            }
+
+            if (exception is not null)
+            {
+                throw exception;
+            }
+
+            return result ?? PdfResult.Invalid("PDF_NOT_CONFIGURED", "PDF extractor was not configured.");
         }
     }
 

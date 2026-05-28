@@ -11,6 +11,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Persistence;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 
 namespace Orchestration.Api.Controllers;
 
@@ -51,7 +52,7 @@ public class AnalysisSessionsController(
             activityPublisher,
             financialMetricsSessionService,
             financialMetricsCsvParser,
-            new MissingStructuredFinancialMetricsPdfExtractor(),
+            CreateMissingPdfExtractorFailure(),
             fileUploadOptions)
     {
     }
@@ -535,19 +536,24 @@ public class AnalysisSessionsController(
     {
         StructuredFinancialMetricsPdfExtractionResult? extraction;
 
-        await using (var stream = request.File!.OpenReadStream())
+        try
         {
-            extraction = await _financialMetricsPdfExtractor.ExtractAsync(
-                stream,
-                new StructuredFinancialMetricsPdfExtractionRequest(
-                    DocumentId: request.DocumentId,
-                    Company: request.Company,
-                    Currency: request.Currency,
-                    Unit: request.Unit,
-                    OriginalFileName: request.File.FileName
-                ),
-                cancellationToken
-            );
+            await using var stream = request.File!.OpenReadStream();
+            extraction = await ExtractPdfMetricsAsync(request, stream, cancellationToken);
+        }
+        catch (PdfOcrDependencyException)
+        {
+            return BadRequest(new FileUploadErrorResponse(
+                "PDF OCR dependencies are not configured."
+            ));
+        }
+        catch (InvalidDataException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+        }
+        catch (IOException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
         }
 
         if (extraction is null || !extraction.IsValid || extraction.Input is null)
@@ -591,6 +597,24 @@ public class AnalysisSessionsController(
         }
 
         return Ok(CreateFileResponse(request.File, "pdf", result));
+    }
+
+    private Task<StructuredFinancialMetricsPdfExtractionResult> ExtractPdfMetricsAsync(
+        StructuredFinancialMetricsFileUploadRequest request,
+        Stream stream,
+        CancellationToken cancellationToken)
+    {
+        return _financialMetricsPdfExtractor.ExtractAsync(
+            stream,
+            new StructuredFinancialMetricsPdfExtractionRequest(
+                DocumentId: request.DocumentId,
+                Company: request.Company,
+                Currency: request.Currency,
+                Unit: request.Unit,
+                OriginalFileName: request.File!.FileName
+            ),
+            cancellationToken
+        );
     }
 
     private async Task<IActionResult> SaveCsvInputAsync(
@@ -800,37 +824,18 @@ public class AnalysisSessionsController(
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    private static IStructuredFinancialMetricsPdfExtractor CreateMissingPdfExtractorFailure()
+    {
+        throw new InvalidOperationException(
+            "IStructuredFinancialMetricsPdfExtractor is not registered."
+        );
+    }
+
     private sealed record CsvSaveResult(
         IActionResult ActionResult,
         FinancialMetricsSessionSaveResult? SaveResult
     );
 
-    private sealed class MissingStructuredFinancialMetricsPdfExtractor
-        : IStructuredFinancialMetricsPdfExtractor
-    {
-        public Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
-            Stream pdf,
-            StructuredFinancialMetricsPdfExtractionRequest request,
-            CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new StructuredFinancialMetricsPdfExtractionResult(
-                IsValid: false,
-                Input: null,
-                Errors:
-                [
-                    new FinancialMetricsValidationIssue(
-                        Code: "PDF_OCR_NOT_CONFIGURED",
-                        Message: "PDF OCR dependencies are not configured.",
-                        MetricName: null,
-                        Period: null,
-                        Severity: "error"
-                    )
-                ],
-                Warnings: [],
-                UsedOcr: false
-            ));
-        }
-    }
 }
 
 public sealed class StructuredFinancialMetricsFileUploadRequest
