@@ -46,6 +46,7 @@ public class AnalysisSessionControllerIsolationTests
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
+            new FakeStructuredFinancialMetricsPdfExtractor(),
             Options.Create(new StructuredFinancialMetricsFileUploadOptions())
         );
 
@@ -61,6 +62,33 @@ public class AnalysisSessionControllerIsolationTests
         };
 
         return controller;
+    }
+
+    private sealed class FakeStructuredFinancialMetricsPdfExtractor
+        : IStructuredFinancialMetricsPdfExtractor
+    {
+        public Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
+            Stream pdf,
+            StructuredFinancialMetricsPdfExtractionRequest request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new StructuredFinancialMetricsPdfExtractionResult(
+                IsValid: false,
+                Input: null,
+                Errors:
+                [
+                    new FinancialMetricsValidationIssue(
+                        Code: "PDF_NOT_CONFIGURED",
+                        Message: "PDF extraction is not configured for this test.",
+                        MetricName: null,
+                        Period: null,
+                        Severity: "error"
+                    )
+                ],
+                Warnings: [],
+                UsedOcr: false
+            ));
+        }
     }
 
     [Fact]
