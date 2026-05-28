@@ -40,6 +40,8 @@ function formatIngestionMethod(ingestionMethod?: string | null) {
       return "JSON file";
     case "csv_file":
       return "CSV file";
+    case "pdf_file":
+      return "PDF file";
     default:
       return "Unknown";
   }
@@ -163,7 +165,7 @@ export function FinancialRiskEvidencePanel({
       {hasNoMetrics && (
         <div className="financialSourceWarning">
           {requiresSessionMetrics
-            ? "Structured financial metrics are required for this mode but were not attached to this session. Attach JSON/CSV metrics before starting the analysis."
+            ? "Structured financial metrics are required for this mode but were not attached to this session. Attach JSON/CSV/PDF metrics before starting the analysis."
             : "No structured financial metrics were available."}
         </div>
       )}

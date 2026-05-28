@@ -23,8 +23,8 @@ interface StructuredFinancialMetricsPanelProps {
   ) => Promise<void>;
 }
 
-const maxStructuredMetricsFileSizeBytes = 1_048_576;
-const allowedStructuredMetricsFileExtensions = [".json", ".csv"];
+const maxStructuredMetricsFileSizeBytes = 10_485_760;
+const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
 
@@ -88,6 +88,8 @@ function formatIngestionMethod(ingestionMethod?: string | null) {
       return "JSON file";
     case "csv_file":
       return "CSV file";
+    case "pdf_file":
+      return "PDF file";
     default:
       return "Unknown";
   }
@@ -213,18 +215,18 @@ export function StructuredFinancialMetricsPanel({
   async function handleUploadFile() {
     setInputError(null);
     if (!selectedFile) {
-      setInputError("Select a JSON or CSV metrics file.");
+      setInputError("Select a JSON, CSV, or PDF metrics file.");
       return;
     }
 
     const extension = getFileExtension(selectedFile.name);
     if (!allowedStructuredMetricsFileExtensions.includes(extension)) {
-      setInputError("Only .json and .csv files are supported.");
+      setInputError("Only .json, .csv, and .pdf files are supported.");
       return;
     }
 
     if (selectedFile.size > maxStructuredMetricsFileSizeBytes) {
-      setInputError("Only files up to 1 MB are supported.");
+      setInputError("Only files up to 10 MB are supported.");
       return;
     }
 
@@ -412,10 +414,10 @@ export function StructuredFinancialMetricsPanel({
         <div className="metricsEditor">
           <div className="fileUploadBox">
             <label>
-              JSON or CSV file
+              JSON, CSV, or PDF file
               <input
                 type="file"
-                accept=".json,.csv"
+                accept=".json,.csv,.pdf"
                 disabled={!sessionId || isSaving}
                 onChange={(event) =>
                   handleFileSelected(event.currentTarget.files?.[0] ?? null)
@@ -423,7 +425,7 @@ export function StructuredFinancialMetricsPanel({
               />
             </label>
 
-            <p>Only .json and .csv files up to 1 MB are supported.</p>
+            <p>Only .json, .csv, and .pdf files up to 10 MB are supported.</p>
 
             {selectedFile && (
               <div className="selectedFileSummary">

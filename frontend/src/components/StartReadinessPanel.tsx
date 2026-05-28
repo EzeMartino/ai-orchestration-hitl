@@ -71,7 +71,7 @@ export function StartReadinessPanel({
         <span>Start readiness</span>
         <strong>{title}</strong>
         {!preflight.canStart && (
-          <p>Attach JSON/CSV structured metrics before starting this analysis.</p>
+          <p>Attach JSON/CSV/PDF structured metrics before starting this analysis.</p>
         )}
       </div>
 

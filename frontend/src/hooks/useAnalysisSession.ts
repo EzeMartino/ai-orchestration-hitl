@@ -147,7 +147,7 @@ export function useAnalysisSession() {
               );
               setErrorMessage(
                 missingMetrics
-                  ? "Structured financial metrics are required before starting this analysis. Attach JSON/CSV metrics and try again."
+                  ? "Structured financial metrics are required before starting this analysis. Attach JSON/CSV/PDF metrics and try again."
                   : conflictPayload.errors[0]?.message ?? "The analysis session could not be started."
               );
               await loadSessionEvents(session.id);
