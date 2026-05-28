@@ -19,6 +19,11 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (options.MaxPages <= 0)
+        {
+            return [];
+        }
+
         var workDirectory = Path.Combine(
             Path.GetTempPath(),
             "ai-orchestration-hitl-pdf-ocr",
@@ -84,7 +89,7 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
                     : string.Empty;
 
                 pages.Add(new StructuredFinancialMetricsExtractedPage(
-                    PageNumber: index + 1,
+                    PageNumber: GetGeneratedPageNumber(imagePath) ?? index + 1,
                     Text: text,
                     OcrConfidence: 0.6m));
             }
@@ -103,6 +108,11 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new PdfOcrDependencyException(DependencyMessage);
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -153,12 +163,12 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            KillProcessTree(process);
+            await KillProcessTreeAndWaitForExitAsync(process);
             throw;
         }
         catch (OperationCanceledException)
         {
-            KillProcessTree(process);
+            await KillProcessTreeAndWaitForExitAsync(process);
             throw new PdfOcrDependencyException(TimeoutMessage);
         }
 
@@ -176,13 +186,14 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
         }
     }
 
-    private static void KillProcessTree(Process process)
+    private static async Task KillProcessTreeAndWaitForExitAsync(Process process)
     {
         try
         {
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
             }
         }
         catch (InvalidOperationException)
@@ -209,13 +220,18 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
 
     private static int GetGeneratedPageSortKey(string path)
     {
+        return GetGeneratedPageNumber(path) ?? int.MaxValue;
+    }
+
+    private static int? GetGeneratedPageNumber(string path)
+    {
         var fileName = Path.GetFileNameWithoutExtension(path);
         var separatorIndex = fileName.LastIndexOf('-');
 
         return separatorIndex >= 0
             && int.TryParse(fileName[(separatorIndex + 1)..], out var pageNumber)
                 ? pageNumber
-                : int.MaxValue;
+                : null;
     }
 
     private static int GetDpi(StructuredFinancialMetricsPdfExtractionOptions options)
