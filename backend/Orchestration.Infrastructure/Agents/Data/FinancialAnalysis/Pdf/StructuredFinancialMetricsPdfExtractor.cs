@@ -25,6 +25,12 @@ public sealed class StructuredFinancialMetricsPdfExtractor
         IOptions<StructuredFinancialMetricsPdfExtractionOptions> options,
         ILogger<StructuredFinancialMetricsPdfExtractor> logger)
     {
+        ArgumentNullException.ThrowIfNull(pdfTextExtractor);
+        ArgumentNullException.ThrowIfNull(ocrTextExtractor);
+        ArgumentNullException.ThrowIfNull(textParser);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(logger);
+
         _pdfTextExtractor = pdfTextExtractor;
         _ocrTextExtractor = ocrTextExtractor;
         _textParser = textParser;
@@ -101,7 +107,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
     private static int GetTextLength(
         IReadOnlyList<StructuredFinancialMetricsExtractedPage> pages)
     {
-        return pages.Sum(page => page.Text.Length);
+        return pages.Sum(page => page.Text.Count(character => !char.IsWhiteSpace(character)));
     }
 
     private static string GetDocumentId(
@@ -114,7 +120,12 @@ public sealed class StructuredFinancialMetricsPdfExtractor
 
         if (!string.IsNullOrWhiteSpace(request.OriginalFileName))
         {
-            return Path.GetFileNameWithoutExtension(request.OriginalFileName.Trim());
+            var documentId = Path.GetFileNameWithoutExtension(request.OriginalFileName.Trim());
+
+            if (!string.IsNullOrWhiteSpace(documentId))
+            {
+                return documentId;
+            }
         }
 
         return "pdf-report";

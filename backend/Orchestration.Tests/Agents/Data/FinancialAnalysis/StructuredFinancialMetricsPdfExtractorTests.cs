@@ -8,6 +8,54 @@ namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 public sealed class StructuredFinancialMetricsPdfExtractorTests
 {
+    [Theory]
+    [InlineData("pdfTextExtractor")]
+    [InlineData("ocrTextExtractor")]
+    [InlineData("textParser")]
+    [InlineData("options")]
+    [InlineData("logger")]
+    public void Constructor_Should_throw_for_null_dependencies(
+        string dependencyName)
+    {
+        var action = () => _ = dependencyName switch
+        {
+            "pdfTextExtractor" => new StructuredFinancialMetricsPdfExtractor(
+                null!,
+                new FakeOcrTextExtractor([]),
+                new StructuredFinancialMetricsTextParser(),
+                Options.Create(new StructuredFinancialMetricsPdfExtractionOptions()),
+                NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance),
+            "ocrTextExtractor" => new StructuredFinancialMetricsPdfExtractor(
+                new FakePdfTextExtractor([]),
+                null!,
+                new StructuredFinancialMetricsTextParser(),
+                Options.Create(new StructuredFinancialMetricsPdfExtractionOptions()),
+                NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance),
+            "textParser" => new StructuredFinancialMetricsPdfExtractor(
+                new FakePdfTextExtractor([]),
+                new FakeOcrTextExtractor([]),
+                null!,
+                Options.Create(new StructuredFinancialMetricsPdfExtractionOptions()),
+                NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance),
+            "options" => new StructuredFinancialMetricsPdfExtractor(
+                new FakePdfTextExtractor([]),
+                new FakeOcrTextExtractor([]),
+                new StructuredFinancialMetricsTextParser(),
+                null!,
+                NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance),
+            "logger" => new StructuredFinancialMetricsPdfExtractor(
+                new FakePdfTextExtractor([]),
+                new FakeOcrTextExtractor([]),
+                new StructuredFinancialMetricsTextParser(),
+                Options.Create(new StructuredFinancialMetricsPdfExtractionOptions()),
+                null!),
+            _ => throw new ArgumentOutOfRangeException(nameof(dependencyName), dependencyName, null)
+        };
+
+        action.Should().Throw<ArgumentNullException>()
+            .WithParameterName(dependencyName);
+    }
+
     [Fact]
     public async Task ExtractAsync_Should_use_native_text_when_text_is_sufficient()
     {
@@ -83,6 +131,73 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_Should_fallback_to_ocr_when_native_text_is_only_whitespace_above_threshold()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: new string(' ', 60))
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 3,
+                Text: """
+                    Metric 2024A
+                    Revenue 2,500
+                    """,
+                OcrConfidence: 0.72m)
+        ]);
+        var extractor = CreateExtractor(nativeExtractor, ocrExtractor);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.UsedOcr.Should().BeTrue();
+        ocrExtractor.CallCount.Should().Be(1);
+        result.Input!.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Value == 2500m &&
+            metric.Source == "pdf_ocr");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Should_use_native_text_when_meaningful_text_equals_threshold()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 2,
+                Text: """
+                    Metric 2024A
+                    Revenue 1234
+                    """)
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor([]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            nativeTextMinimumCharacters: 22);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.UsedOcr.Should().BeFalse();
+        ocrExtractor.CallCount.Should().Be(0);
+        result.Input!.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Value == 1234m &&
+            metric.Source == "pdf_extraction");
+    }
+
+    [Fact]
     public async Task ExtractAsync_Should_return_dependency_error_when_ocr_is_not_configured()
     {
         var nativeExtractor = new FakePdfTextExtractor(
@@ -112,9 +227,83 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             });
     }
 
+    [Fact]
+    public async Task ExtractAsync_Should_use_default_document_id_when_original_file_name_is_extension_only()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 2,
+                Text: """
+                    Metric 2024A
+                    Revenue 1,234
+                    This text is intentionally long enough to clear the native threshold.
+                    """)
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor([]);
+        var extractor = CreateExtractor(nativeExtractor, ocrExtractor);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            new StructuredFinancialMetricsPdfExtractionRequest(
+                DocumentId: " ",
+                Company: "Vista Energy",
+                Currency: "USD",
+                Unit: "USD_thousand",
+                OriginalFileName: ".pdf"),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.Input!.DocumentId.Should().Be("pdf-report");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Should_honor_stream_and_options_contracts()
+    {
+        using var inputStream = CreatePdfStream();
+        var nativeExtractor = new FakePdfTextExtractor(
+            [
+                new StructuredFinancialMetricsExtractedPage(
+                    PageNumber: 1,
+                    Text: "")
+            ],
+            consumeStream: true);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 4,
+                Text: """
+                    Metric 2024A
+                    Revenue 3,000
+                    """,
+                OcrConfidence: 0.81m)
+        ]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            maxPages: 7);
+
+        var result = await extractor.ExtractAsync(
+            inputStream,
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        nativeExtractor.ReceivedStreamPosition.Should().Be(0);
+        nativeExtractor.ReceivedMaxPages.Should().Be(7);
+        ocrExtractor.ReceivedStreamPosition.Should().Be(0);
+        ocrExtractor.ReceivedOptions.Should().NotBeNull();
+        ocrExtractor.ReceivedOptions!.MaxPages.Should().Be(7);
+        inputStream.CanRead.Should().BeTrue();
+        inputStream.Position = 0;
+        inputStream.ReadByte().Should().Be(0x25);
+    }
+
     private static StructuredFinancialMetricsPdfExtractor CreateExtractor(
         IPdfTextExtractor nativeExtractor,
-        IOcrTextExtractor ocrExtractor)
+        IOcrTextExtractor ocrExtractor,
+        int nativeTextMinimumCharacters = 50,
+        int maxPages = 3)
     {
         return new StructuredFinancialMetricsPdfExtractor(
             nativeExtractor,
@@ -122,8 +311,8 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             new StructuredFinancialMetricsTextParser(),
             Options.Create(new StructuredFinancialMetricsPdfExtractionOptions
             {
-                NativeTextMinimumCharacters = 50,
-                MaxPages = 3
+                NativeTextMinimumCharacters = nativeTextMinimumCharacters,
+                MaxPages = maxPages
             }),
             NullLogger<StructuredFinancialMetricsPdfExtractor>.Instance);
     }
@@ -144,14 +333,27 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
     }
 
     private sealed class FakePdfTextExtractor(
-        IReadOnlyList<StructuredFinancialMetricsExtractedPage> pages)
+        IReadOnlyList<StructuredFinancialMetricsExtractedPage> pages,
+        bool consumeStream = false)
         : IPdfTextExtractor
     {
+        public long? ReceivedStreamPosition { get; private set; }
+
+        public int? ReceivedMaxPages { get; private set; }
+
         public Task<IReadOnlyList<StructuredFinancialMetricsExtractedPage>> ExtractTextAsync(
             Stream pdf,
             int maxPages,
             CancellationToken cancellationToken)
         {
+            ReceivedStreamPosition = pdf.Position;
+            ReceivedMaxPages = maxPages;
+
+            if (consumeStream)
+            {
+                pdf.CopyTo(Stream.Null);
+            }
+
             return Task.FromResult(pages);
         }
     }
@@ -175,12 +377,18 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         public int CallCount { get; private set; }
 
+        public long? ReceivedStreamPosition { get; private set; }
+
+        public StructuredFinancialMetricsPdfExtractionOptions? ReceivedOptions { get; private set; }
+
         public Task<IReadOnlyList<StructuredFinancialMetricsExtractedPage>> ExtractTextAsync(
             Stream pdf,
             StructuredFinancialMetricsPdfExtractionOptions options,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            ReceivedStreamPosition = pdf.Position;
+            ReceivedOptions = options;
 
             if (_exception is not null)
             {
