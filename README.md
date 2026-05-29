@@ -859,7 +859,7 @@ Supported formats:
 - `.csv`
 - `.pdf`
 
-The default upload size limit is 10 MB.
+The default upload size limit is 20 MB.
 
 The file upload path uses the same validation, normalization, and session persistence flow as pasted JSON or CSV input. Analysis still starts only when the user clicks `Start Session`.
 
@@ -991,7 +991,7 @@ DataAgent__RequireSessionFinancialMetrics=false
 Structured file upload defaults:
 
 ```text
-StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=10485760
+StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=20971520
 StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
 StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
 StructuredFinancialMetricsFileUpload__AllowedExtensions__2=.pdf

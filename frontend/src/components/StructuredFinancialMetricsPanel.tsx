@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { DragEvent } from "react";
 import type {
   StructuredFinancialMetricsContext,
   SaveFinancialMetricsResponse,
@@ -23,7 +24,7 @@ interface StructuredFinancialMetricsPanelProps {
   ) => Promise<void>;
 }
 
-const maxStructuredMetricsFileSizeBytes = 10_485_760;
+const maxStructuredMetricsFileSizeBytes = 20_971_520;
 const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
@@ -150,6 +151,7 @@ export function StructuredFinancialMetricsPanel({
   const [fileCurrency, setFileCurrency] = useState("USD");
   const [fileUnit, setFileUnit] = useState("USD_thousand");
   const [inputError, setInputError] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   async function handleSaveJson() {
     setInputError(null);
@@ -212,6 +214,12 @@ export function StructuredFinancialMetricsPanel({
     setSelectedFile(file);
   }
 
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDraggingFile(false);
+    handleFileSelected(event.dataTransfer.files?.[0] ?? null);
+  }
+
   async function handleUploadFile() {
     setInputError(null);
     if (!selectedFile) {
@@ -226,7 +234,7 @@ export function StructuredFinancialMetricsPanel({
     }
 
     if (selectedFile.size > maxStructuredMetricsFileSizeBytes) {
-      setInputError("Only files up to 10 MB are supported.");
+      setInputError("Only files up to 20 MB are supported.");
       return;
     }
 
@@ -412,20 +420,29 @@ export function StructuredFinancialMetricsPanel({
         </div>
       ) : (
         <div className="metricsEditor">
-          <div className="fileUploadBox">
+          <div
+            className={`fileUploadBox ${isDraggingFile ? "fileUploadBox-active" : ""}`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={handleFileDrop}
+          >
             <label>
               JSON, CSV, or PDF file
               <input
                 type="file"
                 accept=".json,.csv,.pdf"
-                disabled={!sessionId || isSaving}
+                disabled={isSaving}
                 onChange={(event) =>
                   handleFileSelected(event.currentTarget.files?.[0] ?? null)
                 }
               />
             </label>
 
-            <p>Only .json, .csv, and .pdf files up to 10 MB are supported.</p>
+            <p>Only .json, .csv, and .pdf files up to 20 MB are supported.</p>
 
             {selectedFile && (
               <div className="selectedFileSummary">

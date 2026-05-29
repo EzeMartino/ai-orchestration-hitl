@@ -779,6 +779,11 @@ code {
   background: #f8fafc;
 }
 
+.fileUploadBox-active {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
 .fileUploadBox input[type="file"] {
   width: 100%;
   border: 1px solid #cbd5e1;
@@ -1794,4 +1799,3 @@ code {
   height: 0.9rem;
   stroke: currentColor;
 }
-
