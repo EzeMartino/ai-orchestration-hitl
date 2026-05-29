@@ -38,26 +38,6 @@ public class AnalysisSessionsController(
     private readonly IStructuredFinancialMetricsPdfExtractor _financialMetricsPdfExtractor = financialMetricsPdfExtractor;
     private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions = fileUploadOptions.Value;
 
-    public AnalysisSessionsController(
-        IOrchestrationDbContext dbContext,
-        AnalysisOrchestratorService orchestrator,
-        IAnalysisSessionStartPreflightValidator startPreflightValidator,
-        IActivityEventPublisher activityPublisher,
-        IStructuredFinancialMetricsSessionService financialMetricsSessionService,
-        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
-        IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions)
-        : this(
-            dbContext,
-            orchestrator,
-            startPreflightValidator,
-            activityPublisher,
-            financialMetricsSessionService,
-            financialMetricsCsvParser,
-            CreateMissingPdfExtractorFailure(),
-            fileUploadOptions)
-    {
-    }
-
     private Guid CurrentUserId => Guid.Parse(
         User.FindFirst(ClaimTypes.NameIdentifier)?.Value
         ?? throw new InvalidOperationException("User ID claim is missing.")
@@ -827,13 +807,6 @@ public class AnalysisSessionsController(
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
 
         return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static IStructuredFinancialMetricsPdfExtractor CreateMissingPdfExtractorFailure()
-    {
-        throw new InvalidOperationException(
-            "IStructuredFinancialMetricsPdfExtractor is not registered."
-        );
     }
 
     private sealed record CsvSaveResult(

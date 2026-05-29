@@ -25,6 +25,13 @@ namespace Orchestration.Tests.Api;
 public sealed class AnalysisSessionFinancialMetricsControllerTests
 {
     [Fact]
+    public void AnalysisSessionsController_Should_have_single_public_constructor()
+    {
+        typeof(AnalysisSessionsController).GetConstructors()
+            .Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task SaveFinancialMetrics_Should_return_ok_and_persist_context_for_valid_metrics()
     {
         await using var dbContext = CreateDbContext();
