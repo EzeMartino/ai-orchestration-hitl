@@ -29,7 +29,7 @@ const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
 const uploadRequiresSessionMessage =
-  "No se pueden cargar los archivos hasta que no tenga una sesi\u00f3n iniciada";
+  "No puede cargar los archivos si no ha creado o cargado una sesi\u00f3n.";
 const saveRequiresSessionMessage =
   "No puede guardar las m\u00e9tricas si no ha creado o cargado una sesi\u00f3n.";
 

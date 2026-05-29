@@ -241,7 +241,14 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
           </label>
         </section>
 
-        {errorMessage && <p className="errorMessage">{errorMessage}</p>}
+        {errorMessage && (
+          <section className="startReadinessPanel startReadiness-danger">
+            <div>
+              <span>Error</span>
+              <strong>{errorMessage}</strong>
+            </div>
+          </section>
+        )}
 
         <section className="dashboardGrid">
           {session && (
