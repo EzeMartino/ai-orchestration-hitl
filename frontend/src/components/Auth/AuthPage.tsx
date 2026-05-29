@@ -61,6 +61,13 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
   return (
     <div className="auth-page-container">
+      {/* Auroras de fondo decorativas */}
+      <div className="aurora-bg" aria-hidden="true">
+        <div className="aurora-blob blob-1"></div>
+        <div className="aurora-blob blob-2"></div>
+        <div className="aurora-blob blob-3"></div>
+      </div>
+
       <div className="auth-card">
         <div className="auth-header">
           <div className="logo-icon">

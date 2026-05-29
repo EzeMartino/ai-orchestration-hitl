@@ -139,7 +139,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
       <section className="shell">
         <header className="header">
           <div>
-            <p className="eyebrow">Plataforma de Orquestación Lista para LLM</p>
+            <p className="eyebrow">Plataforma de Orquestación LLM</p>
             <h1>Sala de Control de Análisis Financiero</h1>
             <p className="subtitle">
               Feed de actividad en tiempo real para flujos de trabajo de agentes supervisados.
