@@ -108,6 +108,14 @@ __pycache__/
 .agents/
 skills-lock.json
 
+# Codegraph / local analysis artifacts
+.codegraph/
+codegraph/
+.codegraph-cache/
+codegraph-cache/
+*.codegraph
+*.codegraph.json
+
 # Local process and temporary files
 *.pid
 *.seed

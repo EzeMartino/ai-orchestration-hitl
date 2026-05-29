@@ -1,0 +1,19 @@
+<h2>User Seeding & Frontend Entry Flow</h2>
+<p class="subtitle">Designing the authentication entry point and development developer experience</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Automatic Seeding (Recommended)</h3>
+      <p>Seed a default administrator (e.g., <code>admin@ezemartino.com</code>) with a default secure password on backend startup. Existing analysis sessions are migrated to this user. Allows instant login and out-of-the-box demoing.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Manual Registration Only</h3>
+      <p>Start with a completely empty database. Existing sessions are assigned to a new user created during development. No hardcoded default users are seeded in the database initialization.</p>
+    </div>
+  </div>
+</div>

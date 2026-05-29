@@ -1,8 +1,22 @@
 # Financial Analysis Control Room
 
-Human-in-the-loop orchestration platform for supervised financial anomaly review, combining deterministic workflow control, optional LLM-assisted planner reasoning, controlled tool calling, Python-based anomaly detection, structured financial analysis, MCP regulatory retrieval, real-time telemetry, and human approval gates.
+AI-ready orchestration platform for supervised financial analysis workflows, combining deterministic agents, controlled LLM advisory layers, structured Python/Pandas analytics, regulatory evidence retrieval, controlled tool calling, real-time telemetry, and human-in-the-loop approval.
 
 This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
+
+## Project Overview
+
+The platform models a financial analysis workflow where specialized agents collect quantitative and regulatory evidence, persist every decision-relevant artifact, and pause before completion for human review. It is built around `AnalysisSession` records, deterministic state transitions, `ContextJson` audit snapshots, and an Activity Feed that can be restored when previous sessions are loaded.
+
+The `DataAgent` computes quantitative financial evidence from structured metrics using CSnakes and Python/Pandas. Optional DataAgent AI review can interpret the already-computed evidence, but it cannot recompute ratios, create metrics, provide investment advice, or confirm accounting correctness.
+
+The `LegalAgent` derives CNV/Infoleg search queries from financial risk signals and maps only cited regulatory retrieval results into review evidence. Optional LegalAgent AI review identifies possible regulatory review areas, but it does not provide legal advice, declare violations, or invent citations.
+
+The `PlannerAgent` coordinates reasoning and controlled tool plans, but the State Machine remains the workflow authority. LLMs can summarize evidence or propose read-only tools under guardrails; they cannot approve, reject, complete, fail, or otherwise transition a session.
+
+## Demo Script
+
+A step-by-step production-like demo is available in [docs/demo-script.md](docs/demo-script.md).
 
 ## Current AI Status
 
@@ -193,10 +207,11 @@ It demonstrates how to combine:
 - deterministic workflow orchestration,
 - specialized agents,
 - Python analytics,
-- regulatory retrieval via MCP,
+- regulatory evidence retrieval,
 - human approval gates,
 - real-time activity streaming,
-- persisted audit history.
+- persisted audit history,
+- multi-user authentication & session isolation.
 
 ## What This Project Is Not Yet
 
@@ -206,7 +221,7 @@ This project does **not** currently include:
 - unrestricted tool execution,
 - LLM-controlled workflow transitions,
 - autonomous legal interpretation,
-- universal PDF extraction, OCR, or visual table parsing,
+- universal visual table parsing,
 - LLM-based financial metric extraction,
 - natural language report understanding,
 - automatic financial decision-making,
@@ -219,6 +234,37 @@ The DataAgent detects statistical anomalies and optional financial risk signals 
 The human auditor remains responsible for approval or rejection.
 
 ## Architecture Overview
+
+```mermaid
+flowchart TB
+    UI["React UI"]
+    API["Orchestration API"]
+    SM["AnalysisSession State Machine"]
+    HITL["Human-in-the-loop approval"]
+    DB["PostgreSQL: ContextJson + Activity Feed"]
+    Planner["PlannerAgent"]
+    Data["DataAgent"]
+    Py["CSnakes + Python/Pandas"]
+    DataAI["DataAgent AI Review"]
+    Legal["LegalAgent"]
+    MCP["CNV MCP / Infoleg evidence"]
+    LegalAI["LegalAgent AI Review"]
+
+    UI --> API
+    API --> SM
+    API --> Planner
+    API --> HITL
+    API --> DB
+    Planner --> Data
+    Data --> Py
+    Data --> DataAI
+    Planner --> Legal
+    Legal --> MCP
+    Legal --> LegalAI
+    Planner --> DB
+    SM --> HITL
+    HITL --> SM
+```
 
 ```text
 React Dashboard
@@ -288,8 +334,9 @@ Responsibilities:
 - generates a planner reasoning summary,
 - proposes, normalizes, validates, and audits controlled tool calls when enabled,
 - executes approved read-only tools only in `PlanDriven` mode,
-- decides whether human approval is required through deterministic rules,
-- updates workflow state.
+- returns whether human approval is required through deterministic rules.
+
+The Orchestrator applies State Machine transitions. Planner reasoning does not control workflow state.
 
 Current reasoning behavior:
 
@@ -378,7 +425,52 @@ LegalAgent AI review can be backed by Semantic Kernel when enabled, but it is co
 - **Strict safety boundaries**:
   - The LegalAgent **does not declare legal violations**.
   - The LegalAgent **does not provide legal advice**.
-  - Legal AI review persistence and user interface presentation are deferred to a later block (Block 10.5).
+  - The LegalAgent **does not invent citations or regulations**.
+  - The LegalAgent identifies possible regulatory review areas for human review.
+
+#### LegalAgent quality cases
+
+Curated LegalAgent quality tests cover liquidity and leverage financial risk signals with cited CNV/Infoleg evidence, missing citations, no relevant cited evidence, and deterministic/LLM fallback behavior.
+
+The tests assert that:
+
+- possible review areas only use provided citations,
+- uncited MCP evidence is ignored as strong support and produces warnings,
+- missing or irrelevant evidence stays safe with warnings/limitations,
+- LLM output with invented citations is pruned,
+- forbidden legal language falls back to deterministic review,
+- the LegalAgent does not declare legal violations or provide legal advice.
+
+The CNV/Infoleg citations used in these tests are explicit test fixtures and are not represented as real legal conclusions.
+
+#### Production-like E2E validated flow
+
+Backend E2E coverage validates the production-like flow without external services:
+
+```text
+Create Analysis Session
+  -> Attach JSON structured metrics
+  -> Start Session preflight passes
+  -> DataAgent uses session_context metrics
+  -> quantitative financialAnalysis + aiReview are persisted
+  -> LegalAgent derives CNV queries from financial risk signals
+  -> cited CNV evidence + legalReview are persisted
+  -> Planner review + toolPlan audit are persisted
+  -> AwaitingHumanApproval
+  -> Approve
+  -> Completed
+  -> Reload with ContextJson and Activity Feed preserved
+```
+
+The production-like mode keeps fixture fallback disabled and requires session-attached structured metrics:
+
+```text
+DataAgent__FinancialAnalysisToolsEnabled=true
+DataAgent__UseFixtureMetricsFallback=false
+DataAgent__RequireSessionFinancialMetrics=true
+```
+
+The HITL rejection path is also covered by E2E tests. Human rejection moves the session to the existing failure state, preserves analysis evidence and legal review context, keeps Activity Feed history for auditability, and does not emit the approval/completion path.
 
 
 ## Workflow States
@@ -421,6 +513,20 @@ When the DataAgent or LegalAgent detects risk:
 
 The system only moves to `Completed` after explicit approval.
 If rejected, the session moves to `Failed`.
+
+## Multi-User Authentication & Session Isolation
+
+The platform includes a robust, production-grade security architecture that ensures data privacy and workspace isolation across multiple users.
+
+### Security & Privacy Architecture
+- **Authentication**: Built on **ASP.NET Core Identity** and secured via secure, stateless **JWT Bearer Tokens**.
+- **Authorization**: All API endpoints and SignalR connection handshakes require a valid JWT token.
+- **Session Isolation**: Every `AnalysisSession` is owned by a specific `UserId`. All database queries, telemetry, and operations are strictly isolated—users can only query, modify, or run analysis on their own sessions. Any attempt to access another user's session returns a `404 Not Found` (rather than a `403 Forbidden`) to prevent resource enumeration.
+
+### React Authentication Experience
+- **Premium Route Guard**: Unauthenticated users are seamlessly redirected to a premium, glassmorphic login/registration screen.
+- **Obsidian Dark Mode UI**: Standardized obsidian background layouts with glowing inputs and custom form animations.
+- **User Avatar Profile & Logout**: Shows a glowing profile badge in the header displaying the capitalized first letter of the user's email, alongside the full email address, and a dedicated logout button that safely terminates SignalR connections and clears cached credentials.
 
 ## Auditability
 
@@ -529,7 +635,7 @@ Current capabilities:
 - summarize quantitative evidence,
 - expose financial risk evidence in the dashboard.
 
-The current implementation expects structured financial metrics. It does not perform universal PDF extraction, OCR, visual table extraction, or LLM-based financial data extraction yet.
+The current implementation expects structured financial metrics. JSON and CSV inputs are already structured; PDF ingestion is a deterministic preprocessing path that extracts supported metric rows from native PDF text or local OCR output before persisting the same structured metrics contract. It does not perform universal visual table extraction or LLM-based financial data extraction.
 
 Financial-analysis architecture:
 
@@ -588,9 +694,7 @@ These tools are read-only, auditable, and cannot modify workflow state, approve 
 
 This phase does not include:
 
-- OCR,
-- visual PDF parsing,
-- table extraction from PDFs,
+- universal visual PDF table parsing,
 - LLM-based metric extraction,
 - production-grade accounting validation,
 - legal or investment advice.
@@ -599,7 +703,7 @@ The financial analysis pipeline currently uses structured financial metrics, inc
 
 ## Structured Financial Metrics Input
 
-The platform supports structured financial metrics input through pasted JSON, pasted CSV, or uploaded `.json` / `.csv` files.
+The platform supports structured financial metrics input through pasted JSON, pasted CSV, uploaded `.json` / `.csv` files, or uploaded `.pdf` financial analysis reports.
 
 The input is validated, normalized, persisted in the analysis session context, and later consumed by the DataAgent financial workflow.
 
@@ -607,7 +711,7 @@ Current flow:
 
 ```text
 Create Analysis Session
-  -> Attach pasted JSON, pasted CSV, or uploaded JSON/CSV structured metrics
+  -> Attach pasted JSON, pasted CSV, uploaded JSON/CSV metrics, or uploaded PDF metrics
   -> Validate and persist metrics in ContextJson
   -> Start Session
   -> DataAgent loads persisted metrics first
@@ -622,7 +726,7 @@ Supported dashboard input modes:
 
 - Paste JSON,
 - Paste CSV,
-- Upload JSON/CSV file.
+- Upload JSON/CSV/PDF file.
 
 Sample templates are available from the dashboard:
 
@@ -639,7 +743,7 @@ structuredFinancialMetrics
 
 The persisted block includes audit provenance:
 
-- ingestion method (`json_paste`, `csv_paste`, `json_file`, or `csv_file`),
+- ingestion method (`json_paste`, `csv_paste`, `json_file`, `csv_file`, or `pdf_file`),
 - metric count,
 - validation warning count,
 - upload timestamp,
@@ -701,6 +805,16 @@ CSV input is parsed deterministically without PDF/OCR or LLM extraction.
 
 Invalid headers, invalid numbers, invalid source pages, malformed quotes, and missing required values are reported as safe validation errors.
 
+### PDF Metrics Input
+
+PDF upload extracts supported financial metric rows into the same structured metrics contract used by JSON and CSV. Native text extraction runs first. If native text is too sparse, or native text is present but no supported metrics are found, the extractor falls back to local OCR.
+
+Local OCR uses configured `pdftoppm` and `tesseract` executables. No external OCR service, hosted document AI, or LLM is required.
+
+Supported PDF metric aliases currently include revenue/sales, gross profit, operating income, EBITDA, EBIT, net income, cash, short-term investments, receivables, inventory, current assets, current liabilities, total debt, net debt, equity, capex, free cash flow, interest expense, and shares.
+
+OCR metrics below `StructuredFinancialMetricsPdfExtraction__MinimumMetricConfidence` are ignored. If no extracted metric meets the threshold, the PDF upload returns a validation error instead of persisting low-confidence data.
+
 ### Structured Metrics Endpoints
 
 ```http
@@ -715,7 +829,7 @@ The validation endpoint does not persist data. The session endpoints attach or r
 
 ### Structured Metrics File Upload
 
-The dashboard and API support uploading structured `.json` and `.csv` files.
+The dashboard and API support uploading `.json`, `.csv`, and `.pdf` files.
 
 ```http
 POST /api/analysis-sessions/{sessionId}/financial-metrics/file
@@ -729,8 +843,8 @@ multipart/form-data
 
 Form fields:
 
-- `file`: required `.json` or `.csv` file,
-- `documentId`: optional for JSON, required for CSV,
+- `file`: required `.json`, `.csv`, or `.pdf` file,
+- `documentId`: optional for JSON/PDF, required for CSV,
 - `company`: optional,
 - `currency`: optional,
 - `unit`: optional.
@@ -743,12 +857,13 @@ Supported formats:
 
 - `.json`
 - `.csv`
+- `.pdf`
 
-The default upload size limit is 1 MB.
+The default upload size limit is 20 MB.
 
 The file upload path uses the same validation, normalization, and session persistence flow as pasted JSON or CSV input. Analysis still starts only when the user clicks `Start Session`.
 
-This is not PDF parsing, OCR, Excel ingestion, or LLM extraction.
+This is not Excel ingestion, LLM extraction, source-document verification, or universal visual table parsing.
 
 ### Metrics Provider Order
 
@@ -796,7 +911,7 @@ If metrics are missing, `POST /api/analysis-sessions/{sessionId}/start` returns 
 }
 ```
 
-The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON/CSV metrics, then start the session again.
+The failed preflight does not change workflow state and does not execute the PlannerAgent, DataAgent, or LegalAgent. Attach JSON, CSV, or PDF metrics, then start the session again.
 
 The dashboard also calls:
 
@@ -820,7 +935,7 @@ The dashboard calls `GET /api/analysis-sessions/{sessionId}/start-preflight` to 
 
 ![Start Readiness Blocked](docs/screenshots/start-readiness-blocked.png)
 
-After JSON or CSV metrics are attached to the session, readiness refreshes and `Start Session` becomes available.
+After JSON, CSV, or PDF metrics are attached to the session, readiness refreshes and `Start Session` becomes available.
 
 ![Start Readiness Ready](docs/screenshots/start-readiness-ready.png)
 
@@ -845,13 +960,23 @@ For local development, copy the development example to the ignored local setting
 Copy-Item backend/Orchestration.Api/appsettings.Development.example.json backend/Orchestration.Api/appsettings.Development.json
 ```
 
-### Financial Analysis Mode Matrix
+## Configuration Modes
 
-| Mode | FinancialAnalysisToolsEnabled | UseFixtureMetricsFallback | RequireSessionFinancialMetrics | Behavior |
+| Mode | `DataAgent__FinancialAnalysisToolsEnabled` | `DataAgent__UseFixtureMetricsFallback` | `DataAgent__RequireSessionFinancialMetrics` | Behavior |
 | --- | --- | --- | --- | --- |
-| Default | `false` | `false` | `false` | Uses the legacy anomaly-detection path. |
-| Demo | `true` | `true` | `false` | Uses session metrics first and fixture fallback if missing. |
-| Production-like | `true` | `false` | `true` | Requires session metrics and returns a safe review-required result if missing. |
+| Default | `false` | `false` | `false` | Legacy anomaly path. Structured financial analysis is disabled. |
+| Demo | `true` | `true` | `false` | Uses session metrics first and fixture fallback if missing. Fixture fallback is visibly marked. |
+| Production-like | `true` | `false` | `true` | Requires session metrics. Missing metrics block Start Session through preflight. |
+
+Optional AI/tooling settings:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `DataAgent__AiReviewEnabled` | `false` | Enables Semantic Kernel DataAgent AI review when `Llm__Enabled=true`; deterministic fallback remains available. |
+| `LegalAgent__AiReviewEnabled` | `false` | Enables Semantic Kernel LegalAgent AI review when `Llm__Enabled=true`; deterministic fallback remains available. |
+| `Llm__Enabled` | `false` | Enables configured LLM provider for advisory reviews/reasoning. |
+| `ToolCalling__Enabled` | `false` | Enables controlled tool-plan proposal, validation, and audit. |
+| `ToolCalling__ExecutionMode` | `Shadow` | `Shadow` audits proposals; `PlanDriven` executes approved read-only calls through `ControlledToolExecutor`. |
 
 Development configuration for structured financial analysis:
 
@@ -866,12 +991,21 @@ DataAgent__RequireSessionFinancialMetrics=false
 Structured file upload defaults:
 
 ```text
-StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=1048576
+StructuredFinancialMetricsFileUpload__MaxFileSizeBytes=20971520
 StructuredFinancialMetricsFileUpload__AllowedExtensions__0=.json
 StructuredFinancialMetricsFileUpload__AllowedExtensions__1=.csv
+StructuredFinancialMetricsFileUpload__AllowedExtensions__2=.pdf
+StructuredFinancialMetricsPdfExtraction__NativeTextMinimumCharacters=200
+StructuredFinancialMetricsPdfExtraction__MaxPages=20
+StructuredFinancialMetricsPdfExtraction__OcrDpi=200
+StructuredFinancialMetricsPdfExtraction__OcrTimeoutSeconds=60
+StructuredFinancialMetricsPdfExtraction__MinimumMetricConfidence=0.5
+StructuredFinancialMetricsPdfExtraction__PdfToPpmPath=pdftoppm
+StructuredFinancialMetricsPdfExtraction__TesseractPath=tesseract
+StructuredFinancialMetricsPdfExtraction__TesseractLanguage=eng
 ```
 
-### Financial Risk Threshold Profiles
+## Financial Risk Threshold Profiles
 
 To customize risk heuristic sensitivity, you can configure the active risk threshold profile:
 
@@ -880,7 +1014,7 @@ To customize risk heuristic sensitivity, you can configure the active risk thres
 - `strict`: Conservative risk settings enforcing highly safe liquidity and low leverage levels.
 - `demo`: Sensitive and aggressive thresholds tailored specifically for demonstrations and testing.
 
-#### Core Principles & Architecture
+### Core Principles & Architecture
 1. **C# as Single Source of Truth**: Profile limits, operators, and severity ratings are fully declared in C# (`InMemoryFinancialRiskThresholdProfileProvider`).
 2. **Dynamic Mappings**: The C# workflow passes resolved profile limits dynamically to Python's CSnakes agent (`financial_analysis.py`).
 3. **No Drift / Legacy Alias Fallback**: Direct tests and legacy profiles are mapped gracefully. If an invalid profile name is requested, the provider automatically falls back to `default` with a resolution warning.
@@ -892,7 +1026,7 @@ To change the active profile locally, use the environment variable:
 DataAgent__RiskThresholdProfile=oil_and_gas
 ```
 
-### Financial Risk Signal Explainability
+## Financial Risk Signal Explainability
 
 Each financial risk signal can include the metric, period, observed value, threshold code, threshold operator, threshold value, and deterministic reason that produced the signal.
 
@@ -913,18 +1047,16 @@ Example persisted fields:
 
 These fields make threshold decisions easier to audit in the dashboard and safer to interpret in the DataAgent and LegalAgent advisory review layers. Thresholds remain heuristic review criteria. Signals are not investment advice and do not confirm accounting correctness.
 
-### Structured Input Limitations
+## Structured Input Limitations
 
 This phase does not include:
 
 - Excel ingestion,
-- PDF parsing,
-- OCR,
-- table extraction from visual reports,
+- universal table extraction from visual reports,
 - LLM-based financial metric extraction,
 - accounting correctness guarantees.
 
-The system validates structure and computes advisory risk signals. It does not verify that the source document was transcribed correctly.
+The system validates structure and computes advisory risk signals. PDF text/OCR extraction is deterministic and limited to supported metric aliases; it does not verify that the source document was transcribed correctly.
 
 Structured metrics may be incomplete or manually provided. Missing data produces warnings or limitations instead of invented values.
 
@@ -953,6 +1085,18 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 ### Structured Metrics File Upload
 
 ![Structured Metrics File Upload](docs/screenshots/structured-metrics-file-upload.png)
+
+### Start Readiness Blocked
+
+![Start Readiness Blocked](docs/screenshots/start-readiness-blocked.png)
+
+### Start Readiness Ready
+
+![Start Readiness Ready](docs/screenshots/start-readiness-ready.png)
+
+### Financial Risk Evidence from Session Context
+
+![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk-evidence-session-context.png)
 
 ### Financial Risk Evidence from Structured Input
 
@@ -999,6 +1143,17 @@ Aspire starts:
 - optional CNV ingestion executable,
 - React frontend.
 
+### Authentication & Seed Credentials
+
+When the backend runs for the first time, database migrations will automatically apply and seed two default accounts for local development and testing:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| **Administrator** | `admin@ezemartino.com` | `Password1!` |
+| **Standard User** | `user@ezemartino.com` | `Password1!` |
+
+You can also use the registration form on the login screen to create a new, isolated account.
+
 ### Enabling LLM Planner Reasoning
 
 The system works without an LLM by default.
@@ -1040,6 +1195,8 @@ ToolCalling__ExecutionMode=PlanDriven
 ```
 
 In `PlanDriven` mode, approved allowlisted calls execute through `ControlledToolExecutor`.
+
+Regression coverage validates both `Shadow` and `PlanDriven` modes, deny-by-default rejection for unsafe or unknown tools, read-only allowlisted execution, and persisted `toolPlan` audit data without storing raw `OutputJson` payloads in `ContextJson`.
 
 Use with LLM planner/tool proposal:
 
@@ -1149,15 +1306,25 @@ VITE_API_URL
 
 ## Tests
 
-Run backend tests:
+Run the full validation set:
+
+```bash
+python -m unittest discover -s python-agents\tests
+```
 
 ```bash
 cd backend
+dotnet build
 dotnet test
 ```
 
-Latest validated backend suite: 210 tests.
-Latest validated Python financial-analysis suite: 11 tests.
+```bash
+cd frontend
+npm run build
+```
+
+Latest validated backend suite: 439 tests.
+Latest validated Python financial-analysis suite: 13 tests.
 
 Current test coverage includes:
 
@@ -1187,7 +1354,9 @@ Current test coverage includes:
 - structured financial metrics validation,
 - structured JSON metrics persistence,
 - structured CSV metrics ingestion,
-- structured JSON/CSV metrics file upload,
+- structured JSON/CSV/PDF metrics file upload,
+- native PDF text metrics extraction,
+- local OCR fallback for image-only or hybrid PDFs,
 - session metrics provider ordering,
 - structured metrics input UI compatibility,
 - frontend build compatibility,
@@ -1198,12 +1367,21 @@ Current test coverage includes:
 - cited-result filtering,
 - warning propagation.
 
-Run frontend build:
+## Limitations
 
-```bash
-cd frontend
-npm run build
-```
+This project intentionally does not provide:
+
+- universal visual table extraction from reports,
+- LLM-based financial metric extraction,
+- investment advice,
+- legal advice,
+- final regulatory determinations,
+- accounting correctness guarantees,
+- automatic workflow completion by an LLM,
+- unrestricted or autonomous tool execution,
+- raw uploaded file persistence.
+
+Structured metrics may be pasted, uploaded, or manually provided. The system validates structure and computes advisory risk signals, but it does not verify that source documents were transcribed correctly.
 
 ## Safety Notes
 
@@ -1233,13 +1411,13 @@ This is intentional: the project demonstrates how higher-automation systems can 
 
 ### Next: Structured Financial Input Hardening and Extraction
 
-The structured financial-analysis workflow can now consume pasted JSON, pasted CSV, uploaded JSON files, or uploaded CSV files persisted in the session context.
+The structured financial-analysis workflow can now consume pasted JSON, pasted CSV, uploaded JSON files, uploaded CSV files, or uploaded PDF reports persisted in the session context.
 
 Planned upgrades:
 
 - add client-side preview before persistence,
 - add stronger financial consistency validation,
-- later evaluate PDF table extraction or OCR,
+- later evaluate richer PDF table extraction,
 - later evaluate LLM-assisted metric extraction with human review.
 
 The LLM must not bypass the state machine or human approval flow.

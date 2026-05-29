@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,9 +11,12 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Persistence;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
+using UglyToad.PdfPig.Core;
 
 namespace Orchestration.Api.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/analysis-sessions")]
 public class AnalysisSessionsController(
@@ -21,6 +26,7 @@ public class AnalysisSessionsController(
     IActivityEventPublisher activityPublisher,
     IStructuredFinancialMetricsSessionService financialMetricsSessionService,
     IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
+    IStructuredFinancialMetricsPdfExtractor financialMetricsPdfExtractor,
     IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions) : ControllerBase
 {
     private readonly IOrchestrationDbContext _dbContext = dbContext;
@@ -29,7 +35,13 @@ public class AnalysisSessionsController(
     private readonly IActivityEventPublisher _activityPublisher = activityPublisher;
     private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService = financialMetricsSessionService;
     private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser = financialMetricsCsvParser;
+    private readonly IStructuredFinancialMetricsPdfExtractor _financialMetricsPdfExtractor = financialMetricsPdfExtractor;
     private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions = fileUploadOptions.Value;
+
+    private Guid CurrentUserId => Guid.Parse(
+        User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        ?? throw new InvalidOperationException("User ID claim is missing.")
+    );
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web)
@@ -41,6 +53,7 @@ public class AnalysisSessionsController(
     public async Task<IActionResult> GetSessions(CancellationToken cancellationToken)
     {
         var sessions = await _dbContext.AnalysisSessions
+            .Where(x => x.UserId == CurrentUserId)
             .OrderByDescending(x => x.CreatedAt)
             .Select(x => new
             {
@@ -59,7 +72,7 @@ public class AnalysisSessionsController(
     [HttpPost]
     public async Task<IActionResult> CreateSession(CancellationToken cancellationToken)
     {
-        var session = AnalysisSession.Create();
+        var session = AnalysisSession.Create(CurrentUserId);
 
         _dbContext.AnalysisSessions.Add(session);
 
@@ -86,7 +99,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -112,7 +125,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -167,7 +180,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var session = await _dbContext.AnalysisSessions
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (session is null)
         {
@@ -188,6 +201,14 @@ public class AnalysisSessionsController(
         [FromBody] HumanDecisionDto request,
         CancellationToken cancellationToken)
     {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
         try
         {
             var result = await _orchestrator.ApproveAsync(
@@ -218,6 +239,14 @@ public class AnalysisSessionsController(
         [FromBody] HumanDecisionDto request,
         CancellationToken cancellationToken)
     {
+        var session = await _dbContext.AnalysisSessions
+            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (session is null)
+        {
+            return NotFound();
+        }
+
         try
         {
             var result = await _orchestrator.RejectAsync(
@@ -248,7 +277,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {
@@ -280,6 +309,14 @@ public class AnalysisSessionsController(
         if (input is null)
         {
             return BadRequest();
+        }
+
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
         }
 
         var result = await _financialMetricsSessionService.SaveAsync(
@@ -330,6 +367,14 @@ public class AnalysisSessionsController(
         [FromForm] StructuredFinancialMetricsFileUploadRequest request,
         CancellationToken cancellationToken)
     {
+        var sessionExists = await _dbContext.AnalysisSessions
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
+
+        if (!sessionExists)
+        {
+            return NotFound();
+        }
+
         var fileValidationResult = ValidateUploadedFile(request?.File);
 
         if (fileValidationResult is not null)
@@ -339,6 +384,12 @@ public class AnalysisSessionsController(
 
         var file = request!.File!;
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+        if (extension == ".pdf")
+        {
+            return await SavePdfFileAsync(id, request, cancellationToken);
+        }
+
         var content = await ReadFileContentAsync(file, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(content))
@@ -360,7 +411,7 @@ public class AnalysisSessionsController(
         CancellationToken cancellationToken)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {
@@ -459,6 +510,98 @@ public class AnalysisSessionsController(
             : Ok(CreateFileResponse(request.File!, "csv", result.SaveResult));
     }
 
+    private async Task<IActionResult> SavePdfFileAsync(
+        Guid id,
+        StructuredFinancialMetricsFileUploadRequest request,
+        CancellationToken cancellationToken)
+    {
+        StructuredFinancialMetricsPdfExtractionResult? extraction;
+
+        try
+        {
+            await using var stream = request.File!.OpenReadStream();
+            extraction = await ExtractPdfMetricsAsync(request, stream, cancellationToken);
+        }
+        catch (PdfOcrDependencyException)
+        {
+            return BadRequest(new FileUploadErrorResponse(
+                "PDF OCR dependencies are not configured."
+            ));
+        }
+        catch (InvalidDataException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+        }
+        catch (PdfDocumentFormatException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+        }
+        catch (IOException)
+        {
+            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+        }
+
+        if (extraction is null || !extraction.IsValid || extraction.Input is null)
+        {
+            var errors = extraction?.Errors ?? [];
+
+            if (errors.Any(issue => issue.Code == "PDF_OCR_NOT_CONFIGURED"))
+            {
+                return BadRequest(new FileUploadErrorResponse(
+                    "PDF OCR dependencies are not configured."
+                ));
+            }
+
+            var invalidResult = new FinancialMetricsSessionSaveResult(
+                SessionId: id,
+                IsValid: false,
+                Context: null,
+                Errors: errors,
+                Warnings: extraction?.Warnings ?? []
+            );
+
+            return Ok(CreateFileResponse(request.File, "pdf", invalidResult));
+        }
+
+        var result = await _financialMetricsSessionService.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: id,
+                Input: ApplyFallbackMetadata(extraction.Input, request),
+                Provenance: await CreateBinaryFileProvenanceAsync(
+                    request.File,
+                    "pdf_file",
+                    cancellationToken
+                )
+            ),
+            cancellationToken
+        );
+
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(CreateFileResponse(request.File, "pdf", result));
+    }
+
+    private Task<StructuredFinancialMetricsPdfExtractionResult> ExtractPdfMetricsAsync(
+        StructuredFinancialMetricsFileUploadRequest request,
+        Stream stream,
+        CancellationToken cancellationToken)
+    {
+        return _financialMetricsPdfExtractor.ExtractAsync(
+            stream,
+            new StructuredFinancialMetricsPdfExtractionRequest(
+                DocumentId: request.DocumentId,
+                Company: request.Company,
+                Currency: request.Currency,
+                Unit: request.Unit,
+                OriginalFileName: request.File!.FileName
+            ),
+            cancellationToken
+        );
+    }
+
     private async Task<IActionResult> SaveCsvInputAsync(
         Guid id,
         StructuredFinancialMetricsCsvInput input,
@@ -486,7 +629,7 @@ public class AnalysisSessionsController(
         StructuredFinancialMetricsProvenanceInput? provenance = null)
     {
         var sessionExists = await _dbContext.AnalysisSessions
-            .AnyAsync(x => x.Id == id, cancellationToken);
+            .AnyAsync(x => x.Id == id && x.UserId == CurrentUserId, cancellationToken);
 
         if (!sessionExists)
         {
@@ -642,6 +785,22 @@ public class AnalysisSessionsController(
         );
     }
 
+    private static async Task<StructuredFinancialMetricsProvenanceInput> CreateBinaryFileProvenanceAsync(
+        IFormFile file,
+        string ingestionMethod,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream();
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+
+        return new StructuredFinancialMetricsProvenanceInput(
+            IngestionMethod: ingestionMethod,
+            OriginalFileName: Path.GetFileName(file.FileName),
+            FileSizeBytes: file.Length,
+            ContentHash: Convert.ToHexString(hash).ToLowerInvariant()
+        );
+    }
+
     private static string ComputeSha256(
         string content)
     {
@@ -654,6 +813,7 @@ public class AnalysisSessionsController(
         IActionResult ActionResult,
         FinancialMetricsSessionSaveResult? SaveResult
     );
+
 }
 
 public sealed class StructuredFinancialMetricsFileUploadRequest

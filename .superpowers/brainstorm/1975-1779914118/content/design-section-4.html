@@ -1,0 +1,38 @@
+<h2>Section 4: Frontend Auth Integration & Premium UI</h2>
+<p class="subtitle">Implementing JWT persistence, API interceptors, and Dark-Mode Login/Register layouts</p>
+
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">Frontend State & API Layer (api.ts)</div>
+  <div class="mockup-body" style="padding: 1.5rem; background: #0f172a; font-family: monospace; font-size: 0.85rem; color: #f1f5f9; line-height: 1.4;">
+    
+    <div style="color: #64748b;">// 1. Retrieve JWT token from localStorage</div>
+    const getAuthToken = (): string | null => localStorage.getItem("auth_token");<br><br>
+
+    <div style="color: #64748b;">// 2. Fetch wrapper to inject Bearer Header automatically</div>
+    async function authenticatedFetch(url: string, options: RequestInit = {}): Promise&lt;Response&gt; {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;const token = getAuthToken();<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;const headers = {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;...options.headers,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"Content-Type": "application/json",<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;...(token ? { "Authorization": `Bearer ${token}` } : {})<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;};<br><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;const response = await fetch(url, { ...options, headers });<br><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<div style="color: #64748b;">// Auto-logout if token is expired or unauthorized</div>
+    &nbsp;&nbsp;&nbsp;&nbsp;if (response.status === 401) {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;localStorage.removeItem("auth_token");<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;window.location.reload();<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;return response;<br>
+    }
+  </div>
+</div>
+
+<div class="mockup" style="margin-top: 1.5rem;">
+  <div class="mockup-header">Premium User Interface Components</div>
+  <div class="mockup-body" style="padding: 1rem; background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(14, 165, 233, 0.2); border-radius: 6px; font-size: 0.85rem; line-height: 1.5;">
+    <strong>Key Frontend Upgrades:</strong><br>
+    - <strong>Login/Register Views:</strong> Completely styled dark-mode screens, utilizing glassmorphic backdrop filters, custom input fields, error handling notifications, and smooth fade-in animations.<br>
+    - <strong>Router Guards:</strong> If no <code>auth_token</code> exists in local storage, render the Auth view instead of the Dashboard.<br>
+    - <strong>Interactive Profile Badge:</strong> The dashboard header will dynamically display the user's name/email and offer a clean logout button that wipes the token.
+  </div>
+</div>

@@ -148,17 +148,17 @@ namespace Orchestration.Application.AnalysisSessions
                 return null;
             }
 
+            var completedStatus = _workflow.ApplyTrigger(
+                session,
+                AnalysisSessionTrigger.HumanApproved
+            );
+
             await PublishAsync(
                 session.Id,
                 "human_decision_received",
                 "HumanAuditor",
                 $"Approval received. Reason: {request.Reason ?? "No reason provided."}",
                 cancellationToken
-            );
-
-            var completedStatus = _workflow.ApplyTrigger(
-                session,
-                AnalysisSessionTrigger.HumanApproved
             );
 
             session.SetStatus(completedStatus);
@@ -198,17 +198,17 @@ namespace Orchestration.Application.AnalysisSessions
                 return null;
             }
 
+            var failedStatus = _workflow.ApplyTrigger(
+                session,
+                AnalysisSessionTrigger.HumanRejected
+            );
+
             await PublishAsync(
                 session.Id,
                 "human_decision_received",
                 "HumanAuditor",
                 $"Rejection received. Reason: {request.Reason ?? "No reason provided."}",
                 cancellationToken
-            );
-
-            var failedStatus = _workflow.ApplyTrigger(
-                session,
-                AnalysisSessionTrigger.HumanRejected
             );
 
             session.SetStatus(failedStatus);

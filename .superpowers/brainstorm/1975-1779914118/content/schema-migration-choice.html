@@ -1,0 +1,19 @@
+<h2>Database Schema & Migration</h2>
+<p class="subtitle">Adding User association to AnalysisSession table</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Strict Non-Nullable UserId (Recommended)</h3>
+      <p>Every analysis session must belong to a user (<code>Guid UserId</code>). High integrity schema. Existing records in the DB will be migrated to a default seed user during the migration execution.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Nullable UserId for Compatibility</h3>
+      <p>Allows sessions without an owner (<code>Guid? UserId</code>). Existing records remain orphaned and can either be viewed by everyone or hidden. New sessions created via the UI will associate with the logged-in user.</p>
+    </div>
+  </div>
+</div>

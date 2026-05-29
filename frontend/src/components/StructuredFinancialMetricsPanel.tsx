@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { DragEvent } from "react";
 import type {
   StructuredFinancialMetricsContext,
   SaveFinancialMetricsResponse,
@@ -23,10 +24,14 @@ interface StructuredFinancialMetricsPanelProps {
   ) => Promise<void>;
 }
 
-const maxStructuredMetricsFileSizeBytes = 1_048_576;
-const allowedStructuredMetricsFileExtensions = [".json", ".csv"];
+const maxStructuredMetricsFileSizeBytes = 20_971_520;
+const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
+const uploadRequiresSessionMessage =
+  "No puede cargar los archivos si no ha creado o cargado una sesi\u00f3n.";
+const saveRequiresSessionMessage =
+  "No puede guardar las m\u00e9tricas si no ha creado o cargado una sesi\u00f3n.";
 
 const jsonMetricsTemplate = JSON.stringify(
   {
@@ -88,6 +93,8 @@ function formatIngestionMethod(ingestionMethod?: string | null) {
       return "JSON file";
     case "csv_file":
       return "CSV file";
+    case "pdf_file":
+      return "PDF file";
     default:
       return "Unknown";
   }
@@ -148,6 +155,7 @@ export function StructuredFinancialMetricsPanel({
   const [fileCurrency, setFileCurrency] = useState("USD");
   const [fileUnit, setFileUnit] = useState("USD_thousand");
   const [inputError, setInputError] = useState<string | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
 
   async function handleSaveJson() {
     setInputError(null);
@@ -210,21 +218,27 @@ export function StructuredFinancialMetricsPanel({
     setSelectedFile(file);
   }
 
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setIsDraggingFile(false);
+    handleFileSelected(event.dataTransfer.files?.[0] ?? null);
+  }
+
   async function handleUploadFile() {
     setInputError(null);
     if (!selectedFile) {
-      setInputError("Select a JSON or CSV metrics file.");
+      setInputError("Select a JSON, CSV, or PDF metrics file.");
       return;
     }
 
     const extension = getFileExtension(selectedFile.name);
     if (!allowedStructuredMetricsFileExtensions.includes(extension)) {
-      setInputError("Only .json and .csv files are supported.");
+      setInputError("Only .json, .csv, and .pdf files are supported.");
       return;
     }
 
     if (selectedFile.size > maxStructuredMetricsFileSizeBytes) {
-      setInputError("Only files up to 1 MB are supported.");
+      setInputError("Only files up to 20 MB are supported.");
       return;
     }
 
@@ -350,13 +364,20 @@ export function StructuredFinancialMetricsPanel({
             />
           </label>
 
-          <button
-            onClick={handleSaveJson}
-            disabled={!sessionId || isSaving}
-            type="button"
+          <span
+            className={!sessionId ? "sessionActionTooltip" : undefined}
+            data-tooltip={!sessionId ? saveRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? saveRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Saving..." : "Save JSON Metrics"}
-          </button>
+            <button
+              onClick={handleSaveJson}
+              disabled={!sessionId || isSaving}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save JSON Metrics"}
+            </button>
+          </span>
         </div>
       ) : mode === "csv" ? (
         <div className="metricsEditor">
@@ -400,30 +421,46 @@ export function StructuredFinancialMetricsPanel({
             />
           </label>
 
-          <button
-            onClick={handleSaveCsv}
-            disabled={!sessionId || isSaving}
-            type="button"
+          <span
+            className={!sessionId ? "sessionActionTooltip" : undefined}
+            data-tooltip={!sessionId ? saveRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? saveRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Saving..." : "Save CSV Metrics"}
-          </button>
+            <button
+              onClick={handleSaveCsv}
+              disabled={!sessionId || isSaving}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save CSV Metrics"}
+            </button>
+          </span>
         </div>
       ) : (
         <div className="metricsEditor">
-          <div className="fileUploadBox">
+          <div
+            className={`fileUploadBox ${isDraggingFile ? "fileUploadBox-active" : ""}`}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={handleFileDrop}
+          >
             <label>
-              JSON or CSV file
+              JSON, CSV, or PDF file
               <input
                 type="file"
-                accept=".json,.csv"
-                disabled={!sessionId || isSaving}
+                accept=".json,.csv,.pdf"
+                disabled={isSaving}
                 onChange={(event) =>
                   handleFileSelected(event.currentTarget.files?.[0] ?? null)
                 }
               />
             </label>
 
-            <p>Only .json and .csv files up to 1 MB are supported.</p>
+            <p>Only .json, .csv, and .pdf files up to 20 MB are supported.</p>
 
             {selectedFile && (
               <div className="selectedFileSummary">
@@ -469,13 +506,20 @@ export function StructuredFinancialMetricsPanel({
             </label>
           </div>
 
-          <button
-            onClick={handleUploadFile}
-            disabled={!sessionId || isSaving || !selectedFile}
-            type="button"
+          <span
+            className={!sessionId ? "sessionActionTooltip" : undefined}
+            data-tooltip={!sessionId ? uploadRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? uploadRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Uploading..." : "Upload File"}
-          </button>
+            <button
+              onClick={handleUploadFile}
+              disabled={!sessionId || isSaving || !selectedFile}
+              type="button"
+            >
+              {isSaving ? "Uploading..." : "Upload File"}
+            </button>
+          </span>
         </div>
       )}
 

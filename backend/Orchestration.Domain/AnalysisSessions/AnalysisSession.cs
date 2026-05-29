@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -25,6 +25,29 @@ public class AnalysisSession
     {
     }
 
+    public Guid UserId { get; private set; }
+
+    public static AnalysisSession Create(Guid userId)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("User ID cannot be empty.", nameof(userId));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+
+        return new AnalysisSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Status = AnalysisSessionStatus.Pending,
+            ContextJson = "{}",
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+    }
+
+    [Obsolete("Use Create(Guid userId) instead. Invoking this sets UserId to Guid.Empty, which violates database foreign key constraints on persistence.")]
     public static AnalysisSession Create()
     {
         var now = DateTimeOffset.UtcNow;
@@ -32,6 +55,7 @@ public class AnalysisSession
         return new AnalysisSession
         {
             Id = Guid.NewGuid(),
+            UserId = Guid.Empty,
             Status = AnalysisSessionStatus.Pending,
             ContextJson = "{}",
             CreatedAt = now,

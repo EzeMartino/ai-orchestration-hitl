@@ -1,0 +1,47 @@
+<h2>Section 1: Database Entity Relationships (ERD)</h2>
+<p class="subtitle">Integrating ASP.NET Identity with our existing analysis tables</p>
+
+<div class="mockup" style="margin-top: 2rem;">
+  <div class="mockup-header">Entity Relationship Diagram (ERD)</div>
+  <div class="mockup-body" style="padding: 2rem; background: #0f172a; font-family: monospace; color: #f1f5f9;">
+    <div style="display: flex; justify-content: space-around; align-items: center; gap: 1rem;">
+      
+      <!-- User Card -->
+      <div style="border: 2px solid #38bdf8; border-radius: 8px; padding: 1rem; background: #1e293b; min-width: 200px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+        <div style="font-weight: bold; color: #38bdf8; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; margin-bottom: 0.5rem;">AspNetUsers</div>
+        <div style="font-size: 0.8rem; line-height: 1.4;">
+          🔑 Id: Guid (PK)<br>
+          📧 Email: string<br>
+          🔒 PasswordHash: string<br>
+          👤 UserName: string
+        </div>
+      </div>
+
+      <!-- Relationship Line -->
+      <div style="display: flex; flex-direction: column; align-items: center; color: #94a3b8; font-size: 1.2rem;">
+        <span>─────── 1:N ───────▶</span>
+        <span style="font-size: 0.75rem; margin-top: 0.25rem;">UserId (FK)</span>
+      </div>
+
+      <!-- Analysis Session Card -->
+      <div style="border: 2px solid #0ea5e9; border-radius: 8px; padding: 1rem; background: #1e293b; min-width: 200px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+        <div style="font-weight: bold; color: #0ea5e9; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; margin-bottom: 0.5rem;">AnalysisSessions</div>
+        <div style="font-size: 0.8rem; line-height: 1.4;">
+          🔑 Id: Guid (PK)<br>
+          👤 UserId: Guid (FK)<br>
+          📊 Status: string<br>
+          📄 Context: JSONB<br>
+          📅 CreatedAt: DateTime
+        </div>
+      </div>
+
+    </div>
+    
+    <div style="margin-top: 2rem; padding: 1rem; background: rgba(14, 165, 233, 0.1); border-radius: 6px; border: 1px solid rgba(14, 165, 233, 0.2); font-size: 0.85rem; line-height: 1.5;">
+      <strong>Migration Plan details:</strong><br>
+      1. Upgrade <code>OrchestrationDbContext</code> to inherit from <code>IdentityDbContext&lt;IdentityUser&lt;Guid&gt;, IdentityRole&lt;Guid&gt;, Guid&gt;</code>.<br>
+      2. Add a non-nullable foreign key <code>UserId</code> in the <code>AnalysisSession</code> entity.<br>
+      3. Create migration step: generates <code>AspNetUsers</code> tables, adds <code>UserId</code> column to <code>AnalysisSessions</code>, populates existing sessions with a seeded administrator <code>UserId</code>, and sets foreign key constraints.
+    </div>
+  </div>
+</div>

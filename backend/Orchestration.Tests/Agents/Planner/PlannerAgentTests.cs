@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
@@ -8,6 +9,8 @@ using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
+using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 using Orchestration.Tests.Agents;
 
 namespace Orchestration.Tests.Agents.Planner;
@@ -546,6 +549,183 @@ public class PlannerAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_skip_approved_calls_and_never_call_executor_in_shadow_mode()
+    {
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: true));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var executor = new FakeControlledToolExecutor();
+        var publisher = new FakeActivityEventPublisher();
+        var proposedPlan = new ToolPlan(
+            [
+                CreateProposedToolCall("data.analyze_transactions"),
+                CreateProposedToolCall(
+                    "legal.search_cnv_regulation",
+                    new Dictionary<string, string>
+                    {
+                        ["query"] = "agentes"
+                    }
+                ),
+                CreateProposedToolCall("workflow.complete"),
+                CreateProposedToolCall("unknown.tool")
+            ]
+        );
+
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            publisher,
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(proposedPlan),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            executor,
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions
+            {
+                Enabled = true,
+                ExecutionMode = ToolCallingExecutionMode.Shadow
+            }
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        dataAgent.WasCalled.Should().BeTrue();
+        legalAgent.WasCalled.Should().BeTrue();
+        executor.WasCalled.Should().BeFalse();
+        result.RequiresHumanApproval.Should().BeTrue();
+        result.ToolPlan.ApprovedCalls.Select(call => call.ToolName)
+            .Should()
+            .Equal("data.analyze_transactions", "legal.search_cnv_regulation");
+        result.ToolPlan.RejectedCalls.Select(call => call.ToolName)
+            .Should()
+            .Equal("workflow.complete", "unknown.tool");
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.SkippedAlreadySatisfied);
+        publisher.PublishedEvents.Select(evt => evt.Type).Should().Contain(
+            [
+                "tool_plan_proposed",
+                "tool_plan_validated",
+                "tool_call_rejected",
+                "tool_call_skipped"
+            ]
+        );
+        publisher.PublishedEvents.Should().NotContain(evt => evt.Type == "tool_call_executed");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_execute_only_approved_calls_in_plan_driven_mode()
+    {
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var executor = new FakeControlledToolExecutor();
+        var publisher = new FakeActivityEventPublisher();
+        var mappedDataResult = CreateDataResult(hasAnomaly: true);
+        var mappedLegalResult = CreateLegalResult(hasComplianceRisk: true);
+        var proposedPlan = new ToolPlan(
+            [
+                CreateProposedToolCall("data.analyze_transactions"),
+                CreateProposedToolCall(
+                    "legal.search_cnv_regulation",
+                    new Dictionary<string, string>
+                    {
+                        ["query"] = "agentes"
+                    }
+                ),
+                CreateProposedToolCall("workflow.complete"),
+                CreateProposedToolCall("money.transfer")
+            ]
+        );
+
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            publisher,
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(proposedPlan),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            executor,
+            new FakeToolExecutionResultMapper(mappedDataResult, mappedLegalResult),
+            CreatePlanDrivenOptions()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        executor.WasCalled.Should().BeTrue();
+        executor.ReceivedCalls.Select(call => call.ToolName)
+            .Should()
+            .Equal("data.analyze_transactions", "legal.search_cnv_regulation");
+        dataAgent.WasCalled.Should().BeFalse();
+        legalAgent.WasCalled.Should().BeFalse();
+        result.ToolPlan.RejectedCalls.Select(call => call.ToolName)
+            .Should()
+            .Equal("workflow.complete", "money.transfer");
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.Executed);
+        result.RequiresHumanApproval.Should().BeTrue();
+        publisher.PublishedEvents.Select(evt => evt.Type).Should().Contain(
+            [
+                "tool_plan_proposed",
+                "tool_plan_validated",
+                "tool_call_rejected",
+                "tool_call_executed"
+            ]
+        );
+        publisher.PublishedEvents.Should().NotContain(evt => evt.Type == "tool_call_skipped");
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_map_plan_driven_tool_outputs_with_real_mapper()
+    {
+        var mappedDataResult = CreateDataResult(hasAnomaly: true);
+        var mappedLegalOutput = CreateCitedLegalSearchResponse();
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var executor = new MappingControlledToolExecutor(mappedDataResult, mappedLegalOutput);
+
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(CreateExecutableToolPlan()),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            executor,
+            new ToolExecutionResultMapper(),
+            CreatePlanDrivenOptions()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            AnalysisSession.Create(),
+            CancellationToken.None
+        );
+
+        executor.WasCalled.Should().BeTrue();
+        dataAgent.WasCalled.Should().BeFalse();
+        legalAgent.WasCalled.Should().BeFalse();
+        result.DataResult.Should().BeEquivalentTo(mappedDataResult);
+        result.LegalResult.HasComplianceRisk.Should().BeTrue();
+        result.LegalResult.Engine.Should().Be("Semantic Kernel + MCP CNV Regulation Server");
+        result.LegalResult.Evidence.Should().ContainSingle();
+        result.ToolPlan.ExecutedCalls
+            .Should()
+            .OnlyContain(call => call.Status == ToolExecutionStatus.Executed);
+        result.RequiresHumanApproval.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task RunAsync_Should_fallback_to_deterministic_agents_when_plan_driven_mapping_fails()
     {
         var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
@@ -667,6 +847,44 @@ public class PlannerAgentTests
                     }
                 )
             ]
+        );
+    }
+
+    private static CnvRegulationSearchResponse CreateCitedLegalSearchResponse()
+    {
+        return new CnvRegulationSearchResponse(
+            Query: "agentes",
+            Results:
+            [
+                new CnvRegulationSearchResult(
+                    DocumentId: "cnv-plan-driven-result",
+                    ChunkId: "chunk-1",
+                    Title: "Plan-driven CNV cited result",
+                    Chapter: null,
+                    Section: "Agentes",
+                    Article: "Articulo 1",
+                    Source: "CNV test fixture",
+                    Url: "https://example.test/cnv",
+                    Snippet: "Cited plan-driven evidence.",
+                    Score: 0.9,
+                    Citations:
+                    [
+                        new CnvRegulationCitation(
+                            Source: "CNV test fixture",
+                            DocumentType: "test_fixture",
+                            ResolutionNumber: "PD",
+                            Title: "Plan-driven CNV cited result",
+                            Chapter: null,
+                            Section: "Agentes",
+                            Article: "Articulo 1",
+                            PublicationDate: null,
+                            Url: "https://example.test/cnv",
+                            QuotedText: "Cited plan-driven evidence."
+                        )
+                    ]
+                )
+            ],
+            Warnings: []
         );
     }
 
@@ -816,6 +1034,68 @@ public class PlannerAgentTests
             IReadOnlyList<ToolExecutionResult> executedCalls)
         {
             return _legalResult;
+        }
+    }
+
+    private sealed class MappingControlledToolExecutor : IControlledToolExecutor
+    {
+        private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+        private readonly DataAgentResult _dataResult;
+        private readonly CnvRegulationSearchResponse _legalOutput;
+
+        public bool WasCalled { get; private set; }
+
+        public MappingControlledToolExecutor(
+            DataAgentResult dataResult,
+            CnvRegulationSearchResponse legalOutput)
+        {
+            _dataResult = dataResult;
+            _legalOutput = legalOutput;
+        }
+
+        public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
+            IReadOnlyList<ApprovedToolCall> calls,
+            CancellationToken cancellationToken)
+        {
+            WasCalled = true;
+
+            return Task.FromResult<IReadOnlyList<ToolExecutionResult>>(
+                calls.Select(CreateResult).ToList()
+            );
+        }
+
+        private ToolExecutionResult CreateResult(
+            ApprovedToolCall call)
+        {
+            object? output = call.ToolName switch
+            {
+                "data.analyze_transactions" => _dataResult,
+                "legal.search_cnv_regulation" => _legalOutput,
+                _ => null
+            };
+
+            if (output is null)
+            {
+                return new ToolExecutionResult(
+                    ToolName: call.ToolName,
+                    Status: ToolExecutionStatus.Failed,
+                    Succeeded: false,
+                    Summary: "Tool is not executable.",
+                    Engine: "Mapping Controlled Tool Executor",
+                    OutputJson: "{}",
+                    Error: "Tool is not executable."
+                );
+            }
+
+            return new ToolExecutionResult(
+                ToolName: call.ToolName,
+                Status: ToolExecutionStatus.Executed,
+                Succeeded: true,
+                Summary: $"Executed {call.ToolName}.",
+                Engine: "Mapping Controlled Tool Executor",
+                OutputJson: JsonSerializer.Serialize(output, JsonOptions),
+                Error: null
+            );
         }
     }
 

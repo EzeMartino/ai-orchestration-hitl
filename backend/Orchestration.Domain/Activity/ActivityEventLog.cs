@@ -2,6 +2,10 @@
 
 public class ActivityEventLog
 {
+    public const int MessageMaxLength = 2_000;
+
+    private const string TruncatedSuffix = " [truncated]";
+
     public Guid Id { get; private set; }
 
     public Guid SessionId { get; private set; }
@@ -31,8 +35,20 @@ public class ActivityEventLog
             SessionId = sessionId,
             Type = type,
             Agent = agent,
-            Message = message,
+            Message = NormalizeMessage(message),
             Timestamp = timestamp
         };
+    }
+
+    private static string NormalizeMessage(string message)
+    {
+        if (message.Length <= MessageMaxLength)
+        {
+            return message;
+        }
+
+        return string.Concat(
+            message.AsSpan(0, MessageMaxLength - TruncatedSuffix.Length),
+            TruncatedSuffix);
     }
 }

@@ -8,6 +8,8 @@ var llmServiceId = builder.Configuration["Llm:ServiceId"];
 
 var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
 var toolCallingExecutionMode = builder.Configuration["ToolCalling:ExecutionMode"];
+var toolCallingFinancialAnalysisToolsEnabled =
+    builder.Configuration["ToolCalling:FinancialAnalysisToolsEnabled"];
 
 var dataAgentFinancialAnalysisToolsEnabled =
     builder.Configuration["DataAgent:FinancialAnalysisToolsEnabled"];
@@ -19,10 +21,14 @@ var dataAgentUseFixtureMetricsFallback =
     builder.Configuration["DataAgent:UseFixtureMetricsFallback"];
 var dataAgentRequireSessionFinancialMetrics =
     builder.Configuration["DataAgent:RequireSessionFinancialMetrics"];
+var dataAgentAiReviewEnabled =
+    builder.Configuration["DataAgent:AiReviewEnabled"];
 var dataAgentRiskThresholdProfile =
     builder.Configuration["DataAgent:RiskThresholdProfile"];
 var dataAgentStructuredMetricsFixturePath =
     builder.Configuration["DataAgent:StructuredMetricsFixturePath"];
+var legalAgentAiReviewEnabled =
+    builder.Configuration["LegalAgent:AiReviewEnabled"];
 
 var postgres = builder
     .AddPostgres("postgres")
@@ -97,13 +103,16 @@ var api = builder
     .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
     .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
     .WithEnvironment("ToolCalling__ExecutionMode", toolCallingExecutionMode ?? "Shadow")
+    .WithEnvironment("ToolCalling__FinancialAnalysisToolsEnabled", toolCallingFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__FinancialAnalysisToolsEnabled", dataAgentFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
     .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")
     .WithEnvironment("DataAgent__UseFixtureMetricsFallback", dataAgentUseFixtureMetricsFallback ?? "false")
     .WithEnvironment("DataAgent__RequireSessionFinancialMetrics", dataAgentRequireSessionFinancialMetrics ?? "false")
+    .WithEnvironment("DataAgent__AiReviewEnabled", dataAgentAiReviewEnabled ?? "false")
     .WithEnvironment("DataAgent__RiskThresholdProfile", dataAgentRiskThresholdProfile ?? "default_oil_and_gas_equity_research")
     .WithEnvironment("DataAgent__StructuredMetricsFixturePath", dataAgentStructuredMetricsFixturePath ?? "")
+    .WithEnvironment("LegalAgent__AiReviewEnabled", legalAgentAiReviewEnabled ?? "false")
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)

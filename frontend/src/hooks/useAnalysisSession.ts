@@ -117,7 +117,7 @@ export function useAnalysisSession() {
       await refreshStartPreflight(createdSession.id);
     } catch (error) {
       console.error(error);
-      setErrorMessage("Could not create the analysis session.");
+      setErrorMessage("No se pudo crear la sesión de análisis.");
     } finally {
       setIsCreating(false);
     }
@@ -147,8 +147,8 @@ export function useAnalysisSession() {
               );
               setErrorMessage(
                 missingMetrics
-                  ? "Structured financial metrics are required before starting this analysis. Attach JSON/CSV metrics and try again."
-                  : conflictPayload.errors[0]?.message ?? "The analysis session could not be started."
+                  ? "Se requieren métricas financieras estructuradas antes de iniciar este análisis. Adjunte métricas en formato JSON/CSV/PDF e intente nuevamente."
+                  : conflictPayload.errors[0]?.message ?? "No se pudo iniciar la sesión de análisis."
               );
               await loadSessionEvents(session.id);
               return;
@@ -157,11 +157,11 @@ export function useAnalysisSession() {
             setErrorMessage(
               conflictPayload.error && typeof conflictPayload.error === "string"
                 ? conflictPayload.error
-                : "Could not start the analysis session."
+                : "No se pudo iniciar la sesión de análisis."
             );
             return;
           } catch {
-            setErrorMessage("Could not start the analysis session.");
+            setErrorMessage("No se pudo iniciar la sesión de análisis.");
             return;
           }
         }
@@ -179,7 +179,7 @@ export function useAnalysisSession() {
       await refreshStartPreflight(updatedSession.id);
     } catch (error) {
       console.error(error);
-      setErrorMessage("Could not start the analysis session.");
+      setErrorMessage("No se pudo iniciar la sesión de análisis.");
     } finally {
       setIsStarting(false);
     }
@@ -207,7 +207,7 @@ export function useAnalysisSession() {
       setDecisionReason("");
     } catch (error) {
       console.error(error);
-      setErrorMessage(`Could not ${decision} the analysis session.`);
+      setErrorMessage(`No se pudo ${decision === "approve" ? "aprobar" : "rechazar"} la sesión de análisis.`);
     } finally {
       setIsSubmittingDecision(false);
     }
@@ -224,7 +224,7 @@ export function useAnalysisSession() {
       await refreshStartPreflight(loadedSession.id);
     } catch (error) {
       console.error(error);
-      setErrorMessage("Could not load the analysis session.");
+      setErrorMessage("No se pudo cargar la sesión de análisis.");
     }
   };
 

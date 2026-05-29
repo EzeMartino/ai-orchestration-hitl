@@ -4,11 +4,12 @@ public sealed class StructuredFinancialMetricsFileUploadOptions
 {
     public const string SectionName = "StructuredFinancialMetricsFileUpload";
 
-    public long MaxFileSizeBytes { get; init; } = 1_048_576;
+    public long MaxFileSizeBytes { get; init; } = 20_971_520;
 
     public string[] AllowedExtensions { get; init; } =
     [
         ".json",
-        ".csv"
+        ".csv",
+        ".pdf"
     ];
 }

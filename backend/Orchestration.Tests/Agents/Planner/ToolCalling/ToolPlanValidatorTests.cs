@@ -208,6 +208,31 @@ public class ToolPlanValidatorTests
         );
     }
 
+    [Theory]
+    [InlineData("unknown.tool")]
+    [InlineData("workflow.complete")]
+    [InlineData("approval.approve")]
+    [InlineData("approval.reject")]
+    [InlineData("money.transfer")]
+    [InlineData("account.block")]
+    [InlineData("legal.declare_violation")]
+    [InlineData("data.delete_metrics")]
+    public void Validate_Should_deny_unsafe_or_unknown_tools_by_default(
+        string toolName)
+    {
+        var validator = new ToolPlanValidator();
+
+        var result = validator.Validate(
+            CreatePlan(CreateCall(toolName))
+        );
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(toolName);
+        result.RejectedCalls.Single().Reason.Should().NotBeNullOrWhiteSpace();
+    }
+
     [Fact]
     public void Validate_Should_cap_max_tool_calls()
     {

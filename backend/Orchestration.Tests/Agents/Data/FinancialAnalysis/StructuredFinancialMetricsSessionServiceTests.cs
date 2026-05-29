@@ -137,6 +137,40 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
     }
 
     [Fact]
+    public async Task SaveAsync_Should_preserve_pdf_file_provenance()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, publisher);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "pdf_file",
+                    OriginalFileName: "report.pdf",
+                    FileSizeBytes: 2048,
+                    ContentHash: "abc123"
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.IsValid.Should().BeTrue();
+        result.Context.Should().NotBeNull();
+        result.Context!.Provenance.Should().NotBeNull();
+        result.Context.Provenance!.IngestionMethod.Should().Be("pdf_file");
+        result.Context.Provenance.OriginalFileName.Should().Be("report.pdf");
+        result.Context.Provenance.FileSizeBytes.Should().Be(2048);
+        result.Context.Provenance.ContentHash.Should().Be("abc123");
+    }
+
+    [Fact]
     public async Task SaveAsync_Should_not_emit_event_when_input_is_invalid()
     {
         await using var dbContext = CreateDbContext();

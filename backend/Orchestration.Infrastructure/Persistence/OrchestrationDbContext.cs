@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
@@ -5,7 +7,7 @@ using Orchestration.Domain.Activity;
 
 namespace Orchestration.Infrastructure.Persistence;
 
-public class OrchestrationDbContext : DbContext, IOrchestrationDbContext
+public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, IdentityRole<Guid>, Guid>, IOrchestrationDbContext
 {
     public OrchestrationDbContext(DbContextOptions<OrchestrationDbContext> options)
         : base(options)
@@ -17,11 +19,22 @@ public class OrchestrationDbContext : DbContext, IOrchestrationDbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        base.OnModelCreating(modelBuilder);
+
         modelBuilder.Entity<AnalysisSession>(builder =>
         {
             builder.ToTable("AnalysisSessions");
 
             builder.HasKey(x => x.Id);
+
+            builder.Property(x => x.UserId)
+                .IsRequired();
+
+            builder.HasOne<IdentityUser<Guid>>()
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Restrict);
 
             builder.Property(x => x.Status)
                 .HasConversion<string>()

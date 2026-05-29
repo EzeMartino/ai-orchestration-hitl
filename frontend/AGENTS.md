@@ -29,6 +29,20 @@
 - Maintain concise, scan-friendly status hierarchy: current session, planner review, tool audit, evidence, activity timeline, human decision.
 - Keep UI changes compatible with `npm run build`; no new package unless it clearly improves the app.
 
+## Development Insights
+- Use `http://localhost:5173` for local UI validation. `127.0.0.1` can miss the configured CORS surface.
+- AppHost injects `VITE_API_URL`; standalone Vite uses the local fallback. When behavior differs, inspect the generated frontend env and API endpoint first.
+- Start readiness is a UX guardrail, not the security boundary. Backend `POST /api/analysis-sessions/{id}/start` preflight remains authoritative.
+- Disable `Start Session` only when preflight was loaded successfully and `canStart=false`. If readiness fetch fails, allow start and let backend return the real result.
+- Structured metrics UI supports JSON paste, CSV paste, JSON/CSV upload, and sample templates. Saving metrics must refresh metrics context and start preflight, but must not start analysis.
+- In production-like mode, a new session without metrics should show `STRUCTURED_FINANCIAL_METRICS_REQUIRED` and `Start blocked by preflight`.
+- Once `financialAnalysis` exists, show `Financial Risk Evidence` and hide legacy `Risk Evidence` to avoid duplicate DataAgent output.
+- Financial panels should show metrics source/provenance, threshold profile, thresholds used, explainable risk signals, warnings, limitations, and DataAgent AI Review metadata.
+- Show fixture fallback and missing-required-metrics warnings prominently. Never imply fixture data is session-specific.
+- LegalAgent UI should frame outputs as possible regulatory review areas, keep citations visible, and avoid legal conclusion/recommendation language.
+- Reloaded `Completed` and `Failed` sessions must restore evidence panels and Activity Feed. Do not gate evidence visibility on active/in-progress states.
+- For browser smoke tests on this Windows machine, Chrome may be blocked by local policy; Playwright with `--channel=msedge` worked for final validation.
+
 ## References
 - `../README.md`: product framing, safety model, run commands, screenshot set.
 - `../docs/screenshots`: expected audit-console surfaces.

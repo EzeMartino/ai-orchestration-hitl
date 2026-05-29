@@ -14,8 +14,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private const string Engine = "Semantic Kernel + CSnakes + Python/Pandas";
     private const string BasePeriod = "2024A";
     private const string ComparisonPeriod = "2025E";
-    private const string StructuredMetricsOnlyLimitation =
-        "Financial analysis uses structured metrics only. It does not parse PDFs, perform OCR, or make operational decisions.";
+    private const string FinancialMetricsInputLimitation =
+        "Financial analysis can parse PDFs and run OCR when needed, but structured JSON or CSV uploads are recommended to preserve data fidelity. It does not make operational decisions.";
     private const string FixtureFallbackWarning =
         "Fixture fallback metrics were used. This mode is intended for development/demo only.";
     private const string RequiredMetricsWarning =
@@ -183,7 +183,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         );
         var severity = ResolveSeverity(signals.Signals.Select(signal => signal.Severity));
         var hasAnomaly = signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
-        var limitations = new[] { StructuredMetricsOnlyLimitation };
+        var limitations = new[] { FinancialMetricsInputLimitation };
         var aiReview = await _aiReviewService.ReviewAsync(
             new FinancialAnalysisAiReviewInput(
                 SessionId: report.SessionId.ToString(),
@@ -254,7 +254,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 RiskSignals: [],
                 RiskEvidence: [],
                 Warnings: ["Structured financial metrics were not available."],
-                Limitations: [StructuredMetricsOnlyLimitation],
+                Limitations: [FinancialMetricsInputLimitation],
                 MetricsInputSource: FinancialMetricsInputSources.None,
                 AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
             )
@@ -290,7 +290,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Limitations:
                 [
                     "No financial ratios or period comparisons were computed because no structured metrics were available.",
-                    StructuredMetricsOnlyLimitation
+                    FinancialMetricsInputLimitation
                 ],
                 MetricsInputSource: FinancialMetricsInputSources.None,
                 AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
