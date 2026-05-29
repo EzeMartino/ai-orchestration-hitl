@@ -4,6 +4,19 @@ interface EvidencePanelProps {
   anomaly: AnalysisContext["anomaly"];
 }
 
+function formatAnalysisEngine(engine: string) {
+  const normalizedEngine = engine.trim().toLowerCase();
+
+  if (
+    normalizedEngine === "semantic kernel + python/csnakes" ||
+    normalizedEngine.includes("legacy fallback")
+  ) {
+    return "Deterministic fallback";
+  }
+
+  return engine;
+}
+
 export function EvidencePanel({ anomaly }: EvidencePanelProps) {
   if (!anomaly) {
     return null;
@@ -19,7 +32,7 @@ export function EvidencePanel({ anomaly }: EvidencePanelProps) {
 
           {anomaly.engine && (
             <div className="engineBadge">
-              Analysis engine: <strong>{anomaly.engine}</strong>
+              Analysis engine: <strong>{formatAnalysisEngine(anomaly.engine)}</strong>
             </div>
           )}
         </div>
