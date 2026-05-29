@@ -207,10 +207,11 @@ It demonstrates how to combine:
 - deterministic workflow orchestration,
 - specialized agents,
 - Python analytics,
-- regulatory retrieval via MCP,
+- regulatory evidence retrieval,
 - human approval gates,
 - real-time activity streaming,
-- persisted audit history.
+- persisted audit history,
+- multi-user authentication & session isolation.
 
 ## What This Project Is Not Yet
 
@@ -512,6 +513,20 @@ When the DataAgent or LegalAgent detects risk:
 
 The system only moves to `Completed` after explicit approval.
 If rejected, the session moves to `Failed`.
+
+## Multi-User Authentication & Session Isolation
+
+The platform includes a robust, production-grade security architecture that ensures data privacy and workspace isolation across multiple users.
+
+### Security & Privacy Architecture
+- **Authentication**: Built on **ASP.NET Core Identity** and secured via secure, stateless **JWT Bearer Tokens**.
+- **Authorization**: All API endpoints and SignalR connection handshakes require a valid JWT token.
+- **Session Isolation**: Every `AnalysisSession` is owned by a specific `UserId`. All database queries, telemetry, and operations are strictly isolated—users can only query, modify, or run analysis on their own sessions. Any attempt to access another user's session returns a `404 Not Found` (rather than a `403 Forbidden`) to prevent resource enumeration.
+
+### React Authentication Experience
+- **Premium Route Guard**: Unauthenticated users are seamlessly redirected to a premium, glassmorphic login/registration screen.
+- **Obsidian Dark Mode UI**: Standardized obsidian background layouts with glowing inputs and custom form animations.
+- **User Avatar Profile & Logout**: Shows a glowing profile badge in the header displaying the capitalized first letter of the user's email, alongside the full email address, and a dedicated logout button that safely terminates SignalR connections and clears cached credentials.
 
 ## Auditability
 
@@ -1127,6 +1142,17 @@ Aspire starts:
 - CNV migration executable,
 - optional CNV ingestion executable,
 - React frontend.
+
+### Authentication & Seed Credentials
+
+When the backend runs for the first time, database migrations will automatically apply and seed two default accounts for local development and testing:
+
+| Role | Email | Password |
+| --- | --- | --- |
+| **Administrator** | `admin@ezemartino.com` | `Password1!` |
+| **Standard User** | `user@ezemartino.com` | `Password1!` |
+
+You can also use the registration form on the login screen to create a new, isolated account.
 
 ### Enabling LLM Planner Reasoning
 
