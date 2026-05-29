@@ -105,7 +105,7 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         result.Context.Provenance.WarningCount.Should().Be(result.Warnings.Count);
         publisher.PublishedEvents.Should().ContainSingle(e =>
             e.Type == "structured_financial_metrics_attached" &&
-            e.Message.Contains("1 metrics from json_paste", StringComparison.Ordinal)
+            e.Message.Contains("1 métricas desde json_paste", StringComparison.Ordinal)
         );
     }
 

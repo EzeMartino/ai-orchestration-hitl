@@ -35,7 +35,7 @@ public class McpRegulatoryKnowledgeSourceTests
         result.RiskLevel.Should().Be("Medium");
         result.Findings.Should().NotBeEmpty();
         result.Warnings.Should().Contain(
-            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
         );
 
         result.Findings
@@ -78,7 +78,7 @@ public class McpRegulatoryKnowledgeSourceTests
         result.Findings.Should().BeEmpty();
         result.Warnings.Should().Contain("candidate source");
         result.Warnings.Should().Contain(
-            "No cited CNV regulatory evidence was found by the MCP search strategy."
+            "No se encontró evidencia regulatoria citada de la CNV mediante la estrategia de búsqueda MCP."
         );
     }
 
@@ -94,7 +94,7 @@ public class McpRegulatoryKnowledgeSourceTests
 
         result.Warnings.Should().Contain("requires review");
         result.Warnings.Should().Contain(
-            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
         );
     }
 
@@ -507,7 +507,7 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         // Assert
-        result.Warnings.Should().Contain("CNV MCP search failed for one query. See application logs for details.");
+        result.Warnings.Should().Contain("La búsqueda en la CNV a través de MCP falló para una consulta. Consulte los registros de la aplicación para más detalles.");
         result.Warnings.Should().NotContain(w => w.Contains("transport failed"));
         result.Warnings.Should().NotContain(w => w.Contains("C:\\sensitive"));
     }
@@ -607,7 +607,7 @@ public class McpRegulatoryKnowledgeSourceTests
         // Assert
         // Margins map to "resultados", which returns uncited result
         result.Findings.Should().NotContain(f => f.Finding.Contains("uncited"));
-        result.Warnings.Should().Contain(w => w.Contains("Some CNV/Infoleg search results were ignored as strong evidence because they did not include citations."));
+        result.Warnings.Should().Contain(w => w.Contains("Algunos resultados de búsqueda de CNV/Infoleg se ignoraron como evidencia sólida debido a que no incluían citas."));
         result.LegalReview.Should().NotBeNull();
         result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
         result.LegalReview.EvidenceReferences.Should().BeEmpty();
@@ -636,7 +636,7 @@ public class McpRegulatoryKnowledgeSourceTests
         // Assert
         result.HasComplianceRisk.Should().BeTrue();
         result.Findings.Should().Contain(f => f.Finding.Contains("fallback"));
-        result.Warnings.Should().Contain(w => w.Contains("No specific financial risk signals were available; using a general financial reporting query."));
+        result.Warnings.Should().Contain(w => w.Contains("No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera."));
         result.LegalReview.Should().NotBeNull();
         result.LegalReview!.UsedLlm.Should().BeFalse();
         result.LegalReview.UsedFallback.Should().BeTrue();

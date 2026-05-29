@@ -81,7 +81,7 @@ public sealed class McpRegulatoryKnowledgeSource(
                         report.SessionId,
                         "legal_cnv_queries_derived",
                         "LegalAgent",
-                        "LegalAgent derived CNV search queries from financial analysis risk signals.",
+                        "LegalAgent derivó consultas de búsqueda CNV a partir de las señales de riesgo del análisis financiero.",
                         DateTimeOffset.UtcNow
                     ),
                     cancellationToken
@@ -102,15 +102,15 @@ public sealed class McpRegulatoryKnowledgeSource(
         var warnings = new List<string>(outcome.Warnings);
         if (sourceStr == "fallback")
         {
-            warnings.Add("No specific financial risk signals were available; using a general financial reporting query.");
+            warnings.Add("No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera.");
         }
 
         var findings = outcome.Findings;
         var hasRisk = findings.Count > 0;
 
         var summary = hasRisk
-            ? "CNV regulatory evidence was found for the submitted financial anomaly. Human legal review is required."
-            : "No CNV regulatory evidence with citations was found for the submitted financial anomaly.";
+            ? "Se encontró evidencia regulatoria de la CNV para la anomalía financiera enviada. Se requiere revisión legal humana."
+            : "No se encontró evidencia regulatoria de la CNV con citas para la anomalía financiera enviada.";
 
         // AI Review Execution
         LegalAnalysisReviewResult legalReviewResult;
@@ -145,15 +145,15 @@ public sealed class McpRegulatoryKnowledgeSource(
                 string activityMsg;
                 if (legalReviewResult.UsedLlm)
                 {
-                    activityMsg = "LegalAgent AI review completed using LLM.";
+                    activityMsg = "Revisión de IA de LegalAgent completada usando LLM.";
                 }
                 else if (legalReviewResult.FailureReason == "financial_analysis_missing")
                 {
-                    activityMsg = "LegalAgent AI review was not executed.";
+                    activityMsg = "La revisión de IA de LegalAgent no fue ejecutada.";
                 }
                 else
                 {
-                    activityMsg = "LegalAgent AI review completed using deterministic fallback.";
+                    activityMsg = "Revisión de IA de LegalAgent completada usando la alternativa determinista.";
                 }
 
                 await _activityPublisher.PublishAsync(
@@ -346,13 +346,13 @@ public sealed class McpRegulatoryKnowledgeSource(
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "CNV MCP search failed for query: {Query}", queryInfo.Query);
-                warnings.Add("CNV MCP search failed for one query. See application logs for details.");
+                warnings.Add("La búsqueda en la CNV a través de MCP falló para una consulta. Consulte los registros de la aplicación para más detalles.");
             }
         }
 
         if (hasUncitedEvidence)
         {
-            warnings.Add("Some CNV/Infoleg search results were ignored as strong evidence because they did not include citations.");
+            warnings.Add("Algunos resultados de búsqueda de CNV/Infoleg se ignoraron como evidencia sólida debido a que no incluían citas.");
         }
 
         // Deduplicate findings
@@ -369,11 +369,11 @@ public sealed class McpRegulatoryKnowledgeSource(
 
         if (uniqueFindings.Count > 0)
         {
-            warnings.Add("Automated regulatory retrieval only. Human legal review is required before making operational decisions.");
+            warnings.Add("Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas.");
         }
         else
         {
-            warnings.Add("No cited CNV regulatory evidence was found by the MCP search strategy.");
+            warnings.Add("No se encontró evidencia regulatoria citada de la CNV mediante la estrategia de búsqueda MCP.");
         }
 
         return new CnvSearchReviewResult(

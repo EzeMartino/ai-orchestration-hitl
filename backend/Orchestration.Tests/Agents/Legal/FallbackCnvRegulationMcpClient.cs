@@ -108,7 +108,7 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
         result.HasComplianceRisk.Should().BeTrue();
         result.Findings.Should().NotBeEmpty();
         result.Warnings.Should().Contain(
-            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
         );
 
         client.ReceivedQueries.Should().Contain("régimen informativo estados financieros emisoras");

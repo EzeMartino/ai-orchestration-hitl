@@ -343,7 +343,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             .Which.Should().BeEquivalentTo(new
             {
                 Code = "PDF_OCR_NOT_CONFIGURED",
-                Message = "PDF OCR dependencies are not configured.",
+                Message = "Las dependencias de OCR para PDF no están configuradas.",
                 Severity = "Error"
             });
     }

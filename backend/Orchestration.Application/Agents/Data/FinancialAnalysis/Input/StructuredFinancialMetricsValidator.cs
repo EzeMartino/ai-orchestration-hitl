@@ -40,7 +40,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "INPUT_REQUIRED",
-                "Structured financial metrics input is required."
+                "Se requiere la entrada de métricas financieras estructuradas."
             ));
 
             return BuildResult(validatedMetrics, errors, warnings);
@@ -50,19 +50,19 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "DOCUMENT_ID_REQUIRED",
-                "DocumentId is required."
+                "El identificador del documento (DocumentId) es obligatorio."
             ));
         }
 
-        AddDocumentWarningIfMissing(input.Company, "COMPANY_MISSING", "Company is missing.", warnings);
-        AddDocumentWarningIfMissing(input.Currency, "CURRENCY_MISSING", "Currency is missing.", warnings);
-        AddDocumentWarningIfMissing(input.Unit, "UNIT_MISSING", "Unit is missing.", warnings);
+        AddDocumentWarningIfMissing(input.Company, "COMPANY_MISSING", "Falta el nombre de la compañía.", warnings);
+        AddDocumentWarningIfMissing(input.Currency, "CURRENCY_MISSING", "Falta la moneda.", warnings);
+        AddDocumentWarningIfMissing(input.Unit, "UNIT_MISSING", "Falta la unidad de medida.", warnings);
 
         if (input.Metrics is null || input.Metrics.Count == 0)
         {
             errors.Add(Error(
                 "METRICS_REQUIRED",
-                "At least one financial metric is required."
+                "Se requiere al menos una métrica financiera."
             ));
 
             return BuildResult(validatedMetrics, errors, warnings);
@@ -93,7 +93,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "METRIC_REQUIRED",
-                "Metric entry is required."
+                "Se requiere la entrada de la métrica."
             ));
 
             return;
@@ -106,7 +106,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "METRIC_NAME_REQUIRED",
-                "Metric name is required.",
+                "El nombre de la métrica es obligatorio.",
                 metric.Name,
                 period
             ));
@@ -116,7 +116,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "METRIC_PERIOD_REQUIRED",
-                "Metric period is required.",
+                "El período de la métrica es obligatorio.",
                 name,
                 metric.Period
             ));
@@ -126,7 +126,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             errors.Add(Error(
                 "METRIC_VALUE_REQUIRED",
-                "Metric value is required.",
+                "El valor de la métrica es obligatorio.",
                 name,
                 period
             ));
@@ -143,7 +143,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             warnings.Add(Warning(
                 "UNKNOWN_METRIC_NAME",
-                "Metric name is not in the initial known financial metric list.",
+                "El nombre de la métrica no está en la lista inicial de métricas financieras conocidas.",
                 name,
                 period
             ));
@@ -189,7 +189,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
             validatedMetrics[key] = metric;
             warnings.Add(Warning(
                 "DUPLICATE_METRIC_REPLACED",
-                "Duplicate metric replaced by a higher-confidence value.",
+                "Métrica duplicada reemplazada por un valor de mayor confianza.",
                 metric.Name,
                 metric.Period
             ));
@@ -199,7 +199,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
 
         warnings.Add(Warning(
             "DUPLICATE_METRIC_IGNORED",
-            "Duplicate metric ignored because an equal or higher-confidence value already exists.",
+            "Métrica duplicada ignorada porque ya existe un valor de igual o mayor confianza.",
             metric.Name,
             metric.Period
         ));
@@ -219,7 +219,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
 
         warnings.Add(Warning(
             "METRIC_UNIT_DEFAULTED",
-            "Metric unit was missing and was defaulted.",
+            "Faltaba la unidad de la métrica y se asignó la unidad predeterminada.",
             name,
             period
         ));
@@ -243,7 +243,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
 
         warnings.Add(Warning(
             "METRIC_CURRENCY_DEFAULTED",
-            "Metric currency was missing and was defaulted from the document when available.",
+            "Faltaba la moneda de la métrica y se asignó la del documento cuando estuvo disponible.",
             name,
             period
         ));
@@ -266,7 +266,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
 
         warnings.Add(Warning(
             "METRIC_SOURCE_DEFAULTED",
-            "Metric source was missing and was defaulted.",
+            "Faltaba el origen de la métrica y se asignó el valor predeterminado.",
             name,
             period
         ));
@@ -284,7 +284,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             warnings.Add(Warning(
                 "METRIC_CONFIDENCE_DEFAULTED",
-                "Metric confidence was missing and was defaulted.",
+                "Faltaba la confianza de la métrica y se asignó el nivel predeterminado.",
                 name,
                 period
             ));
@@ -296,7 +296,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             warnings.Add(Warning(
                 "METRIC_CONFIDENCE_CLAMPED",
-                "Metric confidence was below 0 and was clamped.",
+                "La confianza de la métrica era menor a 0 y fue ajustada.",
                 name,
                 period
             ));
@@ -308,7 +308,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             warnings.Add(Warning(
                 "METRIC_CONFIDENCE_CLAMPED",
-                "Metric confidence was above 1 and was clamped.",
+                "La confianza de la métrica era mayor a 1 y fue ajustada.",
                 name,
                 period
             ));
@@ -334,7 +334,7 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
         {
             warnings.Add(Warning(
                 "METRIC_SOURCE_PAGE_IGNORED",
-                "Metric source page was not positive and was ignored.",
+                "La página de origen de la métrica no era un número positivo y fue ignorada.",
                 name,
                 period
             ));

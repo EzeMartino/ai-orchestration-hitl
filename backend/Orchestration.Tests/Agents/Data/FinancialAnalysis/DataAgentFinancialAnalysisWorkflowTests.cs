@@ -68,7 +68,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.Warnings.Should().Contain("Structured metrics only.");
         result.FinancialAnalysis.Warnings.Should().Contain("Human review recommended.");
         result.FinancialAnalysis.Limitations.Should().Contain(limitation =>
-            limitation.Contains("structured metrics only", StringComparison.OrdinalIgnoreCase)
+            limitation.Contains("JSON o CSV", StringComparison.OrdinalIgnoreCase)
         );
         result.FinancialAnalysis.AiReview.Should().NotBeNull();
         result.FinancialAnalysis.AiReview!.UsedLlm.Should().BeFalse();
@@ -97,11 +97,11 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.Engine.Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
         result.HasAnomaly.Should().BeTrue();
         result.Severity.Should().Be("Medium");
-        result.Summary.Should().Be("Structured financial metrics were not available. Human review recommended.");
+        result.Summary.Should().Be("Las métricas financieras estructuradas no estaban disponibles. Se recomienda una revisión humana.");
         result.Evidence.Should().ContainSingle()
             .Which.Metric.Should().Be("StructuredFinancialMetrics");
         result.FinancialAnalysis.Should().NotBeNull();
-        result.FinancialAnalysis!.Warnings.Should().Contain("Structured financial metrics were not available.");
+        result.FinancialAnalysis!.Warnings.Should().Contain("Las métricas financieras estructuradas no estaban disponibles.");
         result.FinancialAnalysis.Limitations.Should().NotBeEmpty();
         result.FinancialAnalysis.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
         result.FinancialAnalysis.AiReview.Should().NotBeNull();
@@ -135,14 +135,14 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.Engine.Should().Be("Semantic Kernel + CSnakes + Python/Pandas");
         result.HasAnomaly.Should().BeTrue();
         result.Severity.Should().Be("Medium");
-        result.Summary.Should().Be("Structured financial metrics are required but were not attached to this session.");
+        result.Summary.Should().Be("Se requieren métricas financieras estructuradas, pero no se adjuntaron a esta sesión.");
         result.FinancialAnalysis.Should().NotBeNull();
         result.FinancialAnalysis!.MetricsInputSource.Should().Be(FinancialMetricsInputSources.None);
         result.FinancialAnalysis.Warnings.Should().Contain(
-            "Structured financial metrics are required for this mode but were not attached to the session."
+            "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a la sesión."
         );
         result.FinancialAnalysis.Limitations.Should().Contain(
-            "No financial ratios or period comparisons were computed because no structured metrics were available."
+            "No se calcularon índices financieros ni comparaciones de períodos porque no había métricas estructuradas disponibles."
         );
         result.FinancialAnalysis.AiReview.Should().NotBeNull();
         result.FinancialAnalysis.AiReview!.Summary.Should().Be("AI review was not executed.");
@@ -239,7 +239,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             .Be(FinancialMetricsInputSources.FixtureFallback);
         result.FinancialAnalysis.MetricsProvenance.Should().BeNull();
         result.FinancialAnalysis.Warnings.Should().Contain(
-            "Fixture fallback metrics were used. This mode is intended for development/demo only."
+            "Se utilizaron métricas de prueba predefinidas (fixtures). Este modo está destinado únicamente a desarrollo y demostración."
         );
         publisher.PublishedEvents.Should().ContainSingle(e =>
             e.Type == "financial_metrics_fixture_fallback_used" &&
@@ -269,7 +269,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             .Should()
             .Be(FinancialMetricsInputSources.SessionContext);
         result.FinancialAnalysis.Warnings.Should().NotContain(
-            "Fixture fallback metrics were used. This mode is intended for development/demo only."
+            "Se utilizaron métricas de prueba predefinidas (fixtures). Este modo está destinado únicamente a desarrollo y demostración."
         );
         publisher.PublishedEvents.Should().BeEmpty();
     }

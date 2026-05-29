@@ -23,7 +23,7 @@ public sealed class StructuredFinancialMetricsCsvParser
         {
             errors.Add(Error(
                 "CSV_INPUT_REQUIRED",
-                "Structured financial metrics CSV input is required."
+                "Se requiere la entrada CSV de métricas financieras estructuradas."
             ));
 
             return Failed(errors, warnings);
@@ -33,7 +33,7 @@ public sealed class StructuredFinancialMetricsCsvParser
         {
             errors.Add(Error(
                 "CSV_REQUIRED",
-                "CSV content is required."
+                "El contenido del CSV es obligatorio."
             ));
 
             return Failed(errors, warnings);
@@ -50,7 +50,7 @@ public sealed class StructuredFinancialMetricsCsvParser
         {
             errors.Add(Error(
                 "CSV_HEADER_REQUIRED",
-                "CSV header row is required."
+                "La fila de encabezados en el CSV es obligatoria."
             ));
 
             return Failed(errors, warnings);
@@ -64,7 +64,7 @@ public sealed class StructuredFinancialMetricsCsvParser
             {
                 errors.Add(Error(
                     "CSV_REQUIRED_HEADER_MISSING",
-                    $"CSV header '{requiredHeader}' is required."
+                    $"El encabezado CSV '{requiredHeader}' es obligatorio."
                 ));
             }
         }
@@ -85,7 +85,7 @@ public sealed class StructuredFinancialMetricsCsvParser
             {
                 errors.Add(Error(
                     "CSV_ROW_INVALID_COLUMN_COUNT",
-                    $"CSV row {rowNumber} has more values than the header row."
+                    $"La fila CSV {rowNumber} tiene más valores que la fila de encabezados."
                 ));
 
                 continue;
@@ -206,7 +206,7 @@ public sealed class StructuredFinancialMetricsCsvParser
         {
             errors.Add(Error(
                 "CSV_UNCLOSED_QUOTE",
-                "CSV contains an unclosed quoted field."
+                "El CSV contiene un campo entre comillas sin cerrar."
             ));
 
             return [];
@@ -255,7 +255,7 @@ public sealed class StructuredFinancialMetricsCsvParser
 
         errors.Add(Error(
             "CSV_INVALID_DECIMAL",
-            $"CSV row {rowNumber} has an invalid decimal value for '{columnName}'."
+            $"La fila CSV {rowNumber} tiene un valor decimal no válido para '{columnName}'."
         ));
 
         return null;
@@ -283,7 +283,7 @@ public sealed class StructuredFinancialMetricsCsvParser
 
         errors.Add(Error(
             "CSV_INVALID_INT",
-            $"CSV row {rowNumber} has an invalid integer value for '{columnName}'."
+            $"La fila CSV {rowNumber} tiene un valor entero no válido para '{columnName}'."
         ));
 
         return null;

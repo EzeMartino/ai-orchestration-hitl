@@ -56,7 +56,7 @@ public sealed class StructuredFinancialMetricsTextParser
             {
                 Warning(
                     "PDF_OCR_USED",
-                    "PDF text was extracted using OCR."
+                    "El texto del PDF fue extraído utilizando OCR (Reconocimiento Óptico de Caracteres)."
                 )
             }
             : [];
@@ -76,7 +76,7 @@ public sealed class StructuredFinancialMetricsTextParser
                 [
                     Error(
                         "PDF_METRICS_NOT_FOUND",
-                        "No supported financial metrics were found in the extracted PDF text."
+                        "No se encontraron métricas financieras soportadas en el texto extraído del PDF."
                     )
                 ],
                 Warnings: warnings,

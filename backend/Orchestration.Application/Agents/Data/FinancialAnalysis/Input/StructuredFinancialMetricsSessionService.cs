@@ -100,7 +100,7 @@ public sealed class StructuredFinancialMetricsSessionService
                 session.Id,
                 "structured_financial_metrics_attached",
                 "DataAgent",
-                $"Structured financial metrics attached: {metrics.Count} metrics from {provenance.IngestionMethod}.",
+                $"Métricas financieras estructuradas adjuntas: {metrics.Count} métricas desde {provenance.IngestionMethod}.",
                 DateTimeOffset.UtcNow
             ),
             cancellationToken

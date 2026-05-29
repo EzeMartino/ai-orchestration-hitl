@@ -10,7 +10,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
     private const string NativePdfSource = "pdf_extraction";
     private const string OcrPdfSource = "pdf_ocr";
     private const string OcrNotConfiguredCode = "PDF_OCR_NOT_CONFIGURED";
-    private const string OcrNotConfiguredMessage = "PDF OCR dependencies are not configured.";
+    private const string OcrNotConfiguredMessage = "Las dependencias de OCR para PDF no están configuradas.";
 
     private readonly IPdfTextExtractor _pdfTextExtractor;
     private readonly IOcrTextExtractor _ocrTextExtractor;
@@ -131,7 +131,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
         var warnings = result.Warnings
             .Append(new FinancialMetricsValidationIssue(
                 Code: "PDF_METRIC_CONFIDENCE_BELOW_THRESHOLD",
-                Message: "One or more PDF metrics were ignored because confidence was below the configured threshold.",
+                Message: "Se ignoraron una o más métricas del PDF debido a que la confianza estaba por debajo del umbral configurado.",
                 MetricName: null,
                 Period: null,
                 Severity: "Warning"))
@@ -147,7 +147,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
                 [
                     new FinancialMetricsValidationIssue(
                         Code: "PDF_METRICS_BELOW_CONFIDENCE_THRESHOLD",
-                        Message: "No supported financial metrics met the configured confidence threshold.",
+                        Message: "Ninguna métrica financiera soportada cumplió con el umbral de confianza configurado.",
                         MetricName: null,
                         Period: null,
                         Severity: "Error")

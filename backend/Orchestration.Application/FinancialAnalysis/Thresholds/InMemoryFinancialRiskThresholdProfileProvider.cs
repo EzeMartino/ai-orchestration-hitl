@@ -7,53 +7,53 @@ public sealed class InMemoryFinancialRiskThresholdProfileProvider : IFinancialRi
 {
     private static readonly FinancialRiskThresholdProfile DefaultProfile = new(
         Name: "default",
-        Description: "Standard moderate thresholds for general corporate credit risk evaluation.",
+        Description: "Umbrales moderados estándar para la evaluación general de riesgo crediticio corporativo.",
         Thresholds: new[]
         {
-            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.2m, "Medium", "Current ratio is below 1.2. Human review recommended."),
-            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 1.0m, "Medium", "Quick ratio is below 1.0. Liquidity should be reviewed."),
-            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 3.0m, "High", "Net debt to EBITDA is above the configured risk threshold."),
-            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 2.0m, "High", "Debt to equity is above the configured risk threshold."),
-            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 2.5m, "High", "Interest coverage is below the configured risk threshold.")
+            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.2m, "Medium", "El índice de liquidez corriente es menor a 1.2. Se recomienda revisión humana."),
+            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 1.0m, "Medium", "La prueba del ácido (quick ratio) es menor a 1.0. Se debe revisar la liquidez."),
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 3.0m, "High", "La relación deuda neta a EBITDA supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 2.0m, "High", "La relación deuda/patrimonio neto supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 2.5m, "High", "La cobertura de intereses está por debajo del umbral de riesgo configurado.")
         }
     );
 
     private static readonly FinancialRiskThresholdProfile OilAndGasProfile = new(
         Name: "oil_and_gas",
-        Description: "Industry-specific risk guidelines for energy and commodity extraction corporations.",
+        Description: "Pautas de riesgo específicas del sector para corporaciones de extracción de energía y materias primas.",
         Thresholds: new[]
         {
-            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.0m, "Medium", "Current ratio is below 1.0. Human review recommended."),
-            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 0.8m, "Medium", "Quick ratio is below 0.8. Liquidity should be reviewed."),
-            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 3.0m, "High", "Net debt to EBITDA is above the configured risk threshold."),
-            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 2.0m, "High", "Debt to equity is above the configured risk threshold."),
-            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 2.0m, "High", "Interest coverage is below the configured risk threshold.")
+            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.0m, "Medium", "El índice de liquidez corriente es menor a 1.0. Se recomienda revisión humana."),
+            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 0.8m, "Medium", "La prueba del ácido (quick ratio) es menor a 0.8. Se debe revisar la liquidez."),
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 3.0m, "High", "La relación deuda neta a EBITDA supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 2.0m, "High", "La relación deuda/patrimonio neto supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 2.0m, "High", "La cobertura de intereses está por debajo del umbral de riesgo configurado.")
         }
     );
 
     private static readonly FinancialRiskThresholdProfile StrictProfile = new(
         Name: "strict",
-        Description: "Conservative risk settings enforcing highly safe liquidity and low leverage levels.",
+        Description: "Configuraciones de riesgo conservadoras que exigen niveles de apalancamiento bajos y alta liquidez.",
         Thresholds: new[]
         {
-            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.5m, "Medium", "Current ratio is below 1.5. Human review recommended."),
-            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 1.2m, "Medium", "Quick ratio is below 1.2. Liquidity should be reviewed."),
-            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 2.5m, "High", "Net debt to EBITDA is above the configured risk threshold."),
-            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 1.5m, "High", "Debt to equity is above the configured risk threshold."),
-            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 3.0m, "High", "Interest coverage is below the configured risk threshold.")
+            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 1.5m, "Medium", "El índice de liquidez corriente es menor a 1.5. Se recomienda revisión humana."),
+            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 1.2m, "Medium", "La prueba del ácido (quick ratio) es menor a 1.2. Se debe revisar la liquidez."),
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 2.5m, "High", "La relación deuda neta a EBITDA supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 1.5m, "High", "La relación deuda/patrimonio neto supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 3.0m, "High", "La cobertura de intereses está por debajo del umbral de riesgo configurado.")
         }
     );
 
     private static readonly FinancialRiskThresholdProfile DemoProfile = new(
         Name: "demo",
-        Description: "Sensitive and aggressive thresholds tailored specifically for demonstrations and testing.",
+        Description: "Umbrales sensibles y agresivos adaptados específicamente para demostraciones y pruebas.",
         Thresholds: new[]
         {
-            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 3.0m, "Medium", "Current ratio is below 3.0. Human review recommended."),
-            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 2.5m, "Medium", "Quick ratio is below 2.5. Liquidity should be reviewed."),
-            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 1.0m, "High", "Net debt to EBITDA is above the configured risk threshold."),
-            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 0.5m, "High", "Debt to equity is above the configured risk threshold."),
-            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 5.0m, "High", "Interest coverage is below the configured risk threshold.")
+            new FinancialRiskThreshold("LOW_CURRENT_RATIO", "current_ratio", "<", 3.0m, "Medium", "El índice de liquidez corriente es menor a 3.0. Se recomienda revisión humana."),
+            new FinancialRiskThreshold("LOW_QUICK_RATIO", "quick_ratio", "<", 2.5m, "Medium", "La prueba del ácido (quick ratio) es menor a 2.5. Se debe revisar la liquidez."),
+            new FinancialRiskThreshold("HIGH_NET_DEBT_TO_EBITDA", "net_debt_to_ebitda", ">=", 1.0m, "High", "La relación deuda neta a EBITDA supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("HIGH_DEBT_TO_EQUITY", "debt_to_equity", ">=", 0.5m, "High", "La relación deuda/patrimonio neto supera el umbral de riesgo configurado."),
+            new FinancialRiskThreshold("LOW_INTEREST_COVERAGE", "interest_coverage", "<", 5.0m, "High", "La cobertura de intereses está por debajo del umbral de riesgo configurado.")
         }
     );
 
@@ -120,7 +120,7 @@ public sealed class InMemoryFinancialRiskThresholdProfileProvider : IFinancialRi
                     RequestedProfile: profileName,
                     Profile: DefaultProfile,
                     UsedFallback: true,
-                    Warnings: new[] { $"Requested threshold profile '{profileName}' was not found. Fallen back to 'default'." }
+                    Warnings: new[] { $"No se encontró el perfil de umbral solicitado '{profileName}'. Se utilizó el perfil predeterminado ('default')." }
                 );
         }
     }

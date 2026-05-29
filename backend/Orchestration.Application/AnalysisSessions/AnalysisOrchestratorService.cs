@@ -46,7 +46,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "state_transition_requested",
                 "Orchestrator",
-                "Starting analysis session.",
+                "Iniciando sesión de análisis.",
                 cancellationToken
             );
 
@@ -64,7 +64,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "state_changed",
                 "Orchestrator",
-                $"Session moved to {session.Status}.",
+                $"La sesión cambió al estado: {session.Status}.",
                 cancellationToken
             );
 
@@ -91,7 +91,7 @@ namespace Orchestration.Application.AnalysisSessions
                     session.Id,
                     "human_approval_required",
                     "Orchestrator",
-                    "Execution paused. Waiting for human auditor approval.",
+                    "Ejecución pausada. Esperando la aprobación del auditor humano.",
                     cancellationToken
                 );
 
@@ -99,7 +99,7 @@ namespace Orchestration.Application.AnalysisSessions
                     session.Id,
                     "state_changed",
                     "Orchestrator",
-                    $"Session moved to {session.Status}.",
+                    $"La sesión cambió al estado: {session.Status}.",
                     cancellationToken
                 );
 
@@ -120,7 +120,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "state_changed",
                 "Orchestrator",
-                $"Session moved to {session.Status}.",
+                $"La sesión cambió al estado: {session.Status}.",
                 cancellationToken
             );
 
@@ -128,7 +128,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "analysis_completed",
                 "Orchestrator",
-                "Analysis completed without requiring human approval.",
+                "Análisis completado sin requerir aprobación humana.",
                 cancellationToken
             );
 
@@ -157,7 +157,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "human_decision_received",
                 "HumanAuditor",
-                $"Approval received. Reason: {request.Reason ?? "No reason provided."}",
+                $"Aprobación recibida. Motivo: {request.Reason ?? "No se proporcionó ningún motivo."}",
                 cancellationToken
             );
 
@@ -170,7 +170,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "state_changed",
                 "Orchestrator",
-                $"Session moved to {session.Status}.",
+                $"La sesión cambió al estado: {session.Status}.",
                 cancellationToken
             );
 
@@ -178,7 +178,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "analysis_completed",
                 "Orchestrator",
-                "Analysis completed after human approval.",
+                "Análisis completado tras la aprobación humana.",
                 cancellationToken
             );
 
@@ -207,13 +207,13 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "human_decision_received",
                 "HumanAuditor",
-                $"Rejection received. Reason: {request.Reason ?? "No reason provided."}",
+                $"Rechazo recibido. Motivo: {request.Reason ?? "No se proporcionó ningún motivo."}",
                 cancellationToken
             );
 
             session.SetStatus(failedStatus);
             session.SetCurrentAgent(null);
-            session.MarkFailed(request.Reason ?? "Rejected by human auditor.");
+            session.MarkFailed(request.Reason ?? "Rechazado por el auditor humano.");
 
             await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -221,7 +221,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "state_changed",
                 "Orchestrator",
-                $"Session moved to {session.Status}.",
+                $"La sesión cambió al estado: {session.Status}.",
                 cancellationToken
             );
 
@@ -229,7 +229,7 @@ namespace Orchestration.Application.AnalysisSessions
                 session.Id,
                 "analysis_rejected",
                 "Orchestrator",
-                "Analysis was rejected by the human auditor.",
+                "El análisis fue rechazado por el auditor humano.",
                 cancellationToken
             );
 
@@ -331,8 +331,8 @@ namespace Orchestration.Application.AnalysisSessions
                         interpretation = e.Interpretation
                     }),
                     recommendation = plannerResult.RequiresHumanApproval
-                        ? "Human approval is required before continuing the analysis."
-                        : "No human approval is required based on the current data analysis."
+                        ? "Se requiere aprobación humana antes de continuar con el análisis."
+                        : "No se requiere aprobación humana según el análisis de datos actual."
                 },
                 financialAnalysis = plannerResult.DataResult.FinancialAnalysis is null
                     ? null

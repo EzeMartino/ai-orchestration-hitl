@@ -370,7 +370,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Invalid JSON file.");
+        response.Error.Should().Be("Archivo JSON no válido.");
         session.ContextJson.Should().Be("{}");
     }
 
@@ -532,7 +532,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Invalid PDF file.");
+        response.Error.Should().Be("Archivo PDF no válido.");
         session.ContextJson.Should().Be("{}");
     }
 
@@ -687,7 +687,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("PDF OCR dependencies are not configured.");
+        response.Error.Should().Be("Las dependencias de OCR para PDF no están configuradas.");
     }
 
     [Fact]
@@ -757,7 +757,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("DocumentId is required for CSV uploads.");
+        response.Error.Should().Be("Se requiere el identificador de documento (DocumentId) para cargas de CSV.");
         session.ContextJson.Should().Be("{}");
     }
 
@@ -840,7 +840,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Missing file.");
+        response.Error.Should().Be("Falta el archivo.");
     }
 
     [Fact]
@@ -861,7 +861,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Empty file.");
+        response.Error.Should().Be("Archivo vacío.");
     }
 
     [Fact]
@@ -882,7 +882,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Uploaded file is empty.");
+        response.Error.Should().Be("El archivo subido está vacío.");
     }
 
     [Fact]
@@ -903,7 +903,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("Unsupported file extension.");
+        response.Error.Should().Be("Extensión de archivo no soportada.");
     }
 
     [Fact]
@@ -931,7 +931,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<BadRequestObjectResult>()
             .Which.Value.Should().BeOfType<FileUploadErrorResponse>()
             .Subject;
-        response.Error.Should().Be("File exceeds maximum allowed size.");
+        response.Error.Should().Be("El archivo excede el tamaño máximo permitido.");
     }
 
     [Fact]

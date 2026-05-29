@@ -37,7 +37,7 @@ public sealed class FinancialRiskThresholdProfileProviderTests
     [InlineData("oil-and-gas")]
     public void ResolveProfile_Should_fallback_to_default_with_warning_when_profile_is_unknown(string requestedName)
     {
-        var resolution = _provider.ResolveProfile(requestedName); // Wait, let's check ResolveProfile logic
+        var resolution = _provider.ResolveProfile(requestedName);
 
         resolution.Should().NotBeNull();
         resolution.RequestedProfile.Should().Be(requestedName);
@@ -45,7 +45,7 @@ public sealed class FinancialRiskThresholdProfileProviderTests
         resolution.Profile.Name.Should().Be("default");
         resolution.UsedFallback.Should().BeTrue();
         resolution.Warnings.Should().ContainSingle()
-            .Which.Should().Be($"Requested threshold profile '{requestedName}' was not found. Fallen back to 'default'.");
+            .Which.Should().Be($"No se encontró el perfil de umbral solicitado '{requestedName}'. Se utilizó el perfil predeterminado ('default').");
     }
 
     [Fact]

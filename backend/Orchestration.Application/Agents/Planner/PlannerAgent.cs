@@ -57,7 +57,7 @@ public sealed class PlannerAgent : IPlannerAgent
             session.Id,
             "agent_started",
             "PlannerAgent",
-            "PlannerAgent initialized. Building execution plan.",
+            "PlannerAgent (Agente Planificador) inicializado. Construyendo plan de ejecución.",
             cancellationToken
         );
 
@@ -170,7 +170,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 sessionId,
                 "tool_execution_fallback_used",
                 "PlannerAgent",
-                "Plan-driven execution failed; deterministic agent path was used.",
+                "La ejecución basada en plan falló; se utilizó la ruta determinista del agente.",
                 cancellationToken
             );
 
@@ -208,7 +208,7 @@ public sealed class PlannerAgent : IPlannerAgent
             sessionId,
             "agent_task_delegated",
             "PlannerAgent",
-            "Delegating anomaly detection to DataAgent.",
+            "Delegando detección de anomalías a DataAgent (Agente de Datos).",
             cancellationToken
         );
 
@@ -221,7 +221,7 @@ public sealed class PlannerAgent : IPlannerAgent
             sessionId,
             "tool_executed",
             "DataAgent",
-            $"Anomaly detection completed using {dataResult.Engine}.",
+            $"Detección de anomalías completada usando {dataResult.Engine}.",
             cancellationToken
         );
 
@@ -237,7 +237,7 @@ public sealed class PlannerAgent : IPlannerAgent
             sessionId,
             "agent_task_delegated",
             "PlannerAgent",
-            "Delegating compliance review to LegalAgent.",
+            "Delegando revisión de cumplimiento normativo a LegalAgent (Agente Legal).",
             cancellationToken
         );
 
@@ -254,7 +254,7 @@ public sealed class PlannerAgent : IPlannerAgent
             sessionId,
             "tool_executed",
             "LegalAgent",
-            $"Compliance review completed using {legalResult.Engine}.",
+            $"Revisión de cumplimiento completada usando {legalResult.Engine}.",
             cancellationToken
         );
 
@@ -329,8 +329,8 @@ public sealed class PlannerAgent : IPlannerAgent
             legalResult.HasComplianceRisk;
 
         var summary = requiresHumanApproval
-            ? "PlannerAgent determined that human approval is required before completing the workflow."
-            : "PlannerAgent determined that the workflow can be completed without human intervention.";
+            ? "PlannerAgent determinó que se requiere aprobación humana antes de completar el flujo de trabajo."
+            : "PlannerAgent determinó que el flujo de trabajo puede completarse sin intervención humana.";
 
         await PublishAsync(
             sessionId,
@@ -377,10 +377,10 @@ public sealed class PlannerAgent : IPlannerAgent
                     ToolName: call.ToolName,
                     Status: ToolExecutionStatus.Failed,
                     Succeeded: false,
-                    Summary: "Tool execution failed.",
+                    Summary: "La ejecución de la herramienta falló.",
                     Engine: "Controlled Tool Executor",
                     OutputJson: "{}",
-                    Error: "Tool execution failed."
+                    Error: "La ejecución de la herramienta falló."
                 ))
                 .ToList();
         }
@@ -414,10 +414,10 @@ public sealed class PlannerAgent : IPlannerAgent
             ToolName: call.ToolName,
             Status: ToolExecutionStatus.Failed,
             Succeeded: false,
-            Summary: "Tool execution result was not returned.",
+            Summary: "No se devolvió el resultado de ejecución de la herramienta.",
             Engine: "Controlled Tool Executor",
             OutputJson: "{}",
-            Error: "Tool execution result was not returned."
+            Error: "No se devolvió el resultado de ejecución de la herramienta."
         );
     }
 
@@ -440,7 +440,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 sessionId,
                 "tool_plan_proposed",
                 "PlannerAgent",
-                $"PlannerAgent proposed {toolPlan.ProposedCalls.Count} tool calls.",
+                $"PlannerAgent propuso {toolPlan.ProposedCalls.Count} llamadas a herramientas.",
                 cancellationToken
             );
         }
@@ -451,7 +451,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 sessionId,
                 "tool_plan_validated",
                 "PlannerAgent",
-                $"Tool plan validated: {toolPlan.ApprovedCalls.Count} approved, {toolPlan.RejectedCalls.Count} rejected.",
+                $"Plan de herramientas validado: {toolPlan.ApprovedCalls.Count} aprobadas, {toolPlan.RejectedCalls.Count} rechazadas.",
                 cancellationToken
             );
         }
@@ -462,7 +462,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 sessionId,
                 "tool_call_rejected",
                 "PlannerAgent",
-                $"Rejected tool call '{rejectedCall.ToolName}': {rejectedCall.Reason}",
+                $"Llamada a herramienta '{rejectedCall.ToolName}' rechazada: {rejectedCall.Reason}",
                 cancellationToken
             );
         }
@@ -475,7 +475,7 @@ public sealed class PlannerAgent : IPlannerAgent
                     sessionId,
                     "tool_call_skipped",
                     "PlannerAgent",
-                    $"Skipped approved tool call '{executionAudit.ToolName}': {executionAudit.Summary}",
+                    $"Llamada a herramienta aprobada '{executionAudit.ToolName}' omitida: {executionAudit.Summary}",
                     cancellationToken
                 );
             }
@@ -486,7 +486,7 @@ public sealed class PlannerAgent : IPlannerAgent
                     sessionId,
                     "tool_call_executed",
                     "PlannerAgent",
-                    $"Executed approved tool call '{executionAudit.ToolName}' using {executionAudit.Engine}.",
+                    $"Llamada a herramienta aprobada '{executionAudit.ToolName}' ejecutada usando {executionAudit.Engine}.",
                     cancellationToken
                 );
             }
@@ -497,7 +497,7 @@ public sealed class PlannerAgent : IPlannerAgent
                     sessionId,
                     "tool_call_failed",
                     "PlannerAgent",
-                    $"Approved tool call '{executionAudit.ToolName}' failed: {executionAudit.Error ?? executionAudit.Summary}",
+                    $"Llamada a herramienta aprobada '{executionAudit.ToolName}' falló: {executionAudit.Error ?? executionAudit.Summary}",
                     cancellationToken
                 );
             }
@@ -533,15 +533,15 @@ public sealed class PlannerAgent : IPlannerAgent
     {
         if (reasoningResult.UsedFallback && !string.IsNullOrWhiteSpace(reasoningResult.FailureReason))
         {
-            return "LLM reasoning failed; deterministic fallback was used.";
+            return "El razonamiento del LLM falló; se utilizó la alternativa determinista de contingencia.";
         }
 
         if (reasoningResult.UsedLlm)
         {
-            return $"Planner reasoning completed using {reasoningResult.Engine}.";
+            return $"Razonamiento del Planificador completado usando {reasoningResult.Engine}.";
         }
 
-        return "Planner reasoning completed using deterministic fallback.";
+        return "Razonamiento del Planificador completado usando la alternativa determinista.";
     }
 
     private static FinancialReportContext BuildReportContext(
@@ -605,12 +605,12 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
-            PlannerSummary: "Collect read-only financial anomaly and regulatory retrieval evidence before planner reasoning.",
+            PlannerSummary: "Recopilar evidencia de anomalías financieras y recuperación regulatoria antes del razonamiento del planificador.",
             RiskFactors: [],
             Limitations:
             [
-                "The LLM may propose tools only; workflow control remains deterministic.",
-                "Human approval remains mandatory when risk exists."
+                "El LLM puede proponer herramientas únicamente; el control del flujo de trabajo sigue siendo determinista.",
+                "La aprobación humana sigue siendo obligatoria cuando existe riesgo."
             ]
         );
     }

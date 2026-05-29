@@ -144,7 +144,7 @@ public class AnalysisSessionsController(
                     id,
                     "analysis_start_blocked",
                     "Orchestrator",
-                    "Analysis start blocked: structured financial metrics are required but missing.",
+                    "Inicio de análisis bloqueado: se requieren métricas financieras estructuradas pero no están presentes.",
                     DateTimeOffset.UtcNow
                 ),
                 cancellationToken
@@ -394,14 +394,14 @@ public class AnalysisSessionsController(
 
         if (string.IsNullOrWhiteSpace(content))
         {
-            return BadRequest(new FileUploadErrorResponse("Uploaded file is empty."));
+            return BadRequest(new FileUploadErrorResponse("El archivo subido está vacío."));
         }
 
         return extension switch
         {
             ".json" => await SaveJsonFileAsync(id, request, content, cancellationToken),
             ".csv" => await SaveCsvFileAsync(id, request, content, cancellationToken),
-            _ => BadRequest(new FileUploadErrorResponse("Unsupported file extension."))
+            _ => BadRequest(new FileUploadErrorResponse("Extensión de archivo no soportada."))
         };
     }
 
@@ -446,12 +446,12 @@ public class AnalysisSessionsController(
         }
         catch (JsonException)
         {
-            return BadRequest(new FileUploadErrorResponse("Invalid JSON file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo JSON no válido."));
         }
 
         if (input is null)
         {
-            return BadRequest(new FileUploadErrorResponse("Invalid JSON file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo JSON no válido."));
         }
 
         var result = await _financialMetricsSessionService.SaveAsync(
@@ -484,7 +484,7 @@ public class AnalysisSessionsController(
         if (string.IsNullOrWhiteSpace(request.DocumentId))
         {
             return BadRequest(new FileUploadErrorResponse(
-                "DocumentId is required for CSV uploads."
+                "Se requiere el identificador de documento (DocumentId) para cargas de CSV."
             ));
         }
 
@@ -525,20 +525,20 @@ public class AnalysisSessionsController(
         catch (PdfOcrDependencyException)
         {
             return BadRequest(new FileUploadErrorResponse(
-                "PDF OCR dependencies are not configured."
+                "Las dependencias de OCR para PDF no están configuradas."
             ));
         }
         catch (InvalidDataException)
         {
-            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo PDF no válido."));
         }
         catch (PdfDocumentFormatException)
         {
-            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo PDF no válido."));
         }
         catch (IOException)
         {
-            return BadRequest(new FileUploadErrorResponse("Invalid PDF file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo PDF no válido."));
         }
 
         if (extraction is null || !extraction.IsValid || extraction.Input is null)
@@ -548,7 +548,7 @@ public class AnalysisSessionsController(
             if (errors.Any(issue => issue.Code == "PDF_OCR_NOT_CONFIGURED"))
             {
                 return BadRequest(new FileUploadErrorResponse(
-                    "PDF OCR dependencies are not configured."
+                    "Las dependencias de OCR para PDF no están configuradas."
                 ));
             }
 
@@ -691,18 +691,18 @@ public class AnalysisSessionsController(
     {
         if (file is null)
         {
-            return BadRequest(new FileUploadErrorResponse("Missing file."));
+            return BadRequest(new FileUploadErrorResponse("Falta el archivo."));
         }
 
         if (file.Length <= 0)
         {
-            return BadRequest(new FileUploadErrorResponse("Empty file."));
+            return BadRequest(new FileUploadErrorResponse("Archivo vacío."));
         }
 
         if (file.Length > _fileUploadOptions.MaxFileSizeBytes)
         {
             return BadRequest(new FileUploadErrorResponse(
-                "File exceeds maximum allowed size."
+                "El archivo excede el tamaño máximo permitido."
             ));
         }
 
@@ -714,7 +714,7 @@ public class AnalysisSessionsController(
         ))
         {
             return BadRequest(new FileUploadErrorResponse(
-                "Unsupported file extension."
+                "Extensión de archivo no soportada."
             ));
         }
 

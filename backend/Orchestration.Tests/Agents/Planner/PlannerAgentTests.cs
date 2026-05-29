@@ -138,7 +138,7 @@ public class PlannerAgentTests
             .Contain(x =>
                 x.Type == "planner_reasoning_completed" &&
                 x.Agent == "PlannerAgent" &&
-                x.Message == "Planner reasoning completed using deterministic fallback.");
+                x.Message == "Razonamiento del Planificador completado usando la alternativa determinista.");
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class PlannerAgentTests
             .Contain(x =>
                 x.Type == "planner_reasoning_fallback_used" &&
                 x.Agent == "PlannerAgent" &&
-                x.Message == "LLM reasoning failed; deterministic fallback was used.");
+                x.Message == "El razonamiento del LLM falló; se utilizó la alternativa determinista de contingencia.");
     }
 
     [Fact]
@@ -374,19 +374,19 @@ public class PlannerAgentTests
 
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_plan_proposed" &&
-            x.Message == "PlannerAgent proposed 2 tool calls."
+            x.Message == "PlannerAgent propuso 2 llamadas a herramientas."
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_plan_validated" &&
-            x.Message == "Tool plan validated: 2 approved, 0 rejected."
+            x.Message == "Plan de herramientas validado: 2 aprobadas, 0 rechazadas."
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_skipped" &&
-            x.Message == "Skipped approved tool call 'data.analyze_transactions': DataAgent already executed during the deterministic workflow."
+            x.Message == "Llamada a herramienta aprobada 'data.analyze_transactions' omitida: DataAgent already executed during the deterministic workflow."
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_skipped" &&
-            x.Message == "Skipped approved tool call 'legal.search_cnv_regulation': LegalAgent already executed during the deterministic workflow."
+            x.Message == "Llamada a herramienta aprobada 'legal.search_cnv_regulation' omitida: LegalAgent already executed during the deterministic workflow."
         );
         publisher.PublishedEvents.Should().NotContain(x => x.Type == "tool_call_executed");
     }
@@ -429,7 +429,7 @@ public class PlannerAgentTests
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_rejected" &&
-            x.Message == "Rejected tool call 'workflow.complete': Workflow transition tools are not allowed."
+            x.Message == "Llamada a herramienta 'workflow.complete' rechazada: Workflow transition tools are not allowed."
         );
         publisher.PublishedEvents.Should().NotContain(x => x.Type == "tool_call_executed");
     }
@@ -540,11 +540,11 @@ public class PlannerAgentTests
             .OnlyContain(call => call.Status == ToolExecutionStatus.Executed);
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_executed" &&
-            x.Message == "Executed approved tool call 'data.analyze_transactions' using Fake Controlled Tool Executor."
+            x.Message == "Llamada a herramienta aprobada 'data.analyze_transactions' ejecutada usando Fake Controlled Tool Executor."
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_executed" &&
-            x.Message == "Executed approved tool call 'legal.search_cnv_regulation' using Fake Controlled Tool Executor."
+            x.Message == "Llamada a herramienta aprobada 'legal.search_cnv_regulation' ejecutada usando Fake Controlled Tool Executor."
         );
     }
 
@@ -759,7 +759,7 @@ public class PlannerAgentTests
         result.LegalResult.HasComplianceRisk.Should().BeTrue();
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_execution_fallback_used" &&
-            x.Message == "Plan-driven execution failed; deterministic agent path was used."
+            x.Message == "La ejecución basada en plan falló; se utilizó la ruta determinista del agente."
         );
     }
 

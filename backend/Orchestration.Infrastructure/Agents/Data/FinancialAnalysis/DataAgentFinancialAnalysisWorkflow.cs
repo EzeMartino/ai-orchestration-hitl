@@ -15,11 +15,11 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private const string BasePeriod = "2024A";
     private const string ComparisonPeriod = "2025E";
     private const string FinancialMetricsInputLimitation =
-        "Financial analysis can parse PDFs and run OCR when needed, but structured JSON or CSV uploads are recommended to preserve data fidelity. It does not make operational decisions.";
+        "El análisis financiero puede procesar archivos PDF y ejecutar OCR de ser necesario, pero se recomiendan cargas estructuradas en JSON o CSV para preservar la fidelidad de los datos. No toma decisiones operativas.";
     private const string FixtureFallbackWarning =
-        "Fixture fallback metrics were used. This mode is intended for development/demo only.";
+        "Se utilizaron métricas de prueba predefinidas (fixtures). Este modo está destinado únicamente a desarrollo y demostración.";
     private const string RequiredMetricsWarning =
-        "Structured financial metrics are required for this mode but were not attached to the session.";
+        "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a la sesión.";
 
     private static readonly string[] RequestedRatios =
     [
@@ -102,7 +102,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                         report.SessionId,
                         "financial_metrics_required_missing",
                         "DataAgent",
-                        "Structured financial metrics were required but not attached to this session.",
+                        "Se requerían métricas financieras estructuradas, pero no se adjuntaron a esta sesión.",
                         DateTimeOffset.UtcNow
                     ),
                     cancellationToken
@@ -170,7 +170,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                     report.SessionId,
                     "financial_metrics_fixture_fallback_used",
                     "DataAgent",
-                    "Financial analysis used fixture fallback metrics because no session metrics were attached.",
+                    "El análisis financiero utilizó métricas predefinidas de prueba (fixture) porque no se adjuntaron métricas a la sesión.",
                     DateTimeOffset.UtcNow
                 ),
                 cancellationToken
@@ -234,7 +234,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         return new DataAgentResult(
             HasAnomaly: true,
             Severity: "Medium",
-            Summary: "Structured financial metrics were not available. Human review recommended.",
+            Summary: "Las métricas financieras estructuradas no estaban disponibles. Se recomienda una revisión humana.",
             Engine: Engine,
             Evidence:
             [
@@ -242,7 +242,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                     Metric: "StructuredFinancialMetrics",
                     Value: 0,
                     Threshold: 0,
-                    Interpretation: "No structured financial metrics were available for quantitative analysis."
+                    Interpretation: "No había métricas financieras estructuradas disponibles para el análisis cuantitativo."
                 )
             ],
             FinancialAnalysis: new FinancialAnalysisContext(
@@ -253,7 +253,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Comparisons: [],
                 RiskSignals: [],
                 RiskEvidence: [],
-                Warnings: ["Structured financial metrics were not available."],
+                Warnings: ["Las métricas financieras estructuradas no estaban disponibles."],
                 Limitations: [FinancialMetricsInputLimitation],
                 MetricsInputSource: FinancialMetricsInputSources.None,
                 AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
@@ -267,7 +267,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         return new DataAgentResult(
             HasAnomaly: true,
             Severity: "Medium",
-            Summary: "Structured financial metrics are required but were not attached to this session.",
+            Summary: "Se requieren métricas financieras estructuradas, pero no se adjuntaron a esta sesión.",
             Engine: Engine,
             Evidence:
             [
@@ -275,7 +275,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                     Metric: "StructuredFinancialMetricsRequired",
                     Value: 0,
                     Threshold: 1,
-                    Interpretation: "Structured financial metrics are required for this mode but were not attached to the session."
+                    Interpretation: "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a la sesión."
                 )
             ],
             FinancialAnalysis: new FinancialAnalysisContext(
@@ -289,7 +289,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Warnings: [RequiredMetricsWarning],
                 Limitations:
                 [
-                    "No financial ratios or period comparisons were computed because no structured metrics were available.",
+                    "No se calcularon índices financieros ni comparaciones de períodos porque no había métricas estructuradas disponibles.",
                     FinancialMetricsInputLimitation
                 ],
                 MetricsInputSource: FinancialMetricsInputSources.None,
@@ -354,7 +354,7 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         IReadOnlyList<string> warnings)
     {
         var summary = string.IsNullOrWhiteSpace(narrative)
-            ? "Financial risk signals detected. Human review recommended."
+            ? "Se detectaron señales de riesgo financiero. Se recomienda revisión humana."
             : narrative;
 
         return warnings.Count == 0
