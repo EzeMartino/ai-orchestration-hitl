@@ -94,7 +94,7 @@ export function useAnalysisSession() {
       console.error(error);
       setStartPreflight(null);
       setStartPreflightError(
-        "Could not check start readiness. Backend preflight will still run when starting."
+        "No se pudo verificar la preparación de inicio. La validación previa del servidor se ejecutará al iniciar de todos modos."
       );
     } finally {
       setIsCheckingStartPreflight(false);
@@ -165,7 +165,7 @@ export function useAnalysisSession() {
             return;
           }
         }
-        throw new Error("Failed to start analysis session.");
+        throw new Error("No se pudo iniciar la sesión de análisis.");
       }
 
       const updatedSession = await response.json() as AnalysisSessionResponse;
@@ -192,8 +192,8 @@ export function useAnalysisSession() {
     try {
       const fallbackReason =
         decision === "approve"
-          ? "Approved by human auditor."
-          : "Rejected by human auditor.";
+          ? "Aprobado por el auditor humano."
+          : "Rechazado por el auditor humano.";
       const reason = decisionReason.trim().length > 0 ? decisionReason : fallbackReason;
 
       const updatedSession = await api.submitHumanDecision(session.id, decision, reason);
@@ -244,7 +244,7 @@ export function useAnalysisSession() {
       await refreshStartPreflight(session.id);
     } catch (error) {
       console.error(error);
-      setMetricsSaveError("Could not save structured financial metrics.");
+      setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
     } finally {
       setIsSavingStructuredMetrics(false);
     }
@@ -266,7 +266,7 @@ export function useAnalysisSession() {
       await refreshStartPreflight(session.id);
     } catch (error) {
       console.error(error);
-      setMetricsSaveError("Could not save structured financial metrics.");
+      setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
     } finally {
       setIsSavingStructuredMetrics(false);
     }
@@ -294,7 +294,7 @@ export function useAnalysisSession() {
       setMetricsSaveError(
         error instanceof Error
           ? error.message
-          : "File upload failed. Please check the file format and try again."
+          : "La carga del archivo falló. Por favor, compruebe el formato del archivo e intente de nuevo."
       );
     } finally {
       setIsSavingStructuredMetrics(false);

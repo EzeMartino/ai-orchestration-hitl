@@ -17,8 +17,8 @@ export function StartReadinessPanel({
     return (
       <section className="startReadinessPanel startReadiness-neutral">
         <div>
-          <span>Start readiness</span>
-          <strong>Create or load a session to check start readiness.</strong>
+          <span>Preparación de inicio</span>
+          <strong>Verificar preparación de inicio.</strong>
         </div>
       </section>
     );
@@ -28,8 +28,8 @@ export function StartReadinessPanel({
     return (
       <section className="startReadinessPanel startReadiness-neutral">
         <div>
-          <span>Start readiness</span>
-          <strong>Checking readiness...</strong>
+          <span>Preparación de inicio</span>
+          <strong>Comprobando preparación...</strong>
         </div>
       </section>
     );
@@ -39,9 +39,9 @@ export function StartReadinessPanel({
     return (
       <section className="startReadinessPanel startReadiness-warning">
         <div>
-          <span>Start readiness</span>
-          <strong>Could not check start readiness.</strong>
-          <p>Backend preflight will still run when starting.</p>
+          <span>Preparación de inicio</span>
+          <strong>No se pudo verificar la preparación de inicio.</strong>
+          <p>La validación previa del servidor se ejecutará al iniciar de todos modos.</p>
         </div>
       </section>
     );
@@ -51,8 +51,8 @@ export function StartReadinessPanel({
     return (
       <section className="startReadinessPanel startReadiness-neutral">
         <div>
-          <span>Start readiness</span>
-          <strong>Readiness has not been checked yet.</strong>
+          <span>Preparación de inicio</span>
+          <strong>La preparación aún no ha sido verificada.</strong>
         </div>
       </section>
     );
@@ -62,16 +62,16 @@ export function StartReadinessPanel({
     ? "startReadiness-success"
     : "startReadiness-danger";
   const title = preflight.canStart
-    ? "Ready to start analysis."
-    : "Analysis cannot start yet.";
+    ? "Listo para iniciar el análisis."
+    : "El análisis aún no puede iniciar.";
 
   return (
     <section className={`startReadinessPanel ${toneClass}`}>
       <div>
-        <span>Start readiness</span>
+        <span>Preparación de inicio</span>
         <strong>{title}</strong>
         {!preflight.canStart && (
-          <p>Attach JSON/CSV/PDF structured metrics before starting this analysis.</p>
+          <p>Adjunte métricas estructuradas en formato JSON/CSV/PDF antes de iniciar este análisis.</p>
         )}
       </div>
 

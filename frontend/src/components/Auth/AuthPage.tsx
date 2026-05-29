@@ -22,12 +22,12 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
     // Validate inputs
     if (!email.trim() || !password.trim()) {
-      setError("Please fill in all required fields.");
+      setError("Por favor, complete todos los campos obligatorios.");
       return;
     }
 
     if (!isLogin && password !== confirmPassword) {
-      setError("Passwords do not match.");
+      setError("Las contraseñas no coinciden.");
       return;
     }
 
@@ -39,13 +39,13 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
         onLoginSuccess(response.accessToken);
       } else {
         await registerUser({ email: email.trim(), password });
-        setSuccessMessage("Registration successful! You can now log in.");
+        setSuccessMessage("¡Registro exitoso! Ahora puede iniciar sesión.");
         setIsLogin(true);
         setPassword("");
         setConfirmPassword("");
       }
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
+      setError(err instanceof Error ? err.message : "La autenticación falló.");
     } finally {
       setIsLoading(false);
     }
@@ -77,11 +77,11 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
               <polyline points="2 12 12 17 22 12" />
             </svg>
           </div>
-          <h1>{isLogin ? "Welcome Back" : "Create Account"}</h1>
+          <h1>{isLogin ? "Bienvenido de Nuevo" : "Crear Cuenta"}</h1>
           <p className="auth-subtitle">
             {isLogin
-              ? "Sign in to access the Financial Control Room"
-              : "Register to orchestrate secure agent workflows"}
+              ? "Inicie sesión para acceder a la Sala de Control Financiero"
+              : "Regístrese para orquestar flujos de trabajo de agentes seguros"}
           </p>
         </div>
 
@@ -108,7 +108,7 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
         <form onSubmit={handleSubmit} className="auth-form">
           <div className="form-group">
-            <label htmlFor="email">Email Address</label>
+            <label htmlFor="email">Dirección de Correo Electrónico</label>
             <input
               id="email"
               type="email"
@@ -122,7 +122,7 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">Contraseña</label>
             <input
               id="password"
               type="password"
@@ -137,7 +137,7 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
 
           {!isLogin && (
             <div className="form-group animate-slide-down">
-              <label htmlFor="confirmPassword">Confirm Password</label>
+              <label htmlFor="confirmPassword">Confirmar Contraseña</label>
               <input
                 id="confirmPassword"
                 type="password"
@@ -155,9 +155,9 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
             {isLoading ? (
               <span className="spinner"></span>
             ) : isLogin ? (
-              "Sign In"
+              "Iniciar Sesión"
             ) : (
-              "Register"
+              "Registrarse"
             )}
           </button>
         </form>
@@ -165,8 +165,8 @@ export default function AuthPage({ onLoginSuccess }: AuthPageProps) {
         <div className="auth-footer">
           <button onClick={handleToggleView} disabled={isLoading} className="btn-toggle">
             {isLogin
-              ? "Don't have an account? Register"
-              : "Already have an account? Sign In"}
+              ? "¿No tiene una cuenta? Regístrese"
+              : "¿Ya tiene una cuenta? Inicie sesión"}
           </button>
         </div>
       </div>

@@ -86,17 +86,17 @@ function getFileExtension(fileName: string) {
 function formatIngestionMethod(ingestionMethod?: string | null) {
   switch (ingestionMethod) {
     case "json_paste":
-      return "JSON paste";
+      return "Pegado de JSON";
     case "csv_paste":
-      return "CSV paste";
+      return "Pegado de CSV";
     case "json_file":
-      return "JSON file";
+      return "Archivo JSON";
     case "csv_file":
-      return "CSV file";
+      return "Archivo CSV";
     case "pdf_file":
-      return "PDF file";
+      return "Archivo PDF";
     default:
-      return "Unknown";
+      return "Desconocido";
   }
 }
 
@@ -164,7 +164,7 @@ export function StructuredFinancialMetricsPanel({
       await onSaveJson(parsed);
     } catch (error) {
       console.error(error);
-      setInputError("Invalid JSON format.");
+      setInputError("Formato JSON no válido.");
     }
   }
 
@@ -184,13 +184,13 @@ export function StructuredFinancialMetricsPanel({
     try {
       const response = await fetch(sampleJsonTemplateUrl);
       if (!response.ok) {
-        throw new Error("Sample JSON template could not be loaded.");
+        throw new Error("No se pudo cargar la plantilla JSON de muestra.");
       }
       setJsonText(await response.text());
       setMode("json");
     } catch (error) {
       console.error(error);
-      setInputError("Sample JSON template could not be loaded.");
+      setInputError("No se pudo cargar la plantilla JSON de muestra.");
     }
   }
 
@@ -199,7 +199,7 @@ export function StructuredFinancialMetricsPanel({
     try {
       const response = await fetch(sampleCsvTemplateUrl);
       if (!response.ok) {
-        throw new Error("Sample CSV template could not be loaded.");
+        throw new Error("No se pudo cargar la plantilla CSV de muestra.");
       }
       setCsvText(await response.text());
       setCsvDocumentId("sample-csv-metrics");
@@ -209,7 +209,7 @@ export function StructuredFinancialMetricsPanel({
       setMode("csv");
     } catch (error) {
       console.error(error);
-      setInputError("Sample CSV template could not be loaded.");
+      setInputError("No se pudo cargar la plantilla CSV de muestra.");
     }
   }
 
@@ -227,23 +227,23 @@ export function StructuredFinancialMetricsPanel({
   async function handleUploadFile() {
     setInputError(null);
     if (!selectedFile) {
-      setInputError("Select a JSON, CSV, or PDF metrics file.");
+      setInputError("Seleccione un archivo de métricas JSON, CSV o PDF.");
       return;
     }
 
     const extension = getFileExtension(selectedFile.name);
     if (!allowedStructuredMetricsFileExtensions.includes(extension)) {
-      setInputError("Only .json, .csv, and .pdf files are supported.");
+      setInputError("Solo se admiten archivos con extensión .json, .csv y .pdf.");
       return;
     }
 
     if (selectedFile.size > maxStructuredMetricsFileSizeBytes) {
-      setInputError("Only files up to 20 MB are supported.");
+      setInputError("Solo se admiten archivos de hasta 20 MB.");
       return;
     }
 
     if (extension === ".csv" && fileDocumentId.trim().length === 0) {
-      setInputError("DocumentId is required for CSV uploads.");
+      setInputError("El DocumentId es obligatorio para la carga de CSV.");
       return;
     }
 
@@ -259,72 +259,72 @@ export function StructuredFinancialMetricsPanel({
     <section className="structuredMetricsPanel">
       <div className="structuredMetricsHeader">
         <div>
-          <p className="structuredMetricsEyebrow">Structured metrics input</p>
-          <h2>Attach financial metrics</h2>
+          <p className="structuredMetricsEyebrow">Entrada de métricas estructuradas</p>
+          <h2>Adjuntar métricas financieras</h2>
           <p>
-            Structured validation checks required fields, normalization and
-            basic quality issues. It does not verify accounting correctness.
+            La validación estructurada comprueba los campos requeridos, la normalización y
+            problemas básicos de calidad. No verifica la exactitud contable.
           </p>
         </div>
 
         <div className="structuredMetricsState">
           {!sessionId ? (
-            <span>Create or load a session before attaching structured financial metrics.</span>
+            <span>Cree o cargue una sesión antes de adjuntar métricas financieras estructuradas.</span>
           ) : isLoading ? (
-            <span>Loading structured metrics...</span>
+            <span>Cargando métricas estructuradas...</span>
           ) : metricsContext ? (
             <>
-              <strong>Structured metrics attached</strong>
-              <span>Document: {metricsContext.documentId}</span>
-              <span>Company: {metricsContext.company ?? "-"}</span>
+              <strong>Métricas estructuradas adjuntas</strong>
+              <span>Documento: {metricsContext.documentId}</span>
+              <span>Compañía: {metricsContext.company ?? "-"}</span>
               <span>
-                Source:{" "}
+                Origen:{" "}
                 {formatIngestionMethod(
                   metricsContext.provenance?.ingestionMethod
                 )}
               </span>
               {metricsContext.provenance?.originalFileName && (
-                <span>File: {metricsContext.provenance.originalFileName}</span>
+                <span>Archivo: {metricsContext.provenance.originalFileName}</span>
               )}
               <span>
-                Metrics:{" "}
+                Métricas:{" "}
                 {metricsContext.provenance?.metricCount ??
                   metricsContext.metrics.length}
               </span>
               <span>
-                Warnings:{" "}
+                Advertencias:{" "}
                 {metricsContext.provenance?.warningCount ??
                   metricsContext.validationWarnings.length}
               </span>
-              <span>Uploaded: {new Date(metricsContext.uploadedAt).toLocaleString()}</span>
+              <span>Cargado: {new Date(metricsContext.uploadedAt).toLocaleString()}</span>
             </>
           ) : (
-            <span>No structured financial metrics attached to this session.</span>
+            <span>No hay métricas financieras estructuradas adjuntas a esta sesión.</span>
           )}
         </div>
       </div>
 
       <div className="metricsTemplateBox">
         <div>
-          <strong>Templates</strong>
+          <strong>Plantillas</strong>
           <p>
-            Use these samples to match the expected structured financial
-            metrics format.
+            Utilice estas muestras para coincidir con el formato de métricas
+            financieras estructuradas esperado.
           </p>
         </div>
 
         <div className="templateActions">
           <a href={sampleJsonTemplateUrl} download>
-            Download sample JSON
+            Descargar JSON de muestra
           </a>
           <button onClick={loadSampleJson} type="button">
-            Load sample JSON
+            Cargar JSON de muestra
           </button>
           <a href={sampleCsvTemplateUrl} download>
-            Download sample CSV
+            Descargar CSV de muestra
           </a>
           <button onClick={loadSampleCsv} type="button">
-            Load sample CSV
+            Cargar CSV de muestra
           </button>
         </div>
       </div>
@@ -349,14 +349,14 @@ export function StructuredFinancialMetricsPanel({
           onClick={() => setMode("file")}
           type="button"
         >
-          File Upload
+          Cargar Archivo
         </button>
       </div>
 
       {mode === "json" ? (
         <div className="metricsEditor">
           <label>
-            JSON metrics
+            Métricas en JSON
             <textarea
               value={jsonText}
               onChange={(event) => setJsonText(event.target.value)}
@@ -375,7 +375,7 @@ export function StructuredFinancialMetricsPanel({
               disabled={!sessionId || isSaving}
               type="button"
             >
-              {isSaving ? "Saving..." : "Save JSON Metrics"}
+              {isSaving ? "Guardando..." : "Guardar Métricas JSON"}
             </button>
           </span>
         </div>
@@ -383,28 +383,28 @@ export function StructuredFinancialMetricsPanel({
         <div className="metricsEditor">
           <div className="csvMetaGrid">
             <label>
-              DocumentId
+              Identificador de Documento (DocumentId)
               <input
                 value={csvDocumentId}
                 onChange={(event) => setCsvDocumentId(event.target.value)}
               />
             </label>
             <label>
-              Company
+              Compañía
               <input
                 value={csvCompany}
                 onChange={(event) => setCsvCompany(event.target.value)}
               />
             </label>
             <label>
-              Currency
+              Moneda
               <input
                 value={csvCurrency}
                 onChange={(event) => setCsvCurrency(event.target.value)}
               />
             </label>
             <label>
-              Unit
+              Unidad
               <input
                 value={csvUnit}
                 onChange={(event) => setCsvUnit(event.target.value)}
@@ -413,7 +413,7 @@ export function StructuredFinancialMetricsPanel({
           </div>
 
           <label>
-            CSV metrics
+            Métricas en CSV
             <textarea
               value={csvText}
               onChange={(event) => setCsvText(event.target.value)}
@@ -432,7 +432,7 @@ export function StructuredFinancialMetricsPanel({
               disabled={!sessionId || isSaving}
               type="button"
             >
-              {isSaving ? "Saving..." : "Save CSV Metrics"}
+              {isSaving ? "Guardando..." : "Guardar Métricas CSV"}
             </button>
           </span>
         </div>
@@ -449,7 +449,7 @@ export function StructuredFinancialMetricsPanel({
             onDrop={handleFileDrop}
           >
             <label>
-              JSON, CSV, or PDF file
+              Archivo JSON, CSV o PDF
               <input
                 type="file"
                 accept=".json,.csv,.pdf"
@@ -460,11 +460,11 @@ export function StructuredFinancialMetricsPanel({
               />
             </label>
 
-            <p>Only .json, .csv, and .pdf files up to 20 MB are supported.</p>
+            <p>Solo se admiten archivos .json, .csv y .pdf de hasta 20 MB.</p>
 
             {selectedFile && (
               <div className="selectedFileSummary">
-                <strong>Selected file</strong>
+                <strong>Archivo seleccionado</strong>
                 <span>{selectedFile.name}</span>
                 <span>{formatFileSize(selectedFile.size)}</span>
               </div>
@@ -473,7 +473,7 @@ export function StructuredFinancialMetricsPanel({
 
           <div className="csvMetaGrid">
             <label>
-              DocumentId
+              Identificador de Documento (DocumentId)
               <input
                 value={fileDocumentId}
                 disabled={!sessionId || isSaving}
@@ -481,7 +481,7 @@ export function StructuredFinancialMetricsPanel({
               />
             </label>
             <label>
-              Company
+              Compañía
               <input
                 value={fileCompany}
                 disabled={!sessionId || isSaving}
@@ -489,7 +489,7 @@ export function StructuredFinancialMetricsPanel({
               />
             </label>
             <label>
-              Currency
+              Moneda
               <input
                 value={fileCurrency}
                 disabled={!sessionId || isSaving}
@@ -497,7 +497,7 @@ export function StructuredFinancialMetricsPanel({
               />
             </label>
             <label>
-              Unit
+              Unidad
               <input
                 value={fileUnit}
                 disabled={!sessionId || isSaving}
@@ -517,7 +517,7 @@ export function StructuredFinancialMetricsPanel({
               disabled={!sessionId || isSaving || !selectedFile}
               type="button"
             >
-              {isSaving ? "Uploading..." : "Upload File"}
+              {isSaving ? "Subiendo..." : "Subir Archivo"}
             </button>
           </span>
         </div>
@@ -538,13 +538,13 @@ export function StructuredFinancialMetricsPanel({
           <strong>
             {saveResult.isValid
               ? mode === "file"
-                ? "File metrics saved successfully"
-                : "Saved successfully"
-              : "Metrics were not persisted."}
+                ? "Métricas del archivo guardadas con éxito"
+                : "Guardadas con éxito"
+              : "Las métricas no fueron persistidas."}
           </strong>
 
-          <IssueList title="Errors" issues={saveResult.errors} />
-          <IssueList title="Warnings" issues={saveResult.warnings} />
+          <IssueList title="Errores" issues={saveResult.errors} />
+          <IssueList title="Advertencias" issues={saveResult.warnings} />
         </div>
       )}
     </section>

@@ -49,11 +49,11 @@ function getToolExecutionTone(
   status?: string,
   succeeded?: boolean
 ): "neutral" | "success" | "warning" | "danger" {
-  if (status === "Failed" || succeeded === false) {
+  if (status === "Failed" || status === "Fallida" || succeeded === false) {
     return "danger";
   }
 
-  if (status === "Executed") {
+  if (status === "Executed" || status === "Ejecutada") {
     return "success";
   }
 
@@ -80,15 +80,15 @@ export function ToolPlanAuditPanel({ toolPlan }: ToolPlanAuditPanelProps) {
     <section className="toolPlanPanel">
       <div className="toolPlanHeader">
         <div>
-          <p className="toolPlanEyebrow">Tool plan audit</p>
-          <h2>Controlled tool calling trail</h2>
-          <p>Proposed, validated, rejected, and execution-policy decisions.</p>
+          <p className="toolPlanEyebrow">Auditoría del plan de herramientas</p>
+          <h2>Seguimiento de llamadas a herramientas</h2>
+          <p>Decisiones de herramientas propuestas, validadas, rechazadas y de políticas de ejecución.</p>
         </div>
       </div>
 
       <div className="toolPlanGrid">
         <ToolCallGroup
-          title="Proposed"
+          title="Propuestas"
           tone="neutral"
           calls={toolPlan.proposedCalls.map((call) => ({
             toolName: call.toolName,
@@ -96,7 +96,7 @@ export function ToolPlanAuditPanel({ toolPlan }: ToolPlanAuditPanelProps) {
           }))}
         />
         <ToolCallGroup
-          title="Approved"
+          title="Aprobadas"
           tone="success"
           calls={toolPlan.approvedCalls.map((call) => ({
             toolName: call.toolName,
@@ -104,7 +104,7 @@ export function ToolPlanAuditPanel({ toolPlan }: ToolPlanAuditPanelProps) {
           }))}
         />
         <ToolCallGroup
-          title="Rejected"
+          title="Rechazadas"
           tone="warning"
           calls={toolPlan.rejectedCalls.map((call) => ({
             toolName: call.toolName,
@@ -112,13 +112,13 @@ export function ToolPlanAuditPanel({ toolPlan }: ToolPlanAuditPanelProps) {
           }))}
         />
         <ToolCallGroup
-          title="Execution audit"
+          title="Auditoría de ejecución"
           tone="neutral"
           calls={toolPlan.executedCalls.map((call) => ({
             toolName: call.toolName,
             detail: call.error ?? call.summary,
-            meta: `${call.status ?? (call.succeeded ? "Executed" : "Failed")} - ${call.engine}`,
-            status: call.status ?? (call.succeeded ? "Executed" : "Failed"),
+            meta: `${call.status ?? (call.succeeded ? "Ejecutada" : "Fallida")} - ${call.engine}`,
+            status: call.status ?? (call.succeeded ? "Ejecutada" : "Fallida"),
             statusTone: getToolExecutionTone(call.status, call.succeeded),
           }))}
         />

@@ -10,7 +10,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
   }
 
   const reviewNotes = [
-    "This is regulatory retrieval evidence, not legal advice.",
+    "Esta es evidencia de recuperación regulatoria, no constituye asesoramiento legal.",
     ...(compliance.warnings ?? []),
   ];
 
@@ -20,13 +20,13 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
     <section className="compliancePanel">
       <div className="complianceHeader">
         <div>
-          <p className="complianceEyebrow">Compliance review</p>
-          <h2>LegalAgent assessment</h2>
+          <p className="complianceEyebrow">Revisión de cumplimiento normativo</p>
+          <h2>Evaluación de LegalAgent</h2>
           <p>{compliance.summary}</p>
 
           {compliance.engine && (
             <div className="engineBadge">
-              Compliance engine: <strong>{compliance.engine}</strong>
+              Motor de cumplimiento: <strong>{compliance.engine}</strong>
             </div>
           )}
         </div>
@@ -50,7 +50,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
             <p>{item.finding}</p>
 
             <div className="sourceLine">
-              Source: <span>{item.source}</span>
+              Origen: <span>{item.source}</span>
             </div>
           </article>
         ))}
@@ -61,28 +61,28 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
           <div className="financialAiReviewHeader">
             <div>
               <h3 style={{ margin: 0, color: "#0f2747", fontSize: "1.1rem" }}>
-                LegalAgent AI Review
+                Revisión de IA de LegalAgent
               </h3>
               <p style={{ margin: "0.35rem 0 0", color: "#475569" }}>
                 {legalReview.reviewSummary}
               </p>
             </div>
             <span className="aiReviewStatus">
-              {legalReview.usedLlm ? "AI Review" : "Deterministic Fallback"}
+              {legalReview.usedLlm ? "Revisión de IA" : "Respaldo determinista"}
             </span>
           </div>
 
           <dl className="aiReviewMeta">
             <div>
-              <dt>Method</dt>
-              <dd>{legalReview.usedLlm ? "Semantic Kernel (LLM)" : "Rule-Based Fallback"}</dd>
+              <dt>Método de análisis</dt>
+              <dd>{legalReview.usedLlm ? "Semantic Kernel (LLM)" : "Respaldo basado en reglas"}</dd>
             </div>
             <div>
-              <dt>Model Provider</dt>
+              <dt>Proveedor del modelo</dt>
               <dd>{legalReview.provider || "N/A"}</dd>
             </div>
             <div>
-              <dt>Model Name</dt>
+              <dt>Nombre del modelo</dt>
               <dd>{legalReview.model || "N/A"}</dd>
             </div>
           </dl>
@@ -90,7 +90,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
           {legalReview.possibleRegulatoryReviewAreas && legalReview.possibleRegulatoryReviewAreas.length > 0 && (
             <div className="aiReviewTextBlock" style={{ marginTop: "1.2rem" }}>
               <strong style={{ display: "block", marginBottom: "0.5rem", color: "#0f2747" }}>
-                Possible regulatory review areas
+                Posibles áreas de revisión regulatoria
               </strong>
               <div style={{ display: "grid", gap: "0.85rem" }}>
                 {legalReview.possibleRegulatoryReviewAreas.map((area, index) => (
@@ -113,7 +113,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
                         borderWidth: "1px",
                         borderStyle: "solid"
                       }}>
-                        {area.severity}
+                        {area.severity === "High" ? "Alta" : area.severity === "Medium" ? "Media" : area.severity === "Low" ? "Baja" : area.severity}
                       </span>
                     </div>
                     <p style={{ margin: "0.5rem 0", color: "#334155", fontSize: "0.9rem" }}>
@@ -121,7 +121,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
                     </p>
                     {area.relatedFinancialSignals && area.relatedFinancialSignals.length > 0 && (
                       <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.45rem" }}>
-                        Related Signals:{" "}
+                        Señales relacionadas:{" "}
                         {area.relatedFinancialSignals.map((sig, sIdx) => (
                           <strong key={sIdx} style={{ color: "#334155", background: "#f1f5f9", padding: "0.15rem 0.35rem", borderRadius: "4px", marginRight: "0.25rem", display: "inline-block" }}>
                             {sig}
@@ -131,7 +131,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
                     )}
                     {area.evidenceCitations && area.evidenceCitations.length > 0 && (
                       <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "0.45rem" }}>
-                        Citations:{" "}
+                        Citas normativas:{" "}
                         {area.evidenceCitations.map((cit, cIdx) => (
                           <span key={cIdx} style={{ color: "#0f766e", fontWeight: 700, marginRight: "0.5rem" }}>
                             § {cit}
@@ -148,7 +148,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
           {legalReview.evidenceReferences && legalReview.evidenceReferences.filter(e => e.citation && e.citation.trim() !== "").length > 0 && (
             <div className="aiReviewTextBlock" style={{ marginTop: "1.2rem" }}>
               <strong style={{ display: "block", marginBottom: "0.5rem", color: "#0f2747" }}>
-                Cited Evidence & Supporting Documents
+                Evidencia Citada y Documentos de Respaldo
               </strong>
               <div style={{ display: "grid", gap: "0.75rem" }}>
                 {legalReview.evidenceReferences
@@ -165,7 +165,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
                       </div>
                       {ev.citation && (
                         <p style={{ margin: "0.45rem 0", color: "#0f766e", fontWeight: "700", fontSize: "0.85rem" }}>
-                          Citation: {ev.citation}
+                          Cita: {ev.citation}
                         </p>
                       )}
                       {ev.snippet && (
@@ -176,14 +176,14 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
                       <div className="sourceLine" style={{ fontSize: "0.8rem", marginTop: "0.45rem" }}>
                         {ev.url ? (
                           <a href={ev.url} target="_blank" rel="noopener noreferrer" style={{ color: "#0f766e", textDecoration: "underline", fontWeight: 700 }}>
-                            View official source document
+                            Ver documento de origen oficial
                           </a>
                         ) : (
-                          <span>Source URL N/A</span>
+                          <span>Enlace de origen no disponible</span>
                         )}
                         {ev.score !== undefined && ev.score !== null && (
                           <span style={{ marginLeft: "1rem", color: "#64748b" }}>
-                            Relevance Score: <strong>{(ev.score * 100).toFixed(0)}%</strong>
+                            Puntuación de relevancia: <strong>{(ev.score * 100).toFixed(0)}%</strong>
                           </span>
                         )}
                       </div>
@@ -195,7 +195,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
 
           {((legalReview.warnings && legalReview.warnings.length > 0) || (legalReview.limitations && legalReview.limitations.length > 0)) && (
             <div className="legalWarnings" style={{ marginTop: "1.2rem", background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
-              <strong>AI Review Warnings & Limitations</strong>
+              <strong>Advertencias y Limitaciones de la Revisión de IA</strong>
               <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                 {legalReview.warnings.map((warning, wIdx) => (
                   <li key={`w-${wIdx}`} style={{ marginBottom: "0.25rem" }}>{warning}</li>
@@ -220,15 +220,15 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
             }}
           >
             <strong style={{ display: "block", marginBottom: "0.25rem", color: "#1e3a8a" }}>
-              Advisory Legal Disclaimer
+              Descargo de Responsabilidad (Carácter Consultivo)
             </strong>
-            Advisory review of financial analysis against provided CNV/Infoleg evidence. This is not legal advice. No definitive legal or regulatory conclusion is provided.
+            Revisión de carácter consultivo del análisis financiero frente a la evidencia CNV/Infoleg provista. Esto no constituye asesoramiento legal. No se proporciona ninguna conclusión legal o regulatoria definitiva.
           </div>
         </div>
       )}
 
       <div className="legalWarnings">
-        <strong>Review notes</strong>
+        <strong>Notas de revisión</strong>
         <ul>
           {reviewNotes.map((warning) => (
             <li key={warning}>{warning}</li>

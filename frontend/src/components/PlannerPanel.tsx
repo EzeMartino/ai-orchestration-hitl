@@ -27,22 +27,22 @@ export function PlannerPanel({ planner }: PlannerPanelProps) {
   }
 
   const llmStatus = planner.usedLlm
-    ? "LLM reasoning used"
+    ? "Razonamiento LLM utilizado"
     : planner.usedFallback
-      ? "Deterministic fallback"
-      : "Reasoning metadata unavailable";
+      ? "Alternativa determinista"
+      : "Metadatos de razonamiento no disponibles";
 
   return (
     <section className="plannerPanel">
       <div className="plannerHeader">
         <div>
-          <p className="plannerEyebrow">Planner review</p>
-          <h2>Controlled reasoning summary</h2>
+          <p className="plannerEyebrow">Revisión del Planificador</p>
+          <h2>Resumen de razonamiento controlado</h2>
           <p>{planner.summary}</p>
 
           {planner.engine && (
             <div className="engineBadge">
-              Planner engine: <strong>{planner.engine}</strong>
+              Motor del planificador: <strong>{planner.engine}</strong>
             </div>
           )}
         </div>
@@ -50,35 +50,35 @@ export function PlannerPanel({ planner }: PlannerPanelProps) {
 
       <div className="plannerMetaGrid">
         <div>
-          <span>LLM status</span>
+          <span>Estado del LLM</span>
           <strong>{llmStatus}</strong>
         </div>
 
         <div>
-          <span>Provider</span>
+          <span>Proveedor</span>
           <strong>{planner.provider ?? "None"}</strong>
         </div>
 
         <div>
-          <span>Model</span>
+          <span>Modelo</span>
           <strong>{planner.model ?? "None"}</strong>
         </div>
       </div>
 
       {planner.failureReason && (
         <div className="plannerFallbackWarning">
-          <strong>LLM fallback used</strong>
+          <strong>Alternativa de LLM utilizada</strong>
           <p>{planner.failureReason}</p>
         </div>
       )}
 
       <div className="plannerGrid">
         <PlannerList
-          title="Recommended actions"
+          title="Acciones recomendadas"
           items={planner.recommendedActions}
         />
-        <PlannerList title="Risk factors" items={planner.riskFactors} />
-        <PlannerList title="Limitations" items={planner.limitations} />
+        <PlannerList title="Factores de riesgo" items={planner.riskFactors} />
+        <PlannerList title="Limitaciones" items={planner.limitations} />
       </div>
     </section>
   );

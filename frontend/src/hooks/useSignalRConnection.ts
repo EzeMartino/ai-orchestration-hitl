@@ -49,7 +49,7 @@ export function useSignalRConnection(onActivityEvent: (event: ActivityEvent) => 
         if (isDisposed) {
           return;
         }
-        console.error("SignalR connection failed:", error);
+        console.error("La conexión con SignalR falló:", error);
         setConnectionStatus("Failed");
       });
 

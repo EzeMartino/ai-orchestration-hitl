@@ -33,32 +33,32 @@ function formatPercent(value?: number | null) {
 function formatIngestionMethod(ingestionMethod?: string | null) {
   switch (ingestionMethod) {
     case "json_paste":
-      return "JSON paste";
+      return "Pegado de JSON";
     case "csv_paste":
-      return "CSV paste";
+      return "Pegado de CSV";
     case "json_file":
-      return "JSON file";
+      return "Archivo JSON";
     case "csv_file":
-      return "CSV file";
+      return "Archivo CSV";
     case "pdf_file":
-      return "PDF file";
+      return "Archivo PDF";
     default:
-      return "Unknown";
+      return "Desconocido";
   }
 }
 
 function formatMetricsInputSource(inputSource?: string | null) {
   switch (inputSource) {
     case "session_context":
-      return "Session context";
+      return "Contexto de la sesión";
     case "fixture_fallback":
-      return "Fixture fallback";
+      return "Datos de prueba (Fixture)";
     case "none":
-      return "None";
+      return "Ninguno";
     case "unknown":
-      return "Unknown";
+      return "Desconocido";
     default:
-      return "Unknown";
+      return "Desconocido";
   }
 }
 
@@ -66,18 +66,18 @@ function formatAiReviewStatus(
   aiReview: FinancialAnalysisContext["aiReview"]
 ) {
   if (!aiReview) {
-    return "AI review not available";
+    return "Revisión de IA no disponible";
   }
 
   if (aiReview.usedLlm) {
-    return "LLM used";
+    return "LLM utilizado";
   }
 
   if (aiReview.failureReason?.includes("not") || aiReview.summary.includes("not executed")) {
-    return "Not run";
+    return "No ejecutado";
   }
 
-  return "Deterministic fallback";
+  return "Respaldo determinista";
 }
 
 function formatThreshold(signal: FinancialAnalysisContext["riskSignals"][number]) {
@@ -112,31 +112,31 @@ export function FinancialRiskEvidencePanel({
     <section className="financialRiskPanel">
       <div className="financialRiskHeader">
         <div>
-          <p className="financialRiskEyebrow">Financial risk evidence</p>
+          <p className="financialRiskEyebrow">Evidencia de riesgo financiero</p>
           <h2 style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            {financialAnalysis.company ?? "Structured financial metrics"}
+            {financialAnalysis.company ?? "Métricas financieras estructuradas"}
             {financialAnalysis.thresholdProfile && (
               <span className="profileBadge" style={{ fontWeight: "normal" }}>
-                Profile: <strong>{financialAnalysis.thresholdProfile}</strong>
+                Perfil: <strong>{financialAnalysis.thresholdProfile}</strong>
               </span>
             )}
           </h2>
           <p>
-            Quantitative evidence generated from structured financial metrics.
+            Evidencia cuantitativa generada a partir de métricas financieras estructuradas.
           </p>
 
           <div className="engineBadge">
-            Financial engine: <strong>{financialAnalysis.engine}</strong>
+            Motor financiero: <strong>{financialAnalysis.engine}</strong>
           </div>
           <div className="engineBadge">
-            Metrics source:{" "}
+            Origen de las métricas:{" "}
             <strong>
               {formatMetricsInputSource(financialAnalysis.metricsInputSource)}
             </strong>
           </div>
           {financialAnalysis.metricsProvenance && (
             <div className="engineBadge">
-              Ingestion:{" "}
+              Ingesta:{" "}
               <strong>
                 {formatIngestionMethod(
                   financialAnalysis.metricsProvenance.ingestionMethod
@@ -150,23 +150,22 @@ export function FinancialRiskEvidencePanel({
         </div>
 
         <div className="documentBadge">
-          <span>Document</span>
+          <span>Documento</span>
           <strong>{financialAnalysis.documentId}</strong>
         </div>
       </div>
 
       {isFixtureFallback && (
         <div className="financialSourceWarning">
-          Fixture fallback metrics were used. Attach structured metrics to
-          analyze session-specific data.
+          Se utilizaron métricas de prueba predefinidas (fixtures). Adjunte métricas estructuradas para analizar los datos específicos de la sesión.
         </div>
       )}
 
       {hasNoMetrics && (
         <div className="financialSourceWarning">
           {requiresSessionMetrics
-            ? "Structured financial metrics are required for this mode but were not attached to this session. Attach JSON/CSV/PDF metrics before starting the analysis."
-            : "No structured financial metrics were available."}
+            ? "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a la sesión. Adjunte métricas JSON/CSV/PDF antes de iniciar el análisis."
+            : "Las métricas financieras estructuradas no estaban disponibles."}
         </div>
       )}
 
@@ -174,50 +173,50 @@ export function FinancialRiskEvidencePanel({
         <div className="financialAiReview">
           <div className="financialAiReviewHeader">
             <div>
-              <strong>DataAgent AI Review</strong>
-              <p>Advisory interpretation of deterministic financial evidence.</p>
+              <strong>Revisión de IA de DataAgent</strong>
+              <p>Interpretación asesora de la evidencia financiera determinista.</p>
             </div>
             <span className="aiReviewStatus">{formatAiReviewStatus(aiReview)}</span>
           </div>
 
           <dl className="aiReviewMeta">
             <div>
-              <dt>LLM status</dt>
+              <dt>Estado del LLM</dt>
               <dd>{formatAiReviewStatus(aiReview)}</dd>
             </div>
             <div>
-              <dt>Provider</dt>
+              <dt>Proveedor</dt>
               <dd>{aiReview.provider ?? "-"}</dd>
             </div>
             <div>
-              <dt>Model</dt>
+              <dt>Modelo</dt>
               <dd>{aiReview.model ?? "-"}</dd>
             </div>
             <div>
-              <dt>Failure reason</dt>
+              <dt>Motivo de fallo</dt>
               <dd>{aiReview.failureReason ?? "-"}</dd>
             </div>
           </dl>
 
           {aiReview.failureReason && (
             <div className="financialSourceWarning">
-              AI review used a safe fallback. Reason: {aiReview.failureReason}.
+              La revisión de IA utilizó un respaldo seguro. Motivo: {aiReview.failureReason}.
             </div>
           )}
 
           <div className="aiReviewTextBlock">
-            <strong>Summary</strong>
+            <strong>Resumen</strong>
             <p>{aiReview.summary}</p>
           </div>
 
           <div className="aiReviewTextBlock">
-            <strong>Risk interpretation</strong>
+            <strong>Interpretación de riesgos</strong>
             <p>{aiReview.riskInterpretation}</p>
           </div>
 
           {aiReview.keyFindings.length > 0 && (
             <div className="financialSection">
-              <strong>Key findings</strong>
+              <strong>Hallazgos clave</strong>
               <div className="financialSignalList">
                 {aiReview.keyFindings.map((finding, index) => (
                   <article
@@ -225,7 +224,7 @@ export function FinancialRiskEvidencePanel({
                     key={`${finding.title}-${index}`}
                   >
                     <span className={`severityPill severity-${finding.severity}`}>
-                      {finding.severity}
+                      {finding.severity === "High" ? "Alta" : finding.severity === "Medium" ? "Media" : finding.severity === "Low" ? "Baja" : finding.severity}
                     </span>
                     <div>
                       <strong>{finding.title}</strong>
@@ -245,11 +244,11 @@ export function FinancialRiskEvidencePanel({
             <div className="financialReviewNotes">
               {aiReview.dataQualityNotes.length > 0 && (
                 <div>
-                  <strong>Data quality notes</strong>
+                  <strong>Notas de calidad de datos</strong>
                   <ul>
                     {aiReview.dataQualityNotes.map((note, index) => (
                       <li key={`${note.message}-${index}`}>
-                        [{note.severity}] {note.message}
+                        [{note.severity === "High" ? "Alta" : note.severity === "Medium" ? "Media" : note.severity === "Low" ? "Baja" : note.severity}] {note.message}
                       </li>
                     ))}
                   </ul>
@@ -258,7 +257,7 @@ export function FinancialRiskEvidencePanel({
 
               {aiReview.limitations.length > 0 && (
                 <div>
-                  <strong>AI review limitations</strong>
+                  <strong>Limitaciones de la revisión de IA</strong>
                   <ul>
                     {aiReview.limitations.map((limitation) => (
                       <li key={limitation}>{limitation}</li>
@@ -280,7 +279,7 @@ export function FinancialRiskEvidencePanel({
             >
               <div className="financialEvidenceTop">
                 <span className={`severityBadge severity-${item.severity}`}>
-                  {item.severity}
+                  {item.severity === "High" ? "Alta" : item.severity === "Medium" ? "Media" : item.severity === "Low" ? "Baja" : item.severity}
                 </span>
                 <strong>{formatSignalTitle(item.title)}</strong>
               </div>
@@ -289,27 +288,27 @@ export function FinancialRiskEvidencePanel({
 
               <dl className="financialEvidenceMeta">
                 <div>
-                  <dt>Metric</dt>
+                  <dt>Métrica</dt>
                   <dd>{item.metric ?? "-"}</dd>
                 </div>
                 <div>
-                  <dt>Period</dt>
+                  <dt>Período</dt>
                   <dd>{item.period ?? "-"}</dd>
                 </div>
                 <div>
-                  <dt>Value</dt>
+                  <dt>Valor</dt>
                   <dd>{formatNumber(item.value)}</dd>
                 </div>
                 <div>
-                  <dt>Threshold</dt>
+                  <dt>Umbral</dt>
                   <dd>{formatNumber(item.threshold)}</dd>
                 </div>
                 <div>
-                  <dt>Confidence</dt>
+                  <dt>Confianza</dt>
                   <dd>{formatPercent(item.confidence)}</dd>
                 </div>
                 <div>
-                  <dt>Source page</dt>
+                  <dt>Página de origen</dt>
                   <dd>{item.sourcePage ?? "-"}</dd>
                 </div>
               </dl>
@@ -320,7 +319,7 @@ export function FinancialRiskEvidencePanel({
 
       {visibleSignals.length > 0 && (
         <div className="financialSection">
-          <strong>Risk signals</strong>
+          <strong>Señales de riesgo</strong>
           <div className="financialSignalList">
             {visibleSignals.map((signal, index) => (
               <article
@@ -328,30 +327,30 @@ export function FinancialRiskEvidencePanel({
                 key={`${signal.code}-${signal.metric}-${signal.period}-${index}`}
               >
                 <span className={`severityPill severity-${signal.severity}`}>
-                  {signal.severity}
+                  {signal.severity === "High" ? "Alta" : signal.severity === "Medium" ? "Media" : signal.severity === "Low" ? "Baja" : signal.severity}
                 </span>
                 <div>
                   <strong>{formatSignalTitle(signal.code)}</strong>
                   <p>{signal.explanation}</p>
                   <dl className="financialEvidenceMeta">
                     <div>
-                      <dt>Metric</dt>
+                      <dt>Métrica</dt>
                       <dd>{signal.metric ?? "-"}</dd>
                     </div>
                     <div>
-                      <dt>Period</dt>
+                      <dt>Período</dt>
                       <dd>{signal.period ?? "-"}</dd>
                     </div>
                     <div>
-                      <dt>Observed value</dt>
+                      <dt>Valor observado</dt>
                       <dd>{formatNumber(signal.value)}</dd>
                     </div>
                     <div>
-                      <dt>Threshold</dt>
+                      <dt>Umbral</dt>
                       <dd>{formatThreshold(signal)}</dd>
                     </div>
                   </dl>
-                  {signal.reason && <small>Reason: {signal.reason}</small>}
+                  {signal.reason && <small>Motivo: {signal.reason}</small>}
                 </div>
               </article>
             ))}
@@ -360,8 +359,8 @@ export function FinancialRiskEvidencePanel({
       )}
 
       <div className="disclaimerBox">
-        <strong>Heuristic Guardrail</strong>
-        Risk thresholds are heuristic review criteria. They are not investment advice and do not confirm accounting correctness.
+        <strong>Línea de Defensa Heurística</strong>
+        Los umbrales de riesgo son criterios de revisión heurísticos. No constituyen asesoramiento de inversión ni confirman la exactitud contable.
       </div>
 
       {financialAnalysis.thresholdsUsed && financialAnalysis.thresholdsUsed.length > 0 && (
@@ -371,7 +370,7 @@ export function FinancialRiskEvidencePanel({
             onClick={() => setThresholdsExpanded(!thresholdsExpanded)}
             style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
           >
-            <span>Applied Thresholds ({financialAnalysis.thresholdsUsed.length})</span>
+            <span>Umbrales Aplicados ({financialAnalysis.thresholdsUsed.length})</span>
             <span style={{ transform: thresholdsExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease", display: "inline-block" }}>
               ▼
             </span>
@@ -392,7 +391,7 @@ export function FinancialRiskEvidencePanel({
                     </div>
                     <div className="thresholdCardMeta">
                       <span className={`severityBadge severity-${t.severity}`} style={{ fontSize: "0.65rem", padding: "0.1rem 0.35rem" }}>
-                        {t.severity}
+                        {t.severity === "High" ? "Alta" : t.severity === "Medium" ? "Media" : t.severity === "Low" ? "Baja" : t.severity}
                       </span>
                     </div>
                   </div>
@@ -405,7 +404,7 @@ export function FinancialRiskEvidencePanel({
 
       {visibleRatios.length > 0 && (
         <div className="financialSection">
-          <strong>Key ratios</strong>
+          <strong>Ratios clave</strong>
           <div className="ratioStrip">
             {visibleRatios.map((ratio) => (
               <article className="ratioTile" key={`${ratio.name}-${ratio.period}`}>
@@ -426,7 +425,7 @@ export function FinancialRiskEvidencePanel({
         <div className="financialReviewNotes">
           {financialAnalysis.warnings.length > 0 && (
             <div>
-              <strong>Warnings</strong>
+              <strong>Advertencias</strong>
               <ul>
                 {financialAnalysis.warnings.map((warning) => (
                   <li key={warning}>{warning}</li>
@@ -437,7 +436,7 @@ export function FinancialRiskEvidencePanel({
 
           {financialAnalysis.limitations.length > 0 && (
             <div>
-              <strong>Limitations</strong>
+              <strong>Limitaciones</strong>
               <ul>
                 {financialAnalysis.limitations.map((limitation) => (
                   <li key={limitation}>{limitation}</li>

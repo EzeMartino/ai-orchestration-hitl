@@ -139,10 +139,10 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
       <section className="shell">
         <header className="header">
           <div>
-            <p className="eyebrow">LLM-Ready Orchestration Platform</p>
-            <h1>Financial Analysis Control Room</h1>
+            <p className="eyebrow">Plataforma de Orquestación Lista para LLM</p>
+            <h1>Sala de Control de Análisis Financiero</h1>
             <p className="subtitle">
-              Real-time activity feed for supervised agent workflows.
+              Feed de actividad en tiempo real para flujos de trabajo de agentes supervisados.
             </p>
           </div>
 
@@ -153,9 +153,9 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
               </div>
               <div className="userProfileInfo">
                 <span className="userProfileEmail">
-                  {parseJwt(token)?.email || "User"}
+                  {parseJwt(token)?.email || "Usuario"}
                 </span>
-                <button className="userLogoutBtn" onClick={onLogout} title="Logout">
+                <button className="userLogoutBtn" onClick={onLogout} title="Cerrar sesión">
                   <svg
                     className="userLogoutIcon"
                     viewBox="0 0 24 24"
@@ -169,20 +169,20 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
                     <polyline points="16 17 21 12 16 7" />
                     <line x1="21" y1="12" x2="9" y2="12" />
                   </svg>
-                  <span>Logout</span>
+                  <span>Cerrar sesión</span>
                 </button>
               </div>
             </div>
 
             <div className={`connectionBadge ${connectionStatus.toLowerCase()}`}>
-              SignalR: <strong>{connectionStatus}</strong>
+              Conexión en vivo (SignalR): <strong>{connectionStatus === "Connected" ? "Conectado" : connectionStatus === "Disconnected" ? "Desconectado" : connectionStatus === "Reconnecting" ? "Reconectando" : "Fallida"}</strong>
             </div>
           </div>
         </header>
 
         <section className="actions" aria-label="Session actions">
           <button onClick={createSession} disabled={isCreating}>
-            {isCreating ? "Creating..." : "Create Analysis Session"}
+            {isCreating ? "Creando..." : "Crear Sesión de Análisis"}
           </button>
 
           <button
@@ -190,15 +190,15 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
             disabled={!session || isStarting || isStartBlockedByPreflight}
             title={
               isStartBlockedByPreflight
-                ? "Start blocked by preflight"
+                ? "Inicio bloqueado por validación previa"
                 : undefined
             }
           >
             {isStarting
-              ? "Starting..."
+              ? "Iniciando..."
               : isStartBlockedByPreflight
-                ? "Start blocked by preflight"
-                : "Start Session"}
+                ? "Inicio bloqueado por validación previa"
+                : "Iniciar Sesión"}
           </button>
         </section>
 
@@ -211,14 +211,14 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
         <section className="loadSessionPanel">
           <label>
-            Review previous analysis
+            Revisar análisis anteriores
             <div className="loadSessionRow">
               <select
                 value={selectedSessionId}
                 onChange={(event) => setSelectedSessionId(event.target.value)}
               >
                 {savedSessions.length === 0 ? (
-                  <option value="">No saved sessions yet</option>
+                  <option value="">Aún no hay sesiones guardadas</option>
                 ) : (
                   savedSessions.map((savedSession) => (
                     <option key={savedSession.id} value={savedSession.id}>
@@ -233,10 +233,10 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
                 onClick={() => loadExistingSession()}
                 disabled={!selectedSessionId}
               >
-                Load Session
+                Cargar Sesión
               </button>
 
-              <button onClick={loadSavedSessions}>Refresh</button>
+              <button onClick={loadSavedSessions}>Actualizar</button>
             </div>
           </label>
         </section>
@@ -255,7 +255,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
             <section className="sessionCard">
               <div className="sessionHeader">
                 <div>
-                  <span className="label">Current session</span>
+                  <span className="label">Sesión actual</span>
                   <code>{session.id}</code>
                 </div>
 
@@ -264,12 +264,12 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
               <div className="sessionGrid">
                 <div>
-                  <span>Current agent</span>
-                  <strong>{session.currentAgent ?? "None"}</strong>
+                  <span>Agente actual</span>
+                  <strong>{session.currentAgent ? (session.currentAgent === "PlannerAgent" ? "Agente Planificador" : session.currentAgent === "DataAgent" ? "Agente de Datos" : session.currentAgent === "LegalAgent" ? "Agente Legal" : session.currentAgent) : "Ninguno"}</strong>
                 </div>
 
                 <div>
-                  <span>Created</span>
+                  <span>Creada</span>
                   <strong>
                     {session.createdAt
                       ? new Date(session.createdAt).toLocaleString()
@@ -278,7 +278,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
                 </div>
 
                 <div>
-                  <span>Updated</span>
+                  <span>Actualizada</span>
                   <strong>
                     {session.updatedAt
                       ? new Date(session.updatedAt).toLocaleString()
@@ -311,34 +311,34 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
           {session?.status === "Completed" && (
             <div className="finalDecision finalDecisionSuccess">
-              Human auditor approved this workflow. The analysis was completed.
+              El auditor humano aprobó este flujo de trabajo. El análisis ha finalizado.
             </div>
           )}
 
           {session?.status === "Failed" && (
             <div className="finalDecision finalDecisionDanger">
-              Human auditor rejected this workflow. The analysis was stopped.
+              El auditor humano rechazó este flujo de trabajo. El análisis ha sido detenido.
             </div>
           )}
 
           {session?.status === "AwaitingHumanApproval" && (
             <section className="approvalPanel">
               <div>
-                <p className="approvalEyebrow">Human intervention required</p>
-                <h2>High-severity anomaly detected</h2>
+                <p className="approvalEyebrow">Se requiere intervención humana</p>
+                <h2>Anomalía de alta gravedad detectada</h2>
                 <p>
-                  The supervised workflow has been paused. A human auditor must
-                  review the evidence before the system can continue or
-                  terminate the analysis.
+                  El flujo de trabajo supervisado ha sido pausado. Un auditor humano debe
+                  revisar la evidencia antes de que el sistema pueda continuar o
+                  finalizar el análisis.
                 </p>
               </div>
 
               <label className="reasonField">
-                Auditor reason
+                Comentario del auditor
                 <textarea
                   value={decisionReason}
                   onChange={(event) => setDecisionReason(event.target.value)}
-                  placeholder="Example: Anomaly above threshold, reject for manual investigation."
+                  placeholder="Ejemplo: Anomalía por encima del umbral, rechazar para investigación manual."
                 />
               </label>
 
@@ -348,7 +348,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
                   onClick={() => submitHumanDecision("approve")}
                   disabled={isSubmittingDecision}
                 >
-                  Approve
+                  Aprobar
                 </button>
 
                 <button
@@ -356,7 +356,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
                   onClick={() => submitHumanDecision("reject")}
                   disabled={isSubmittingDecision}
                 >
-                  Reject
+                  Rechazar
                 </button>
               </div>
             </section>
@@ -364,13 +364,13 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
           <section className="activityPanel">
             <div className="panelHeader">
-              <h2>Activity Feed</h2>
-              <span>{events.length} events</span>
+              <h2>Canal de Actividad</h2>
+              <span>{events.length} eventos</span>
             </div>
 
             {latestEvent && (
               <div className="latestEventSummary">
-                <span>Latest event</span>
+                <span>Último evento</span>
                 <strong>{latestEvent.agent}</strong>
                 <p>{latestEvent.message}</p>
               </div>
@@ -378,7 +378,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
             {events.length === 0 ? (
               <p className="emptyState">
-                No activity yet. Create and start a session.
+                Sin actividad aún. Cree e inicie una sesión.
               </p>
             ) : (
               <div className="eventList">
