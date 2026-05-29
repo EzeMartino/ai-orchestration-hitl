@@ -28,6 +28,8 @@ const maxStructuredMetricsFileSizeBytes = 20_971_520;
 const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
+const uploadRequiresSessionMessage =
+  "No se pueden cargar los archivos hasta que no tenga una sesión iniciada";
 
 const jsonMetricsTemplate = JSON.stringify(
   {
@@ -488,13 +490,20 @@ export function StructuredFinancialMetricsPanel({
             </label>
           </div>
 
-          <button
-            onClick={handleUploadFile}
-            disabled={!sessionId || isSaving || !selectedFile}
-            type="button"
+          <span
+            className={!sessionId ? "uploadButtonTooltip" : undefined}
+            data-tooltip={!sessionId ? uploadRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? uploadRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Uploading..." : "Upload File"}
-          </button>
+            <button
+              onClick={handleUploadFile}
+              disabled={!sessionId || isSaving || !selectedFile}
+              type="button"
+            >
+              {isSaving ? "Uploading..." : "Upload File"}
+            </button>
+          </span>
         </div>
       )}
 

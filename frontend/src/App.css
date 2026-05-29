@@ -820,6 +820,40 @@ code {
   background: #0f766e;
 }
 
+.uploadButtonTooltip {
+  position: relative;
+  justify-self: flex-start;
+  display: inline-flex;
+}
+
+.uploadButtonTooltip::after {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.55rem);
+  z-index: 10;
+  width: max-content;
+  max-width: min(320px, 80vw);
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: #0f2747;
+  color: white;
+  content: attr(data-tooltip);
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.3;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(0.25rem);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.uploadButtonTooltip:hover::after,
+.uploadButtonTooltip:focus::after,
+.uploadButtonTooltip:focus-within::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .metricsResult {
   margin-top: 1rem;
   border-radius: 16px;
