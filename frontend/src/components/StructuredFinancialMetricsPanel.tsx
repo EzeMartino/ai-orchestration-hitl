@@ -29,7 +29,9 @@ const allowedStructuredMetricsFileExtensions = [".json", ".csv", ".pdf"];
 const sampleJsonTemplateUrl = "/templates/structured-financial-metrics-sample.json";
 const sampleCsvTemplateUrl = "/templates/structured-financial-metrics-sample.csv";
 const uploadRequiresSessionMessage =
-  "No se pueden cargar los archivos hasta que no tenga una sesión iniciada";
+  "No se pueden cargar los archivos hasta que no tenga una sesi\u00f3n iniciada";
+const saveRequiresSessionMessage =
+  "No puede guardar las m\u00e9tricas si no ha creado o cargado una sesi\u00f3n.";
 
 const jsonMetricsTemplate = JSON.stringify(
   {
@@ -362,13 +364,20 @@ export function StructuredFinancialMetricsPanel({
             />
           </label>
 
-          <button
-            onClick={handleSaveJson}
-            disabled={!sessionId || isSaving}
-            type="button"
+          <span
+            className={!sessionId ? "sessionActionTooltip" : undefined}
+            data-tooltip={!sessionId ? saveRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? saveRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Saving..." : "Save JSON Metrics"}
-          </button>
+            <button
+              onClick={handleSaveJson}
+              disabled={!sessionId || isSaving}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save JSON Metrics"}
+            </button>
+          </span>
         </div>
       ) : mode === "csv" ? (
         <div className="metricsEditor">
@@ -412,13 +421,20 @@ export function StructuredFinancialMetricsPanel({
             />
           </label>
 
-          <button
-            onClick={handleSaveCsv}
-            disabled={!sessionId || isSaving}
-            type="button"
+          <span
+            className={!sessionId ? "sessionActionTooltip" : undefined}
+            data-tooltip={!sessionId ? saveRequiresSessionMessage : undefined}
+            tabIndex={!sessionId ? 0 : undefined}
+            title={!sessionId ? saveRequiresSessionMessage : undefined}
           >
-            {isSaving ? "Saving..." : "Save CSV Metrics"}
-          </button>
+            <button
+              onClick={handleSaveCsv}
+              disabled={!sessionId || isSaving}
+              type="button"
+            >
+              {isSaving ? "Saving..." : "Save CSV Metrics"}
+            </button>
+          </span>
         </div>
       ) : (
         <div className="metricsEditor">
@@ -491,7 +507,7 @@ export function StructuredFinancialMetricsPanel({
           </div>
 
           <span
-            className={!sessionId ? "uploadButtonTooltip" : undefined}
+            className={!sessionId ? "sessionActionTooltip" : undefined}
             data-tooltip={!sessionId ? uploadRequiresSessionMessage : undefined}
             tabIndex={!sessionId ? 0 : undefined}
             title={!sessionId ? uploadRequiresSessionMessage : undefined}

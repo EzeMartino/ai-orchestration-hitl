@@ -820,13 +820,13 @@ code {
   background: #0f766e;
 }
 
-.uploadButtonTooltip {
+.sessionActionTooltip {
   position: relative;
   justify-self: flex-start;
   display: inline-flex;
 }
 
-.uploadButtonTooltip::after {
+.sessionActionTooltip::after {
   position: absolute;
   left: 0;
   bottom: calc(100% + 0.55rem);
@@ -847,9 +847,9 @@ code {
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.uploadButtonTooltip:hover::after,
-.uploadButtonTooltip:focus::after,
-.uploadButtonTooltip:focus-within::after {
+.sessionActionTooltip:hover::after,
+.sessionActionTooltip:focus::after,
+.sessionActionTooltip:focus-within::after {
   opacity: 1;
   transform: translateY(0);
 }
