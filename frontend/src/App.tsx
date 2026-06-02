@@ -136,6 +136,12 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
   return (
     <main className="page">
+      {/* Aurora background */}
+      <div className="aurora-bg" aria-hidden="true">
+        <div className="aurora-blob blob-1"></div>
+        <div className="aurora-blob blob-2"></div>
+        <div className="aurora-blob blob-3"></div>
+      </div>
       <section className="shell">
         <header className="header">
           <div>

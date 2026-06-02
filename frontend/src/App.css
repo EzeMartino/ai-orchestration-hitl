@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #0f172a;
-  background: #eef2f7;
+  color: #f1f5f9;
+  background: #030712;
 }
 
 * {
@@ -30,11 +30,81 @@ button:disabled {
 .page {
   min-height: 100vh;
   padding: 2rem;
+  background: radial-gradient(circle at 50% 50%, #0c152b 0%, #030712 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Aurora background layer (shared with AuthPage) */
+.page > .aurora-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.page .aurora-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.12;
+  mix-blend-mode: screen;
+}
+
+.page .blob-1 {
+  top: -10%;
+  left: -10%;
+  width: 500px;
+  height: 500px;
+  background: #06b6d4;
+  animation: page-float-1 25s infinite alternate ease-in-out;
+}
+
+.page .blob-2 {
+  bottom: -15%;
+  right: -10%;
+  width: 600px;
+  height: 600px;
+  background: #6366f1;
+  animation: page-float-2 30s infinite alternate ease-in-out;
+}
+
+.page .blob-3 {
+  top: 40%;
+  left: 50%;
+  width: 400px;
+  height: 400px;
+  background: #ec4899;
+  animation: page-float-3 20s infinite alternate ease-in-out;
+}
+
+@keyframes page-float-1 {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(100px, 80px) scale(1.15); }
+  100% { transform: translate(-50px, 120px) scale(0.9); }
+}
+
+@keyframes page-float-2 {
+  0% { transform: translate(0, 0) scale(1.1); }
+  50% { transform: translate(-120px, -60px) scale(0.9); }
+  100% { transform: translate(80px, 40px) scale(1.2); }
+}
+
+@keyframes page-float-3 {
+  0% { transform: translate(0, 0) scale(0.9); }
+  50% { transform: translate(60px, -100px) scale(1.1); }
+  100% { transform: translate(-80px, 50px) scale(0.95); }
 }
 
 .shell {
   max-width: 1050px;
   margin: 0 auto;
+  position: relative;
+  z-index: 1;
 }
 
 .header {
@@ -47,7 +117,7 @@ button:disabled {
 
 .eyebrow {
   margin: 0 0 0.5rem;
-  color: #2563eb;
+  color: #38bdf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -57,21 +127,23 @@ button:disabled {
 h1 {
   margin: 0;
   font-size: 2.4rem;
-  color: #071426;
+  color: #f8fafc;
 }
 
 .subtitle {
   margin: 0.6rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .connectionBadge {
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
   padding: 0.7rem 1rem;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
+  color: #cbd5e1;
 }
 
 .actions {
@@ -88,8 +160,8 @@ h1 {
   margin-bottom: 1rem;
   border-radius: 18px;
   padding: 1rem;
-  border: 1px solid #dbe3ef;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .startReadinessPanel span {
@@ -111,26 +183,27 @@ h1 {
 }
 
 .startReadiness-neutral {
-  background: #ffffff;
-  color: #334155;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  color: #cbd5e1;
 }
 
 .startReadiness-success {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-  color: #047857;
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #34d399;
 }
 
 .startReadiness-warning {
-  background: #fffbeb;
-  border-color: #fcd34d;
-  color: #92400e;
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
 }
 
 .startReadiness-danger {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #991b1b;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #f87171;
 }
 
 .preflightIssueList {
@@ -139,22 +212,23 @@ h1 {
   min-width: 280px;
   max-width: 520px;
   font-size: 0.9rem;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .loadSessionPanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
   padding: 1rem;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .loadSessionPanel label {
   display: grid;
   gap: 0.5rem;
-  color: #334155;
+  color: #cbd5e1;
   font-weight: 800;
 }
 
@@ -166,12 +240,12 @@ h1 {
 .loadSessionRow input,
 .loadSessionRow select {
   flex: 1;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 0.8rem;
   font: inherit;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .loadSessionRow input:focus,
@@ -182,11 +256,13 @@ h1 {
 
 .sessionCard,
 .activityPanel {
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .sessionCard {
@@ -196,7 +272,7 @@ h1 {
 .label {
   display: block;
   margin-bottom: 0.4rem;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -204,9 +280,9 @@ h1 {
 
 code {
   display: block;
-  color: #1e293b;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 0.8rem;
   overflow-x: auto;
@@ -217,7 +293,7 @@ code {
   justify-content: space-between;
   margin-top: 0.8rem;
   padding-top: 0.8rem;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .panelHeader {
@@ -231,13 +307,13 @@ code {
 }
 
 .panelHeader span {
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 700;
 }
 
 .emptyState {
-  color: #64748b;
-  border: 1px dashed #cbd5e1;
+  color: #94a3b8;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
   border-radius: 16px;
   padding: 1rem;
 }
@@ -249,44 +325,45 @@ code {
 }
 
 .eventCard {
-  border: 1px solid #e2e8f0;
-  border-left: 5px solid #0f2747;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 5px solid #38bdf8;
   border-radius: 16px;
   padding: 1rem;
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.5);
 }
 
 .eventMeta {
   display: flex;
   justify-content: space-between;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.85rem;
   font-weight: 700;
 }
 
 .eventCard h3 {
   margin: 0.5rem 0;
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .eventCard p {
   margin: 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .approvalPanel {
   margin-bottom: 1rem;
-  background: #ffffff;
-  border: 1px solid #f59e0b;
+  background: rgba(30, 20, 10, 0.65);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(245, 158, 11, 0.4);
   border-left: 6px solid #f59e0b;
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
 }
 
 .approvalEyebrow {
   margin: 0 0 0.4rem;
-  color: #b45309;
+  color: #fbbf24;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -295,17 +372,17 @@ code {
 
 .approvalPanel h2 {
   margin: 0;
-  color: #78350f;
+  color: #fcd34d;
 }
 
 .approvalPanel p {
-  color: #475569;
+  color: #cbd5e1;
 }
 
 .reasonField {
   display: grid;
   gap: 0.5rem;
-  color: #334155;
+  color: #cbd5e1;
   font-weight: 700;
   margin-top: 1rem;
 }
@@ -314,12 +391,12 @@ code {
   width: 100%;
   min-height: 90px;
   resize: vertical;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   padding: 0.8rem;
   font: inherit;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .reasonField textarea:focus {
@@ -347,7 +424,7 @@ code {
 
 .latestEventSummary span {
   display: block;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -355,13 +432,13 @@ code {
 
 .latestEventSummary strong {
   display: block;
-  color: #0f172a;
+  color: #f1f5f9;
   margin-top: 0.2rem;
 }
 
 .latestEventSummary p {
   margin: 0.4rem 0 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .finalDecision {
@@ -398,22 +475,22 @@ code {
 }
 
 .sessionGrid div {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   padding: 0.9rem;
 }
 
 .sessionGrid span {
   display: block;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.8rem;
   font-weight: 700;
   margin-bottom: 0.35rem;
 }
 
 .sessionGrid strong {
-  color: #0f172a;
+  color: #f1f5f9;
 }
 
 .statusBadge {
@@ -459,11 +536,13 @@ code {
 
 .evidencePanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .evidenceHeader {
@@ -475,7 +554,7 @@ code {
 
 .evidenceEyebrow {
   margin: 0 0 0.4rem;
-  color: #2563eb;
+  color: #38bdf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -484,12 +563,12 @@ code {
 
 .evidenceHeader h2 {
   margin: 0;
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .evidenceHeader p {
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .engineBadge {
@@ -497,17 +576,17 @@ code {
   gap: 0.35rem;
   align-items: center;
   margin-top: 0.75rem;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
   padding: 0.45rem 0.75rem;
-  color: #475569;
+  color: #94a3b8;
   font-size: 0.85rem;
   font-weight: 700;
 }
 
 .engineBadge strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .severityBadge {
@@ -546,14 +625,14 @@ code {
 }
 
 .metricCard {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 1rem;
 }
 
 .metricName {
-  color: #475569;
+  color: #94a3b8;
   font-size: 0.8rem;
   font-weight: 800;
 }
@@ -567,44 +646,46 @@ code {
 }
 
 .metricValues strong {
-  color: #0f2747;
+  color: #f1f5f9;
   font-size: 1.7rem;
 }
 
 .metricValues span {
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 700;
 }
 
 .metricCard p {
   margin: 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .recommendationBox {
   margin-top: 1rem;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.2);
   border-radius: 16px;
   padding: 1rem;
 }
 
 .recommendationBox strong {
-  color: #1d4ed8;
+  color: #60a5fa;
 }
 
 .recommendationBox p {
   margin: 0.35rem 0 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .structuredMetricsPanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #99f6e4;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(20, 184, 166, 0.25);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .structuredMetricsHeader {
@@ -616,7 +697,7 @@ code {
 
 .structuredMetricsEyebrow {
   margin: 0 0 0.4rem;
-  color: #0f766e;
+  color: #14b8a6;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -625,13 +706,13 @@ code {
 
 .structuredMetricsHeader h2 {
   margin: 0;
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .structuredMetricsHeader p {
   max-width: 660px;
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .structuredMetricsState {
@@ -639,16 +720,16 @@ code {
   gap: 0.3rem;
   min-width: 240px;
   max-width: 320px;
-  background: #f0fdfa;
-  border: 1px solid #99f6e4;
+  background: rgba(13, 148, 136, 0.15);
+  border: 1px solid rgba(20, 184, 166, 0.25);
   border-radius: 16px;
   padding: 0.9rem;
-  color: #115e59;
+  color: #2dd4bf;
   font-weight: 700;
 }
 
 .structuredMetricsState strong {
-  color: #134e4a;
+  color: #5eead4;
 }
 
 .structuredMetricsState span {
@@ -661,19 +742,19 @@ code {
   gap: 1rem;
   align-items: center;
   margin-top: 1rem;
-  border: 1px solid #dbeafe;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 0.95rem;
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.4);
 }
 
 .metricsTemplateBox strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .metricsTemplateBox p {
   margin: 0.25rem 0 0;
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 700;
 }
 
@@ -693,22 +774,23 @@ code {
 }
 
 .templateActions a {
-  border: 1px solid #99f6e4;
-  color: #0f766e;
-  background: white;
+  border: 1px solid rgba(20, 184, 166, 0.25);
+  color: #14b8a6;
+  background: rgba(15, 23, 42, 0.6);
   text-decoration: none;
 }
 
 .templateActions a:hover {
-  border-color: #0f766e;
+  border-color: #14b8a6;
+  background: rgba(20, 184, 166, 0.1);
 }
 
 .metricsModeToggle {
   display: inline-flex;
   gap: 0.35rem;
   margin-top: 1rem;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px;
   padding: 0.25rem;
 }
@@ -716,13 +798,13 @@ code {
 .metricsModeToggle button {
   border-radius: 10px;
   background: transparent;
-  color: #475569;
+  color: #94a3b8;
   padding: 0.55rem 0.85rem;
 }
 
 .metricsModeToggle button.active {
-  background: #0f766e;
-  color: white;
+  background: #14b8a6;
+  color: #030712;
 }
 
 .metricsEditor {
@@ -735,19 +817,19 @@ code {
 .csvMetaGrid label {
   display: grid;
   gap: 0.45rem;
-  color: #334155;
+  color: #cbd5e1;
   font-weight: 800;
 }
 
 .metricsEditor textarea,
 .csvMetaGrid input {
   width: 100%;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   padding: 0.8rem;
   font: inherit;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .metricsEditor textarea {
@@ -773,29 +855,29 @@ code {
 .fileUploadBox {
   display: grid;
   gap: 0.75rem;
-  border: 1px dashed #94a3b8;
+  border: 1px dashed rgba(255, 255, 255, 0.15);
   border-radius: 16px;
   padding: 1rem;
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.4);
 }
 
 .fileUploadBox-active {
-  border-color: #0f766e;
-  background: #f0fdfa;
+  border-color: #14b8a6;
+  background: rgba(13, 148, 136, 0.1);
 }
 
 .fileUploadBox input[type="file"] {
   width: 100%;
-  border: 1px solid #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 0.75rem;
-  background: white;
-  color: #0f172a;
+  background: rgba(15, 23, 42, 0.6);
+  color: #f1f5f9;
 }
 
 .fileUploadBox p {
   margin: 0;
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 700;
 }
 
@@ -805,9 +887,9 @@ code {
   gap: 0.5rem 0.85rem;
   align-items: center;
   border-radius: 12px;
-  background: #ecfeff;
-  border: 1px solid #a5f3fc;
-  color: #155e75;
+  background: rgba(6, 182, 212, 0.08);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  color: #22d3ee;
   padding: 0.75rem;
 }
 
@@ -835,8 +917,10 @@ code {
   max-width: min(320px, 80vw);
   padding: 0.55rem 0.7rem;
   border-radius: 10px;
-  background: #0f2747;
-  color: white;
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   content: attr(data-tooltip);
   font-size: 0.82rem;
   font-weight: 800;
@@ -865,15 +949,15 @@ code {
 }
 
 .metricsResult-success {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  color: #047857;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #34d399;
 }
 
 .metricsResult-danger {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #f87171;
 }
 
 .issueList {
@@ -903,11 +987,13 @@ code {
 
 .financialRiskPanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #bfdbfe;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(96, 165, 250, 0.2);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .financialRiskHeader {
@@ -919,7 +1005,7 @@ code {
 
 .financialRiskEyebrow {
   margin: 0 0 0.4rem;
-  color: #0369a1;
+  color: #38bdf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -928,25 +1014,25 @@ code {
 
 .financialRiskHeader h2 {
   margin: 0;
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .financialRiskHeader p {
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .documentBadge {
   min-width: 180px;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 0.9rem;
 }
 
 .documentBadge span {
   display: block;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.76rem;
   font-weight: 800;
   margin-bottom: 0.35rem;
@@ -954,25 +1040,25 @@ code {
 }
 
 .documentBadge strong {
-  color: #0f2747;
+  color: #f1f5f9;
   word-break: break-word;
 }
 
 .financialSourceWarning {
   margin-top: 1rem;
-  background: #fffbeb;
-  border: 1px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-left: 5px solid #f59e0b;
   border-radius: 16px;
   padding: 0.9rem 1rem;
-  color: #78350f;
+  color: #fbbf24;
   font-weight: 800;
 }
 
 .financialAiReview {
   margin-top: 1rem;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 1rem;
 }
@@ -985,12 +1071,12 @@ code {
 }
 
 .financialAiReviewHeader strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .financialAiReviewHeader p {
   margin: 0.35rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .aiReviewStatus {
@@ -998,8 +1084,8 @@ code {
   flex-shrink: 0;
   border-radius: 999px;
   padding: 0.35rem 0.65rem;
-  background: #eef2ff;
-  color: #3730a3;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
   font-size: 0.76rem;
   font-weight: 900;
 }
@@ -1016,7 +1102,7 @@ code {
 }
 
 .aiReviewMeta dt {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1024,7 +1110,7 @@ code {
 
 .aiReviewMeta dd {
   margin: 0.25rem 0 0;
-  color: #0f172a;
+  color: #f1f5f9;
   font-weight: 800;
   word-break: break-word;
 }
@@ -1034,12 +1120,12 @@ code {
 }
 
 .aiReviewTextBlock strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .aiReviewTextBlock p {
   margin: 0.35rem 0 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .financialEvidenceGrid {
@@ -1050,9 +1136,9 @@ code {
 }
 
 .financialEvidenceCard {
-  background: #f8fafc;
-  border: 1px solid #dbe3ef;
-  border-left: 5px solid #2563eb;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 5px solid #38bdf8;
   border-radius: 16px;
   padding: 1rem;
 }
@@ -1065,12 +1151,12 @@ code {
 }
 
 .financialEvidenceTop strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .financialEvidenceCard p {
   margin: 0.75rem 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .financialEvidenceMeta {
@@ -1085,7 +1171,7 @@ code {
 }
 
 .financialEvidenceMeta dt {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1093,7 +1179,7 @@ code {
 
 .financialEvidenceMeta dd {
   margin: 0.25rem 0 0;
-  color: #0f172a;
+  color: #f1f5f9;
   font-weight: 800;
   word-break: break-word;
 }
@@ -1103,7 +1189,7 @@ code {
 }
 
 .financialSection > strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .financialSignalList {
@@ -1117,23 +1203,23 @@ code {
   grid-template-columns: auto 1fr;
   gap: 0.75rem;
   align-items: flex-start;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 1rem;
 }
 
 .financialSignalCard strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .financialSignalCard p {
   margin: 0.35rem 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .financialSignalCard small {
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 800;
 }
 
@@ -1155,15 +1241,15 @@ code {
 }
 
 .ratioTile {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 0.9rem;
 }
 
 .ratioTile span {
   display: block;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.76rem;
   font-weight: 800;
 }
@@ -1171,12 +1257,12 @@ code {
 .ratioTile strong {
   display: block;
   margin-top: 0.45rem;
-  color: #0f2747;
+  color: #f1f5f9;
   font-size: 1.45rem;
 }
 
 .ratioTile small {
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 800;
 }
 
@@ -1188,11 +1274,11 @@ code {
 }
 
 .financialReviewNotes div {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 16px;
   padding: 1rem;
-  color: #78350f;
+  color: #fbbf24;
 }
 
 .financialReviewNotes strong {
@@ -1207,11 +1293,13 @@ code {
 
 .plannerPanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #c7d2fe;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(129, 140, 248, 0.25);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .plannerHeader {
@@ -1223,7 +1311,7 @@ code {
 
 .plannerEyebrow {
   margin: 0 0 0.4rem;
-  color: #4338ca;
+  color: #818cf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1232,12 +1320,12 @@ code {
 
 .plannerHeader h2 {
   margin: 0;
-  color: #111827;
+  color: #f1f5f9;
 }
 
 .plannerHeader p {
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .plannerMetaGrid {
@@ -1248,15 +1336,15 @@ code {
 }
 
 .plannerMetaGrid div {
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(129, 140, 248, 0.25);
   border-radius: 16px;
   padding: 0.9rem;
 }
 
 .plannerMetaGrid span {
   display: block;
-  color: #4338ca;
+  color: #818cf8;
   font-size: 0.78rem;
   font-weight: 800;
   margin-bottom: 0.35rem;
@@ -1264,16 +1352,16 @@ code {
 }
 
 .plannerMetaGrid strong {
-  color: #111827;
+  color: #f1f5f9;
 }
 
 .plannerFallbackWarning {
   margin-top: 1rem;
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 16px;
   padding: 1rem;
-  color: #78350f;
+  color: #fbbf24;
 }
 
 .plannerFallbackWarning strong {
@@ -1293,29 +1381,31 @@ code {
 }
 
 .plannerList {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 1rem;
 }
 
 .plannerList strong {
-  color: #111827;
+  color: #f1f5f9;
 }
 
 .plannerList ul {
   margin: 0.6rem 0 0;
   padding-left: 1.2rem;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .toolPlanPanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #bae6fd;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(56, 189, 248, 0.2);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .toolPlanHeader {
@@ -1327,7 +1417,7 @@ code {
 
 .toolPlanEyebrow {
   margin: 0 0 0.4rem;
-  color: #0369a1;
+  color: #38bdf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1336,12 +1426,12 @@ code {
 
 .toolPlanHeader h2 {
   margin: 0;
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .toolPlanHeader p {
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .toolPlanGrid {
@@ -1352,29 +1442,29 @@ code {
 }
 
 .toolCallGroup {
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   padding: 1rem;
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.4);
 }
 
 .toolCallGroup > strong {
-  color: #0f2747;
+  color: #f1f5f9;
 }
 
 .toolCallGroup-success {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  border-color: rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.1);
 }
 
 .toolCallGroup-warning {
-  border-color: #fcd34d;
-  background: #fffbeb;
+  border-color: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.1);
 }
 
 .toolCallGroup-danger {
-  border-color: #fecaca;
-  background: #fef2f2;
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .toolCallList {
@@ -1384,15 +1474,15 @@ code {
 }
 
 .toolCallCard {
-  background: white;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 0.8rem;
 }
 
 .toolCallCard span {
   display: block;
-  color: #0f2747;
+  color: #f1f5f9;
   font-weight: 800;
   word-break: break-word;
 }
@@ -1400,7 +1490,7 @@ code {
 .toolCallCard small {
   display: block;
   margin-top: 0.35rem;
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 800;
 }
 
@@ -1412,65 +1502,67 @@ code {
   font-size: 0.72rem;
   font-style: normal;
   font-weight: 900;
-  border: 1px solid #cbd5e1;
-  color: #475569;
-  background: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .toolCallStatus-success {
-  border-color: #bbf7d0;
-  color: #047857;
-  background: #ecfdf5;
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
 }
 
 .toolCallStatus-warning {
-  border-color: #fcd34d;
-  color: #b45309;
-  background: #fffbeb;
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
 }
 
 .toolCallStatus-danger {
-  border-color: #fecaca;
-  color: #b91c1c;
-  background: #fef2f2;
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
 }
 
 .toolCallCard p {
   margin: 0.5rem 0 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .event-neutral {
-  border-left-color: #0f2747;
+  border-left-color: #38bdf8;
 }
 
 .event-info {
   border-left-color: #2563eb;
-  background: #eff6ff;
+  background: rgba(37, 99, 235, 0.1);
 }
 
 .event-warning {
   border-left-color: #f59e0b;
-  background: #fffbeb;
+  background: rgba(245, 158, 11, 0.1);
 }
 
 .event-danger {
   border-left-color: #dc2626;
-  background: #fef2f2;
+  background: rgba(220, 38, 38, 0.1);
 }
 
 .event-success {
   border-left-color: #16a34a;
-  background: #f0fdf4;
+  background: rgba(22, 163, 74, 0.1);
 }
 
 .compliancePanel {
   margin-bottom: 1rem;
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
   padding: 1.2rem;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.25);
+  color: #e2e8f0;
 }
 
 .complianceHeader {
@@ -1482,7 +1574,7 @@ code {
 
 .complianceEyebrow {
   margin: 0 0 0.4rem;
-  color: #4f46e5;
+  color: #818cf8;
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -1491,12 +1583,12 @@ code {
 
 .complianceHeader h2 {
   margin: 0;
-  color: #111827;
+  color: #f1f5f9;
 }
 
 .complianceHeader p {
   margin: 0.5rem 0 0;
-  color: #475569;
+  color: #94a3b8;
 }
 
 .riskBadge {
@@ -1535,9 +1627,9 @@ code {
 }
 
 .complianceEvidenceCard {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-left: 5px solid #4f46e5;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 5px solid #818cf8;
   border-radius: 16px;
   padding: 1rem;
 }
@@ -1550,37 +1642,37 @@ code {
 }
 
 .complianceEvidenceTop strong {
-  color: #111827;
+  color: #f1f5f9;
 }
 
 .complianceEvidenceTop span {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.85rem;
   font-weight: 800;
 }
 
 .complianceEvidenceCard p {
   margin: 0.7rem 0;
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .sourceLine {
-  color: #64748b;
+  color: #94a3b8;
   font-size: 0.85rem;
   font-weight: 700;
 }
 
 .sourceLine span {
-  color: #334155;
+  color: #cbd5e1;
 }
 
 .legalWarnings {
   margin-top: 1rem;
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 16px;
   padding: 1rem;
-  color: #78350f;
+  color: #fbbf24;
 }
 
 .legalWarnings strong {
@@ -1642,19 +1734,19 @@ code {
 .disclaimerBox {
   margin: 1.5rem 0;
   padding: 1rem 1.25rem;
-  background: linear-gradient(135deg, #fffbeb 0%, #fff7ed 100%);
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.1) 0%, rgba(249, 115, 22, 0.1) 100%);
   border-left: 4px solid #f97316;
   border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   font-size: 0.9rem;
   line-height: 1.45;
-  color: #c2410c;
+  color: #fdba74;
 }
 
 .disclaimerBox strong {
   display: block;
   margin-bottom: 0.25rem;
-  color: #9a3412;
+  color: #f97316;
   font-weight: 800;
   text-transform: uppercase;
   font-size: 0.75rem;
@@ -1662,9 +1754,9 @@ code {
 }
 
 .profileBadge {
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border: 1px solid #93c5fd;
-  color: #1e40af;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(37, 99, 235, 0.12) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
   padding: 0.35rem 0.75rem;
   border-radius: 999px;
   font-weight: 700;
@@ -1672,12 +1764,12 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .thresholdsCollapse {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   margin: 1.25rem 0;
   overflow: hidden;
@@ -1688,22 +1780,22 @@ code {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1.25rem;
-  background: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
   cursor: pointer;
   user-select: none;
   font-weight: 700;
-  color: #0f2747;
+  color: #f1f5f9;
   transition: background 0.2s ease;
 }
 
 .thresholdsCollapseHeader:hover {
-  background: #e2e8f0;
+  background: rgba(15, 23, 42, 0.8);
 }
 
 .thresholdsCollapseContent {
   padding: 1.25rem;
-  border-top: 1px solid #e2e8f0;
-  background: #ffffff;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.3);
 }
 
 .thresholdsGrid {
@@ -1713,10 +1805,10 @@ code {
 }
 
 .thresholdCard {
-  border: 1px solid #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 6px;
   padding: 0.75rem 1rem;
-  background: #f8fafc;
+  background: rgba(15, 23, 42, 0.4);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -1730,23 +1822,24 @@ code {
 
 .thresholdCardTitle {
   font-weight: 700;
-  color: #0f2747;
+  color: #f1f5f9;
   font-size: 0.85rem;
 }
 
 .thresholdValueBadge {
-  background: #e2e8f0;
-  color: #475569;
+  background: rgba(15, 23, 42, 0.6);
+  color: #cbd5e1;
   padding: 0.15rem 0.45rem;
   border-radius: 4px;
   font-size: 0.75rem;
   font-family: monospace;
   font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .thresholdCardBody {
   font-size: 0.8rem;
-  color: #475569;
+  color: #cbd5e1;
   line-height: 1.4;
 }
 
@@ -1754,7 +1847,7 @@ code {
   display: flex;
   gap: 0.5rem;
   font-size: 0.75rem;
-  color: #64748b;
+  color: #94a3b8;
   margin-top: 0.25rem;
 }
 
@@ -1769,11 +1862,12 @@ code {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  background: white;
-  border: 1px solid #dbe3ef;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 0.4rem 0.8rem;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .userAvatarBadge {
@@ -1801,7 +1895,7 @@ code {
 
 .userProfileEmail {
   font-size: 0.8rem;
-  color: #64748b;
+  color: #94a3b8;
   font-weight: 600;
   max-width: 150px;
   overflow: hidden;
