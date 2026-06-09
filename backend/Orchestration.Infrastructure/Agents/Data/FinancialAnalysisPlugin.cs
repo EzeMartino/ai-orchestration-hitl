@@ -32,7 +32,7 @@ public sealed class FinancialAnalysisPlugin
         var request = DeserializeRequest<ComputeFinancialRatiosRequest>(requestJson);
 
         return request is null
-            ? FailedRatiosResponse("Invalid compute financial ratios request JSON.")
+            ? FailedRatiosResponse("JSON de solicitud para calcular ratios financieros no válido.")
             : await _financialAnalysisService.ComputeFinancialRatiosAsync(
                 request,
                 cancellationToken
@@ -49,7 +49,7 @@ public sealed class FinancialAnalysisPlugin
         var request = DeserializeRequest<ComparePeriodsRequest>(requestJson);
 
         return request is null
-            ? FailedComparePeriodsResponse("Invalid compare periods request JSON.")
+            ? FailedComparePeriodsResponse("JSON de solicitud para comparar periodos no válido.")
             : await _financialAnalysisService.ComparePeriodsAsync(
                 request,
                 cancellationToken
@@ -66,7 +66,7 @@ public sealed class FinancialAnalysisPlugin
         var request = DeserializeRequest<DetectFinancialRiskSignalsRequest>(requestJson);
 
         return request is null
-            ? FailedRiskSignalsResponse("Invalid detect financial risk signals request JSON.")
+            ? FailedRiskSignalsResponse("JSON de solicitud para detectar señales de riesgo financiero no válido.")
             : await _financialAnalysisService.DetectFinancialRiskSignalsAsync(
                 request,
                 cancellationToken
@@ -83,7 +83,7 @@ public sealed class FinancialAnalysisPlugin
         var request = DeserializeRequest<SummarizeQuantitativeEvidenceRequest>(requestJson);
 
         return request is null
-            ? FailedEvidenceSummaryResponse("Invalid summarize quantitative evidence request JSON.")
+            ? FailedEvidenceSummaryResponse("JSON de solicitud para resumir evidencia cuantitativa no válido.")
             : await _financialAnalysisService.SummarizeQuantitativeEvidenceAsync(
                 request,
                 cancellationToken
@@ -119,7 +119,7 @@ public sealed class FinancialAnalysisPlugin
             Warnings:
             [
                 message,
-                "Financial ratios could not be computed from the provided request."
+                "No se pudieron calcular los ratios financieros a partir de la solicitud provista."
             ]
         );
     }
@@ -132,7 +132,7 @@ public sealed class FinancialAnalysisPlugin
             Warnings:
             [
                 message,
-                "Financial period comparisons could not be computed from the provided request."
+                "No se pudieron calcular comparaciones entre periodos financieros a partir de la solicitud provista."
             ]
         );
     }
@@ -145,13 +145,13 @@ public sealed class FinancialAnalysisPlugin
             Result: new FinancialAnalysisToolResult(
                 HasRiskSignals: false,
                 RiskLevel: "Low",
-                Summary: "Financial risk signals could not be computed from the provided request.",
+                Summary: "No se pudieron calcular señales de riesgo financiero a partir de la solicitud provista.",
                 Engine: Engine,
                 Evidence: [],
                 Warnings:
                 [
                     message,
-                    "Financial risk signals could not be computed from the provided request."
+                    "No se pudieron calcular señales de riesgo financiero a partir de la solicitud provista."
                 ]
             )
         );
@@ -159,7 +159,7 @@ public sealed class FinancialAnalysisPlugin
 
     private static SummarizeQuantitativeEvidenceResponse FailedEvidenceSummaryResponse(string message)
     {
-        const string summary = "Quantitative evidence could not be summarized from the provided request.";
+        const string summary = "No se pudo resumir la evidencia cuantitativa a partir de la solicitud provista.";
 
         return new SummarizeQuantitativeEvidenceResponse(
             Engine: Engine,
@@ -173,7 +173,7 @@ public sealed class FinancialAnalysisPlugin
                 Warnings:
                 [
                     message,
-                    "Quantitative evidence could not be summarized from the provided request."
+                    "No se pudo resumir la evidencia cuantitativa a partir de la solicitud provista."
                 ]
             )
         );

@@ -1,10 +1,14 @@
+using System.Text;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 
 namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 
 public sealed class PdfPigTextExtractor : IPdfTextExtractor
 {
+    private const double LineTolerance = 2.5;
+
     public Task<IReadOnlyList<StructuredFinancialMetricsExtractedPage>> ExtractTextAsync(
         Stream pdf,
         int maxPages,
@@ -29,10 +33,61 @@ public sealed class PdfPigTextExtractor : IPdfTextExtractor
 
             pages.Add(new StructuredFinancialMetricsExtractedPage(
                 PageNumber: page.Number,
-                Text: page.Text ?? string.Empty));
+                Text: ExtractPageText(page)));
         }
 
         return Task.FromResult<IReadOnlyList<StructuredFinancialMetricsExtractedPage>>(pages);
+    }
+
+    private static string ExtractPageText(
+        Page page)
+    {
+        var words = page.GetWords().ToArray();
+
+        if (words.Length == 0)
+        {
+            return page.Text ?? string.Empty;
+        }
+
+        var lines = new List<List<Word>>();
+
+        foreach (var word in words
+            .Where(word => !string.IsNullOrWhiteSpace(word.Text))
+            .OrderByDescending(word => word.BoundingBox.Bottom)
+            .ThenBy(word => word.BoundingBox.Left))
+        {
+            var line = lines.FirstOrDefault(candidate =>
+                Math.Abs(candidate[0].BoundingBox.Bottom - word.BoundingBox.Bottom) <= LineTolerance);
+
+            if (line is null)
+            {
+                lines.Add([word]);
+                continue;
+            }
+
+            line.Add(word);
+        }
+
+        if (lines.Count == 0)
+        {
+            return page.Text ?? string.Empty;
+        }
+
+        var builder = new StringBuilder();
+
+        foreach (var line in lines)
+        {
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(string.Join(
+                ' ',
+                line.OrderBy(word => word.BoundingBox.Left).Select(word => word.Text)));
+        }
+
+        return builder.ToString();
     }
 
     private sealed class NonDisposingStream : Stream

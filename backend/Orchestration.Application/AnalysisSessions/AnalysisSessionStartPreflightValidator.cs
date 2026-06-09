@@ -14,7 +14,7 @@ public sealed class AnalysisSessionStartPreflightValidator
         "STRUCTURED_FINANCIAL_METRICS_REQUIRED";
 
     public const string StructuredFinancialMetricsRequiredMessage =
-        "Structured financial metrics are required for this mode but were not attached to this session.";
+        "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a esta sesión.";
 
     private const string ContextPropertyName = "structuredFinancialMetrics";
 

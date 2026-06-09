@@ -227,6 +227,106 @@ public sealed class StructuredFinancialMetricsTextParserTests
     }
 
     [Fact]
+    public void Parse_Should_extract_spanish_financial_statement_aliases()
+    {
+        var result = Parse(
+            source: "pdf_extraction",
+            pages:
+            [
+                new StructuredFinancialMetricsExtractedPage(
+                    PageNumber: 12,
+                    Text: """
+                        Concepto 2021A 2022A
+                        Ventas netas 10.000 12.500
+                        Ganancia bruta 4.100 5.250
+                        Resultado operativo 2.000 2.300
+                        Pasivo corriente 1.800 1.950
+                        Activo corriente 3.600 4.095
+                        Deuda financiera total 5.200 5.800
+                        Patrimonio neto 7.400 8.100
+                        Deuda neta 3.100 3.500
+                        Flujo de caja libre (250) 1.200
+                        """
+                )
+            ]
+        );
+
+        result.IsValid.Should().BeTrue();
+        result.Input!.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Period == "2021A" &&
+            metric.Value == 10000m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "gross_profit" &&
+            metric.Period == "2022A" &&
+            metric.Value == 5250m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "operating_income" &&
+            metric.Period == "2022A" &&
+            metric.Value == 2300m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "current_liabilities" &&
+            metric.Period == "2021A" &&
+            metric.Value == 1800m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "current_assets" &&
+            metric.Period == "2022A" &&
+            metric.Value == 4095m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "total_debt" &&
+            metric.Period == "2022A" &&
+            metric.Value == 5800m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "equity" &&
+            metric.Period == "2021A" &&
+            metric.Value == 7400m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "net_debt" &&
+            metric.Period == "2022A" &&
+            metric.Value == 3500m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "free_cash_flow" &&
+            metric.Period == "2021A" &&
+            metric.Value == -250m);
+    }
+
+    [Fact]
+    public void Parse_Should_extract_interleaved_period_values_with_locale_numbers()
+    {
+        var result = Parse(
+            source: "pdf_extraction",
+            pages:
+            [
+                new StructuredFinancialMetricsExtractedPage(
+                    PageNumber: 14,
+                    Text: """
+                        Ventas netas 2021A 10.000 2022A 12.500,75
+                        Margen bruto 2021A 41,5% 2022A 42.0%
+                        """
+                )
+            ]
+        );
+
+        result.IsValid.Should().BeTrue();
+        result.Input!.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Period == "2021A" &&
+            metric.Value == 10000m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "revenue" &&
+            metric.Period == "2022A" &&
+            metric.Value == 12500.75m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "gross_margin" &&
+            metric.Period == "2021A" &&
+            metric.Value == 0.415m);
+        result.Input.Metrics.Should().Contain(metric =>
+            metric.Name == "gross_margin" &&
+            metric.Period == "2022A" &&
+            metric.Value == 0.42m);
+    }
+
+    [Fact]
     public void Parse_Should_deduplicate_by_highest_confidence_then_earliest_page()
     {
         var result = Parse(

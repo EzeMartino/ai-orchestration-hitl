@@ -83,7 +83,7 @@ public sealed class ConfigurableDataAgentTests
 
         legacy.WasCalled.Should().BeTrue();
         workflow.WasCalled.Should().BeTrue();
-        result.Engine.Should().Be("Legacy DataAgent (legacy fallback)");
+        result.Engine.Should().Be("Legacy DataAgent (respaldo legacy)");
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public sealed class ConfigurableDataAgentTests
         result.Engine.Should().Be("Financial Analysis Workflow");
         result.HasAnomaly.Should().BeTrue();
         result.Severity.Should().Be("Medium");
-        result.Summary.Should().Be("Financial analysis could not be completed. Human review recommended.");
+        result.Summary.Should().Be("No se pudo completar el análisis financiero. Se recomienda revisión humana.");
     }
 
     [Fact]

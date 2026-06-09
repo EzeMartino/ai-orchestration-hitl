@@ -2,10 +2,10 @@ namespace Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 
 public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewService
 {
-    private const string DeterministicAdvisoryLimitation = "This review is deterministic and advisory.";
-    private const string NoMetricRecalculationLimitation = "It does not recompute financial metrics.";
-    private const string NoAccountingVerificationLimitation = "It does not verify accounting records.";
-    private const string NoRecommendationLimitation = "It does not provide portfolio or transaction recommendations.";
+    private const string DeterministicAdvisoryLimitation = "Esta revisión es determinista y asesora.";
+    private const string NoMetricRecalculationLimitation = "No recalcula métricas financieras.";
+    private const string NoAccountingVerificationLimitation = "No verifica registros contables.";
+    private const string NoRecommendationLimitation = "No brinda recomendaciones de cartera ni de transacciones.";
 
     public Task<FinancialAnalysisAiReviewResult> ReviewAsync(
         FinancialAnalysisAiReviewInput input,
@@ -40,17 +40,17 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         IReadOnlyList<FinancialRiskSignal> riskSignals)
     {
         var signalPhrase = riskSignals.Count == 0
-            ? "The financial analysis did not identify major risk signals based on the provided structured metrics."
-            : $"The financial analysis identified {riskSignals.Count} risk signal(s) based on structured financial metrics.";
+            ? "El análisis financiero no identificó señales de riesgo relevantes a partir de las métricas estructuradas provistas."
+            : $"El análisis financiero identificó {riskSignals.Count} señal(es) de riesgo a partir de métricas financieras estructuradas.";
 
         return GetMetricsSource(input.MetricsInputSource) switch
         {
             FinancialMetricsInputSources.SessionContext =>
-                $"{signalPhrase} The review used metrics attached to the analysis session.",
+                $"{signalPhrase} La revisión usó métricas adjuntas a la sesión de análisis.",
             FinancialMetricsInputSources.FixtureFallback =>
-                $"{signalPhrase} The review used fixture fallback metrics intended for demo/development use.",
+                $"{signalPhrase} La revisión usó métricas fixture de respaldo previstas para demo/desarrollo.",
             FinancialMetricsInputSources.None =>
-                "Structured financial metrics were not available for review.",
+                "No había métricas financieras estructuradas disponibles para la revisión.",
             _ => signalPhrase
         };
     }
@@ -61,7 +61,7 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         return riskSignals
             .Select(signal => new FinancialAnalysisAiKeyFinding(
                 Title: string.IsNullOrWhiteSpace(signal.Name)
-                    ? "Financial risk signal"
+                    ? "Señal de riesgo financiero"
                     : signal.Name,
                 Description: BuildFindingDescription(signal),
                 Severity: string.IsNullOrWhiteSpace(signal.Severity)
@@ -85,8 +85,8 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         }
 
         return string.IsNullOrWhiteSpace(signal.Period)
-            ? "A financial risk signal was produced by the deterministic analysis."
-            : $"A financial risk signal was produced for {signal.Period}.";
+            ? "El análisis determinista produjo una señal de riesgo financiero."
+            : $"Se produjo una señal de riesgo financiero para {signal.Period}.";
     }
 
     private static IReadOnlyList<string> ExtractRelatedMetrics(FinancialRiskSignal signal)
@@ -106,15 +106,15 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         IReadOnlyList<string> limitations)
     {
         var interpretation = riskSignals.Any(signal => IsSeverity(signal.Severity, "High"))
-            ? "The analysis includes high-severity risk signals. Human review should focus on the underlying metrics and evidence."
+            ? "El análisis incluye señales de riesgo de severidad alta. La revisión humana debe enfocarse en las métricas y evidencias subyacentes."
             : riskSignals.Any(signal => IsSeverity(signal.Severity, "Medium"))
-                ? "The analysis includes moderate risk indicators that should be reviewed in context."
+                ? "El análisis incluye indicadores de riesgo moderado que deben revisarse en contexto."
                 : riskSignals.Count == 0
-                    ? "No material risk signals were produced by the deterministic financial analysis."
-                    : "The analysis includes low-severity risk indicators that should be reviewed in context.";
+                    ? "El análisis financiero determinista no produjo señales de riesgo material."
+                    : "El análisis incluye indicadores de riesgo de severidad baja que deben revisarse en contexto.";
 
         return warnings.Count > 0 || limitations.Count > 0
-            ? $"{interpretation} The interpretation should be read together with the validation warnings and limitations."
+            ? $"{interpretation} La interpretación debe leerse junto con las advertencias de validación y las limitaciones."
             : interpretation;
     }
 
@@ -146,7 +146,7 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         if (GetMetricsSource(input.MetricsInputSource) == FinancialMetricsInputSources.FixtureFallback)
         {
             notes.Add(new FinancialAnalysisAiDataQualityNote(
-                Message: "Fixture fallback metrics were used. This is intended for demo/development only.",
+                Message: "Se usaron métricas fixture de respaldo. Esto está previsto solo para demo/desarrollo.",
                 Severity: "Warning",
                 RelatedFields: ["metricsInputSource"]
             ));
@@ -155,7 +155,7 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         if (GetMetricsSource(input.MetricsInputSource) == FinancialMetricsInputSources.None)
         {
             notes.Add(new FinancialAnalysisAiDataQualityNote(
-                Message: "No structured financial metrics were available for review.",
+                Message: "No había métricas financieras estructuradas disponibles para la revisión.",
                 Severity: "Warning",
                 RelatedFields: ["metricsInputSource"]
             ));
@@ -164,7 +164,7 @@ public sealed class DeterministicDataAgentAiReviewService : IDataAgentAiReviewSe
         if (input.MetricsProvenance is { WarningCount: > 0 } provenance)
         {
             notes.Add(new FinancialAnalysisAiDataQualityNote(
-                Message: $"The structured metrics ingestion produced {provenance.WarningCount} warning(s).",
+                Message: $"La ingesta de métricas estructuradas produjo {provenance.WarningCount} advertencia(s).",
                 Severity: "Warning",
                 RelatedFields: ["metricsProvenance.warningCount"]
             ));

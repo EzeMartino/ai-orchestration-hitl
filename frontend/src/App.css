@@ -1273,7 +1273,7 @@ code {
   margin-top: 1rem;
 }
 
-.financialReviewNotes div {
+.financialReviewNotes > div {
   background: rgba(245, 158, 11, 0.1);
   border: 1px solid rgba(245, 158, 11, 0.25);
   border-radius: 16px;
@@ -1289,6 +1289,76 @@ code {
 .financialReviewNotes ul {
   margin: 0;
   padding-left: 1.2rem;
+}
+
+.warningGroupList {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.warningGroup {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(251, 191, 36, 0.24);
+  border-radius: 8px;
+  color: #fde68a;
+  padding: 0.75rem;
+}
+
+.warningGroup summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.warningGroup summary span {
+  color: #f8fafc;
+  font-weight: 800;
+}
+
+.warningGroup summary small {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.warningGroup > ul {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin-top: 0.75rem;
+  padding-left: 0;
+}
+
+.warningGroupItem {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.warningGroupItem strong {
+  color: #f8fafc;
+  margin: 0;
+}
+
+.warningGroupItem span {
+  color: #fde68a;
+  font-weight: 700;
+}
+
+.warningGroupItem details {
+  color: #fcd34d;
+}
+
+.warningGroupItem details summary {
+  display: inline-flex;
+  font-size: 0.8rem;
+  justify-content: flex-start;
+}
+
+.warningGroupItem details ul {
+  color: #fbbf24;
+  font-size: 0.8rem;
+  margin-top: 0.35rem;
 }
 
 .plannerPanel {

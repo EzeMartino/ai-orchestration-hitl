@@ -1,5 +1,9 @@
 import { useState } from "react";
 import type { FinancialAnalysisContext } from "../types/domain.types";
+import {
+  formatFinancialWarningText,
+  groupFinancialWarnings,
+} from "../utils/financialWarnings";
 
 interface FinancialRiskEvidencePanelProps {
   financialAnalysis?: FinancialAnalysisContext | null;
@@ -52,7 +56,7 @@ function formatMetricsInputSource(inputSource?: string | null) {
     case "session_context":
       return "Contexto de la sesión";
     case "fixture_fallback":
-      return "Datos de prueba (Fixture)";
+      return "Datos de prueba (respaldo)";
     case "none":
       return "Ninguno";
     case "unknown":
@@ -73,7 +77,11 @@ function formatAiReviewStatus(
     return "LLM utilizado";
   }
 
-  if (aiReview.failureReason?.includes("not") || aiReview.summary.includes("not executed")) {
+  if (
+    aiReview.failureReason?.includes("not") ||
+    aiReview.summary.includes("not executed") ||
+    aiReview.summary.includes("no se ejecutó")
+  ) {
     return "No ejecutado";
   }
 
@@ -86,6 +94,30 @@ function formatThreshold(signal: FinancialAnalysisContext["riskSignals"][number]
   }
 
   return formatNumber(signal.threshold);
+}
+
+function formatMissingInput(value: string) {
+  switch (value) {
+    case "numerator":
+      return "numerador";
+    case "denominator":
+      return "denominador";
+    default:
+      return value;
+  }
+}
+
+function formatMissingInputs(values: string[]) {
+  return values.map(formatMissingInput).join(" y ");
+}
+
+function isRequiredMetricsWarning(warning: string) {
+  const normalized = warning.toLowerCase();
+
+  return (
+    normalized.includes("required for this mode") ||
+    normalized.includes("se requieren métricas financieras estructuradas")
+  );
 }
 
 export function FinancialRiskEvidencePanel({
@@ -104,9 +136,8 @@ export function FinancialRiskEvidencePanel({
   const isFixtureFallback = metricsInputSource === "fixture_fallback";
   const hasNoMetrics = metricsInputSource === "none";
   const aiReview = financialAnalysis.aiReview;
-  const requiresSessionMetrics = financialAnalysis.warnings.some((warning) =>
-    warning.includes("required for this mode")
-  );
+  const requiresSessionMetrics = financialAnalysis.warnings.some(isRequiredMetricsWarning);
+  const groupedWarnings = groupFinancialWarnings(financialAnalysis.warnings);
 
   return (
     <section className="financialRiskPanel">
@@ -143,7 +174,7 @@ export function FinancialRiskEvidencePanel({
                 )}
               </strong>
               {financialAnalysis.metricsProvenance.originalFileName
-                ? ` - File: ${financialAnalysis.metricsProvenance.originalFileName}`
+                ? ` - Archivo: ${financialAnalysis.metricsProvenance.originalFileName}`
                 : ""}
             </div>
           )}
@@ -426,11 +457,54 @@ export function FinancialRiskEvidencePanel({
           {financialAnalysis.warnings.length > 0 && (
             <div>
               <strong>Advertencias</strong>
-              <ul>
-                {financialAnalysis.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
+              {groupedWarnings.periodGroups.length > 0 && (
+                <div className="warningGroupList">
+                  {groupedWarnings.periodGroups.map((group) => (
+                    <details
+                      className="warningGroup"
+                      key={group.period}
+                      open={groupedWarnings.periodGroups.length <= 2}
+                    >
+                      <summary>
+                        <span>{group.period}</span>
+                        <small>
+                          Faltan {group.messageCount} insumos para{" "}
+                          {group.items.length} ratios
+                        </small>
+                      </summary>
+                      <ul>
+                        {group.items.map((item) => (
+                          <li key={`${group.period}-${item.ratioName}`}>
+                            <div className="warningGroupItem">
+                              <strong>{formatSignalTitle(item.ratioName)}</strong>
+                              <span>
+                                Falta {formatMissingInputs(item.missingInputs)}
+                              </span>
+                              <details>
+                                <summary>Ver detalle técnico</summary>
+                                <ul>
+                                  {item.messages.map((message) => (
+                                    <li key={message}>
+                                      {formatFinancialWarningText(message)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ))}
+                </div>
+              )}
+              {groupedWarnings.ungrouped.length > 0 && (
+                <ul>
+                  {groupedWarnings.ungrouped.map((warning) => (
+                    <li key={warning}>{formatFinancialWarningText(warning)}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
@@ -439,7 +513,7 @@ export function FinancialRiskEvidencePanel({
               <strong>Limitaciones</strong>
               <ul>
                 {financialAnalysis.limitations.map((limitation) => (
-                  <li key={limitation}>{limitation}</li>
+                  <li key={limitation}>{formatFinancialWarningText(limitation)}</li>
                 ))}
               </ul>
             </div>

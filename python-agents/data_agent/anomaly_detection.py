@@ -34,9 +34,9 @@ def analyze_transactions(
         severity = "Low"
 
     summary = (
-        "Unusual transaction pattern detected in the submitted financial report."
+        "Se detectó un patrón transaccional inusual en el informe financiero enviado."
         if has_anomaly
-        else "No significant transaction anomaly detected in the submitted financial report."
+        else "No se detectó una anomalía transaccional significativa en el informe financiero enviado."
     )
 
     evidence: list[tuple[str, float, float, str]] = [
@@ -45,9 +45,9 @@ def analyze_transactions(
             transaction_amount_z_score,
             amount_threshold,
             (
-                "Transaction amount is significantly above expected range."
+                "El monto de la transacción está significativamente por encima del rango esperado."
                 if has_amount_anomaly
-                else "Transaction amount is within expected range."
+                else "El monto de la transacción está dentro del rango esperado."
             ),
         ),
         (
@@ -55,9 +55,9 @@ def analyze_transactions(
             velocity_score,
             velocity_threshold,
             (
-                "Transaction frequency increased abnormally in a short time window."
+                "La frecuencia transaccional aumentó anormalmente en una ventana de tiempo corta."
                 if has_velocity_anomaly
-                else "Transaction frequency is within expected range."
+                else "La frecuencia transaccional está dentro del rango esperado."
             ),
         ),
     ]

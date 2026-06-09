@@ -28,7 +28,7 @@ def compute_financial_ratios(request_json: str) -> str:
         for ratio_name in ratio_names:
             spec = ratio_specs.get(ratio_name)
             if spec is None:
-                warnings.append(f"Unsupported ratio requested: {ratio_name}.")
+                warnings.append(f"Ratio solicitado no admitido: {ratio_name}.")
                 continue
 
             ratio = _compute_ratio(period, period_metrics, ratio_name, spec, warnings)
@@ -49,7 +49,7 @@ def compute_financial_ratios(request_json: str) -> str:
             )
 
     if not ratios:
-        limitations.append("No ratios were computed from the provided structured metrics.")
+        limitations.append("No se calcularon ratios a partir de las métricas estructuradas provistas.")
 
     return _dumps(
         {
@@ -76,8 +76,8 @@ def compare_periods(request_json: str) -> str:
         return _dumps(
             {
                 "comparisons": [],
-                "warnings": ["basePeriod and comparisonPeriod are required."],
-                "limitations": ["Period comparison could not run without both periods."],
+                "warnings": ["basePeriod y comparisonPeriod son obligatorios."],
+                "limitations": ["La comparación de periodos no pudo ejecutarse sin ambos periodos."],
             }
         )
 
@@ -97,7 +97,7 @@ def compare_periods(request_json: str) -> str:
 
         if base_metric is None or comparison_metric is None:
             warnings.append(
-                f"Missing metric {metric_name} for {base_period} or {comparison_period}."
+                f"Falta la métrica {metric_name} para {base_period} o {comparison_period}."
             )
             continue
 
@@ -105,7 +105,7 @@ def compare_periods(request_json: str) -> str:
         comparison_value = _number(comparison_metric.get("value"))
         if base_value is None or comparison_value is None:
             warnings.append(
-                f"Metric {metric_name} has a non-numeric value for comparison."
+                f"La métrica {metric_name} tiene un valor no numérico para la comparación."
             )
             continue
 
@@ -159,7 +159,7 @@ def compare_periods(request_json: str) -> str:
         )
 
     if not comparisons:
-        limitations.append("No period comparisons were produced from the provided metrics.")
+        limitations.append("No se generaron comparaciones entre periodos a partir de las métricas provistas.")
 
     return _dumps(
         {
@@ -234,7 +234,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
                 "NEGATIVE_FREE_CASH_FLOW",
                 "High",
                 period,
-                "Free cash flow is negative. Human review recommended.",
+                "El flujo de caja libre es negativo. Se recomienda revisión humana.",
                 [
                     _evidence_item(
                         "free_cash_flow",
@@ -255,7 +255,7 @@ def detect_financial_risk_signals(request_json: str) -> str:
             )
 
     if len(periods) < 2:
-        limitations.append("Not enough comparable periods to detect trend-based risk signals.")
+        limitations.append("No hay suficientes periodos comparables para detectar señales de riesgo basadas en tendencias.")
     else:
         _detect_margin_compression(signals, evidence, ratio_index, limitations)
         _detect_revenue_drop(signals, evidence, metric_index)
@@ -308,7 +308,7 @@ def summarize_quantitative_evidence(request_json: str) -> str:
     )[:max_items]
 
     if not signals and not comparisons:
-        limitations.append("No quantitative signals or comparisons were provided.")
+        limitations.append("No se proporcionaron señales cuantitativas ni comparaciones.")
 
     summary = _summary_text(signals, evidence)
 
@@ -445,6 +445,22 @@ def _compute_ratio(
     warnings: list[str],
 ) -> dict[str, Any] | None:
     inputs: list[dict[str, Any]] = []
+    direct_metric = metrics.get(ratio_name)
+
+    if direct_metric is not None:
+        direct_value = _number(direct_metric.get("value"))
+        if direct_value is not None:
+            return {
+                "name": ratio_name,
+                "period": period,
+                "value": _round(direct_value),
+                "unit": _reported_ratio_unit(direct_metric.get("unit"), spec["unit"]),
+                "formula": "reported",
+                "inputs": [str(direct_metric.get("name"))],
+                "interpretation": f"{ratio_name} informado directamente en las métricas estructuradas.",
+                "source": "reported",
+                "confidence": _min_confidence([direct_metric]),
+            }
 
     if "sum_numerator" in spec:
         numerator = 0.0
@@ -460,29 +476,29 @@ def _compute_ratio(
             inputs.append(metric)
             found_any = True
         if not found_any:
-            warnings.append(f"Missing numerator inputs for {ratio_name} in {period}.")
+            warnings.append(f"Faltan insumos del numerador para {ratio_name} en {period}.")
             return None
     else:
         metric = _first_metric(metrics, spec["numerator"])
         if metric is None:
-            warnings.append(f"Missing numerator input for {ratio_name} in {period}.")
+            warnings.append(f"Falta el numerador para {ratio_name} en {period}.")
             return None
         numerator = _number(metric.get("value"))
         if numerator is None:
-            warnings.append(f"Invalid numerator input for {ratio_name} in {period}.")
+            warnings.append(f"Numerador no válido para {ratio_name} en {period}.")
             return None
         inputs.append(metric)
 
     denominator_metric = _first_metric(metrics, spec["denominator"])
     if denominator_metric is None:
-        warnings.append(f"Missing denominator input for {ratio_name} in {period}.")
+        warnings.append(f"Falta el denominador para {ratio_name} en {period}.")
         return None
     denominator = _number(denominator_metric.get("value"))
     if denominator is None:
-        warnings.append(f"Invalid denominator input for {ratio_name} in {period}.")
+        warnings.append(f"Denominador no válido para {ratio_name} en {period}.")
         return None
     if denominator == 0:
-        warnings.append(f"Zero denominator for {ratio_name} in {period}.")
+        warnings.append(f"Denominador cero para {ratio_name} en {period}.")
         return None
 
     inputs.append(denominator_metric)
@@ -495,7 +511,7 @@ def _compute_ratio(
         "unit": spec["unit"],
         "formula": spec["formula"],
         "inputs": [str(metric.get("name")) for metric in inputs],
-        "interpretation": f"{ratio_name} computed from structured metrics.",
+        "interpretation": f"{ratio_name} calculado a partir de métricas estructuradas.",
         "source": "computed",
         "confidence": _min_confidence(inputs),
     }
@@ -510,6 +526,11 @@ def _first_metric(
         if metric is not None:
             return metric
     return None
+
+
+def _reported_ratio_unit(unit: Any, fallback: str) -> str:
+    normalized = str(unit or "").strip()
+    return normalized if normalized in {"ratio", "x", "%"} else fallback
 
 
 def _comparison_severity(
@@ -544,15 +565,15 @@ def _comparison_explanation(
     percentage_change: float | None,
     severity: str,
 ) -> str:
-    direction = "increased" if absolute_change >= 0 else "decreased"
+    direction = "aumentó" if absolute_change >= 0 else "disminuyó"
     percent_text = (
         "n/a"
         if percentage_change is None
         else f"{percentage_change * 100:.1f}%"
     )
     return (
-        f"{metric_name} {direction} from {base_period} to {comparison_period}; "
-        f"change={_round(absolute_change)}, percent={percent_text}, severity={severity}."
+        f"{metric_name} {direction} de {base_period} a {comparison_period}; "
+        f"cambio={_round(absolute_change)}, porcentaje={percent_text}, severidad={severity}."
     )
 
 
@@ -582,7 +603,7 @@ def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, An
             "<",
             1.0,
             "Medium",
-            "Current ratio is below 1.0. Human review recommended.",
+            "El ratio corriente está por debajo de 1,0. Se recomienda revisión humana.",
         ),
         "quick_ratio": _threshold_rule(
             "LOW_QUICK_RATIO",
@@ -590,7 +611,7 @@ def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, An
             "<",
             0.8,
             "Medium",
-            "Quick ratio is below 0.8. Liquidity should be reviewed.",
+            "El quick ratio está por debajo de 0,8. Se debe revisar la liquidez.",
         ),
         "net_debt_to_ebitda": _threshold_rule(
             "HIGH_NET_DEBT_TO_EBITDA",
@@ -598,7 +619,7 @@ def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, An
             ">=",
             3.0,
             "High",
-            "Net debt to EBITDA is above the configured threshold.",
+            "La deuda neta sobre EBITDA supera el umbral configurado.",
         ),
         "debt_to_equity": _threshold_rule(
             "HIGH_DEBT_TO_EQUITY",
@@ -606,7 +627,7 @@ def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, An
             ">=",
             2.0,
             "High",
-            "Debt to equity is above the configured threshold.",
+            "La deuda sobre patrimonio supera el umbral configurado.",
         ),
         "interest_coverage": _threshold_rule(
             "LOW_INTEREST_COVERAGE",
@@ -614,7 +635,7 @@ def _threshold_rules(thresholds: list[dict[str, Any]]) -> dict[str, dict[str, An
             "<",
             2.0,
             "High",
-            "Interest coverage is below the configured threshold.",
+            "La cobertura de intereses está por debajo del umbral configurado.",
         ),
     }
 
@@ -654,7 +675,7 @@ def _threshold_reason(
     threshold: float,
 ) -> str:
     return (
-        f"{metric_name} {_round(value)} crossed the configured threshold "
+        f"{metric_name} {_round(value)} cruzó el umbral configurado "
         f"{operator} {_round(threshold)}."
     )
 
@@ -720,7 +741,7 @@ def _detect_margin_compression(
     ]
     margin_ratios.sort(key=lambda item: str(item.get("period", "")))
     if len(margin_ratios) < 2:
-        limitations.append("Not enough EBITDA margin periods to detect margin compression.")
+        limitations.append("No hay suficientes periodos de margen EBITDA para detectar compresión de margen.")
         return
 
     previous = margin_ratios[-2]
@@ -750,7 +771,7 @@ def _detect_margin_compression(
             "MARGIN_COMPRESSION",
             severity,
             period,
-            "EBITDA margin compression requires review.",
+            "La compresión del margen EBITDA requiere revisión.",
             [item],
             metric="ebitda_margin",
             value=current_value,
@@ -773,7 +794,7 @@ def _detect_revenue_drop(
         "revenue",
         "REVENUE_DROP",
         0.15,
-        "Revenue declined by more than 15%. Human review recommended.",
+        "Los ingresos disminuyeron más de 15%. Se recomienda revisión humana.",
     )
 
 
@@ -814,7 +835,7 @@ def _detect_capex_spike(
             "CAPEX_SPIKE",
             "Medium",
             period,
-            "Capex spike should be reviewed against the investment plan.",
+            "El aumento de capex debe revisarse contra el plan de inversión.",
             [item],
             metric="capex",
             value=current,
@@ -850,7 +871,7 @@ def _detect_forecast_dependency(
             None,
             "count",
             "Info",
-            "Analysis includes multiple forecast periods. Forecast assumptions require review.",
+            "El análisis incluye múltiples periodos proyectados. Los supuestos de forecast requieren revisión.",
         )
         _append_signal(
             signals,
@@ -858,12 +879,12 @@ def _detect_forecast_dependency(
             "FORECAST_DEPENDENCY",
             "Info",
             period,
-            "Quantitative analysis depends on forecast periods. Human review recommended.",
+            "El análisis cuantitativo depende de periodos proyectados. Se recomienda revisión humana.",
             [item],
             metric="forecast_periods",
             value=value,
             threshold_code="FORECAST_DEPENDENCY",
-            reason="Analysis includes multiple forecast periods. Forecast assumptions require review.",
+            reason="El análisis incluye múltiples periodos proyectados. Los supuestos de forecast requieren revisión.",
         )
 
 
@@ -1021,18 +1042,18 @@ def _summary_text(
     evidence: list[dict[str, Any]],
 ) -> str:
     if not signals and not evidence:
-        return "No quantitative risk signals were provided."
+        return "No se proporcionaron señales cuantitativas de riesgo."
 
     high_count = sum(1 for signal in signals if signal.get("severity") == "High")
     medium_count = sum(1 for signal in signals if signal.get("severity") == "Medium")
     if high_count > 0:
         return (
-            f"{high_count} high-severity quantitative risk signal(s) were identified. "
-            "Human review recommended."
+            f"Se identificaron {high_count} señal(es) cuantitativas de riesgo de severidad alta. "
+            "Se recomienda revisión humana."
         )
     if medium_count > 0:
         return (
-            f"{medium_count} medium-severity quantitative risk signal(s) were identified. "
-            "Human review recommended."
+            f"Se identificaron {medium_count} señal(es) cuantitativas de riesgo de severidad media. "
+            "Se recomienda revisión humana."
         )
-    return "Quantitative evidence was summarized with no high-severity risk signals."
+    return "La evidencia cuantitativa se resumió sin señales de riesgo de severidad alta."

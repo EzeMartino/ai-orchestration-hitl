@@ -46,7 +46,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "system.execute_command",
-                "Tool is not allowlisted."
+                "La herramienta no está permitida."
             )
         );
     }
@@ -70,7 +70,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "legal.search_cnv_regulation",
-                "Tool is not allowlisted."
+                "La herramienta no está permitida."
             )
         );
     }
@@ -94,7 +94,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 toolName,
-                "Financial analysis tools are disabled."
+                "Las herramientas de análisis financiero están deshabilitadas."
             )
         );
     }
@@ -143,7 +143,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "data.compute_financial_ratios",
-                "Missing required argument: requestJson."
+                "Falta el argumento obligatorio: requestJson."
             )
         );
     }
@@ -176,21 +176,21 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "data.compute_financial_ratios",
-                "Empty required argument: requestJson."
+                "El argumento obligatorio está vacío: requestJson."
             )
         );
     }
 
     [Theory]
-    [InlineData("workflow.complete", "Workflow transition tools are not allowed.")]
-    [InlineData("workflow.transition", "Workflow transition tools are not allowed.")]
-    [InlineData("approval.approve_session", "Human approval tools cannot be called by LLM.")]
-    [InlineData("approval.reject_session", "Human approval tools cannot be called by LLM.")]
-    [InlineData("money.move", "Operational financial tools are not allowed.")]
-    [InlineData("account.freeze", "Operational financial tools are not allowed.")]
-    [InlineData("transaction.block", "Operational financial tools are not allowed.")]
-    [InlineData("legal.determine_violation", "Legal conclusion tools are not allowed.")]
-    [InlineData("legal.issue_advice", "Legal conclusion tools are not allowed.")]
+    [InlineData("workflow.complete", "No se permiten herramientas de transición de workflow.")]
+    [InlineData("workflow.transition", "No se permiten herramientas de transición de workflow.")]
+    [InlineData("approval.approve_session", "El LLM no puede llamar herramientas de aprobación humana.")]
+    [InlineData("approval.reject_session", "El LLM no puede llamar herramientas de aprobación humana.")]
+    [InlineData("money.move", "No se permiten herramientas financieras operativas.")]
+    [InlineData("account.freeze", "No se permiten herramientas financieras operativas.")]
+    [InlineData("transaction.block", "No se permiten herramientas financieras operativas.")]
+    [InlineData("legal.determine_violation", "No se permiten herramientas de conclusión legal.")]
+    [InlineData("legal.issue_advice", "No se permiten herramientas de conclusión legal.")]
     public void Validate_Should_reject_prohibited_tools(
         string toolName,
         string expectedReason)
@@ -256,7 +256,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "legal.search_cnv_regulation",
-                "Maximum tool call count exceeded."
+                "Se excedió la cantidad máxima de llamadas a herramientas."
             )
         );
     }
@@ -277,7 +277,7 @@ public class ToolPlanValidatorTests
         result.IsValid.Should().BeFalse();
         result.ApprovedCalls.Should().BeEmpty();
         result.RejectedCalls.Should().ContainSingle().Which.Reason.Should().Be(
-            "Tool is not allowlisted."
+            "La herramienta no está permitida."
         );
     }
 
@@ -298,15 +298,15 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().Equal(
             new RejectedToolCall(
                 "workflow.complete",
-                "Workflow transition tools are not allowed."
+                "No se permiten herramientas de transición de workflow."
             ),
             new RejectedToolCall(
                 "approval.reject_session",
-                "Human approval tools cannot be called by LLM."
+                "El LLM no puede llamar herramientas de aprobación humana."
             ),
             new RejectedToolCall(
                 "money.move",
-                "Operational financial tools are not allowed."
+                "No se permiten herramientas financieras operativas."
             )
         );
     }

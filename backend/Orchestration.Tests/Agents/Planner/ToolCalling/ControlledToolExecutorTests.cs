@@ -95,7 +95,7 @@ public class ControlledToolExecutorTests
 
         result.Succeeded.Should().BeFalse();
         result.Status.Should().Be(ToolExecutionStatus.Failed);
-        result.Error.Should().Be("Missing required argument: reportName.");
+        result.Error.Should().Be("Falta el argumento obligatorio: reportName.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();
     }
@@ -127,7 +127,7 @@ public class ControlledToolExecutorTests
 
         result.Succeeded.Should().BeFalse();
         result.Status.Should().Be(ToolExecutionStatus.Failed);
-        result.Error.Should().Be("Invalid decimal argument: totalAmount.");
+        result.Error.Should().Be("Argumento decimal no válido: totalAmount.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();
     }
@@ -314,7 +314,7 @@ public class ControlledToolExecutorTests
 
         result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Succeeded.Should().BeFalse();
-        result.Error.Should().Be("Invalid JSON argument: requestJson.");
+        result.Error.Should().Be("Argumento JSON no válido: requestJson.");
         result.OutputJson.Should().Be("{}");
         financialAnalysisService.ComputeRequest.Should().BeNull();
     }
@@ -339,7 +339,7 @@ public class ControlledToolExecutorTests
 
         result.Status.Should().Be(ToolExecutionStatus.Failed);
         result.Succeeded.Should().BeFalse();
-        result.Error.Should().Be("Missing required argument: requestJson.");
+        result.Error.Should().Be("Falta el argumento obligatorio: requestJson.");
         result.OutputJson.Should().Be("{}");
         financialAnalysisService.ComputeRequest.Should().BeNull();
     }
@@ -367,7 +367,7 @@ public class ControlledToolExecutorTests
 
         result.Succeeded.Should().BeFalse();
         result.Status.Should().Be(ToolExecutionStatus.Failed);
-        result.Error.Should().Be("Missing required argument: query.");
+        result.Error.Should().Be("Falta el argumento obligatorio: query.");
         result.OutputJson.Should().Be("{}");
         mcpClient.WasCalled.Should().BeFalse();
     }

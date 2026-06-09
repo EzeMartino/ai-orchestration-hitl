@@ -77,8 +77,30 @@ public sealed class CSnakesFinancialAnalysisServiceTests
 
         response.Ratios.Should().BeEmpty();
         response.Warnings.Should().Contain(warning =>
-            warning.Contains("Missing numerator input", StringComparison.Ordinal)
+            warning.Contains("Falta el numerador", StringComparison.Ordinal)
         );
+    }
+
+    [Fact]
+    public async Task ComputeFinancialRatiosAsync_Should_preserve_reported_ratio_source()
+    {
+        var service = _fixture.GetRequiredService<IPythonFinancialAnalysisService>();
+        var reportedGrossMargin = CreateMetric("gross_margin", "2024A", 0.415m);
+        var request = new ComputeFinancialRatiosRequest(
+            Metrics: [reportedGrossMargin],
+            RequestedRatios: ["gross_margin"]
+        );
+
+        var response = await service.ComputeFinancialRatiosAsync(
+            request,
+            CancellationToken.None
+        );
+
+        var ratio = response.Ratios.Should().ContainSingle().Subject;
+        ratio.Name.Should().Be("gross_margin");
+        ratio.Source.Should().Be("reported");
+        ratio.Formula.Should().Be("reported");
+        ratio.Inputs.Should().Equal("gross_margin");
     }
 
     [Fact]
@@ -127,7 +149,7 @@ public sealed class CSnakesFinancialAnalysisServiceTests
         );
 
         response.Comparisons.Should().ContainSingle()
-            .Which.Interpretation.Should().Contain("severity=High");
+            .Which.Interpretation.Should().Contain("severidad=High");
     }
 
     [Fact]
@@ -148,7 +170,7 @@ public sealed class CSnakesFinancialAnalysisServiceTests
 
         response.Comparisons.Should().BeEmpty();
         response.Warnings.Should().Contain(warning =>
-            warning.Contains("Missing metric revenue", StringComparison.Ordinal)
+            warning.Contains("Falta la métrica revenue", StringComparison.Ordinal)
         );
     }
 
@@ -339,7 +361,7 @@ public sealed class CSnakesFinancialAnalysisServiceTests
             CancellationToken.None
         );
 
-        response.Narrative.Should().Contain("high-severity");
+        response.Narrative.Should().Contain("severidad alta");
         response.Result.Evidence.Should().ContainSingle()
             .Which.MetricName.Should().Be("net_debt_to_ebitda");
         response.Result.RiskLevel.Should().Be("High");

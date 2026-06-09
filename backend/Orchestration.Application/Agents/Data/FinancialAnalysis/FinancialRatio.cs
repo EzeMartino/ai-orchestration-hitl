@@ -7,5 +7,6 @@ public sealed record FinancialRatio(
     string Unit,
     string Formula,
     IReadOnlyList<string> Inputs,
-    string Interpretation
+    string Interpretation,
+    string Source = "computed"
 );

@@ -115,7 +115,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 Unit: GetString(ratio, "unit"),
                 Formula: GetString(ratio, "formula"),
                 Inputs: GetStringArray(ratio, "inputs"),
-                Interpretation: GetString(ratio, "interpretation")
+                Interpretation: GetString(ratio, "interpretation"),
+                Source: GetString(ratio, "source", defaultValue: "computed")
             ));
         }
 
@@ -203,7 +204,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         using var document = JsonDocument.Parse(responseJson);
         var root = document.RootElement;
-        var narrative = GetString(root, "summary", defaultValue: "Quantitative evidence was summarized.");
+        var narrative = GetString(root, "summary", defaultValue: "Se resumió la evidencia cuantitativa.");
         var evidence = MapEvidence(root);
         var severities = EnumerateArray(root, "evidence")
             .Select(item => GetString(item, "severity", defaultValue: "Info"));
@@ -250,8 +251,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             Ratios: [],
             Warnings:
             [
-                "Python financial ratio computation failed.",
-                "Financial ratios could not be computed from the provided metrics."
+                "Falló el cálculo de ratios financieros en Python.",
+                "No se pudieron calcular los ratios financieros a partir de las métricas provistas."
             ]
         );
     }
@@ -263,8 +264,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             Comparisons: [],
             Warnings:
             [
-                "Python period comparison failed.",
-                "Period comparisons could not be computed from the provided metrics."
+                "Falló la comparación de periodos en Python.",
+                "No se pudieron calcular comparaciones entre periodos a partir de las métricas provistas."
             ]
         );
     }
@@ -277,13 +278,13 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             Result: new FinancialAnalysisToolResult(
                 HasRiskSignals: false,
                 RiskLevel: "Low",
-                Summary: "Financial risk signals could not be computed from the provided metrics.",
+                Summary: "No se pudieron calcular señales de riesgo financiero a partir de las métricas provistas.",
                 Engine: Engine,
                 Evidence: [],
                 Warnings:
                 [
-                    "Python financial risk signal detection failed.",
-                    "Risk signals could not be computed from the provided metrics."
+                    "Falló la detección de señales de riesgo financiero en Python.",
+                    "No se pudieron calcular señales de riesgo a partir de las métricas provistas."
                 ]
             )
         );
@@ -291,7 +292,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
 
     private static SummarizeQuantitativeEvidenceResponse SafeEvidenceSummaryResponse()
     {
-        const string narrative = "Quantitative evidence could not be summarized from the provided metrics.";
+        const string narrative = "No se pudo resumir la evidencia cuantitativa a partir de las métricas provistas.";
 
         return new SummarizeQuantitativeEvidenceResponse(
             Engine: Engine,
@@ -304,8 +305,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 Evidence: [],
                 Warnings:
                 [
-                    "Python quantitative evidence summarization failed.",
-                    "Quantitative evidence could not be summarized from the provided metrics."
+                    "Falló el resumen de evidencia cuantitativa en Python.",
+                    "No se pudo resumir la evidencia cuantitativa a partir de las métricas provistas."
                 ]
             )
         );
@@ -316,8 +317,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         string riskLevel)
     {
         return signals.Count == 0
-            ? "No quantitative risk signals were identified."
-            : $"{signals.Count} quantitative risk signal(s) were identified at {riskLevel} risk level. Human review recommended.";
+            ? "No se identificaron señales cuantitativas de riesgo."
+            : $"Se identificaron {signals.Count} señal(es) cuantitativas de riesgo con nivel {riskLevel}. Se recomienda revisión humana.";
     }
 
     private static string ResolveRiskLevel(IEnumerable<string> severities)

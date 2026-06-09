@@ -9,7 +9,8 @@ function formatAnalysisEngine(engine: string) {
 
   if (
     normalizedEngine === "semantic kernel + python/csnakes" ||
-    normalizedEngine.includes("legacy fallback")
+    normalizedEngine.includes("legacy fallback") ||
+    normalizedEngine.includes("respaldo legacy")
   ) {
     return "Respaldo determinista";
   }

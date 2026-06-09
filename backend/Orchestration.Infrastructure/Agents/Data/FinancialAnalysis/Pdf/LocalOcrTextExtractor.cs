@@ -6,9 +6,9 @@ namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 
 public sealed class LocalOcrTextExtractor : IOcrTextExtractor
 {
-    private const string DependencyMessage = "PDF OCR dependencies are not configured.";
-    private const string FailedMessage = "PDF OCR processing failed.";
-    private const string TimeoutMessage = "PDF OCR processing timed out.";
+    private const string DependencyMessage = "Las dependencias de OCR para PDF no están configuradas.";
+    private const string FailedMessage = "Falló el procesamiento OCR del PDF.";
+    private const string TimeoutMessage = "Se agotó el tiempo de procesamiento OCR del PDF.";
 
     public async Task<IReadOnlyList<StructuredFinancialMetricsExtractedPage>> ExtractTextAsync(
         Stream pdf,

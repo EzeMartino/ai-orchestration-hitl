@@ -85,8 +85,8 @@ public sealed class LegalAnalysisReviewContractsTests
         result.Provider.Should().BeNull();
         result.Model.Should().BeNull();
         result.FailureReason.Should().Be("Legal AI review is disabled.");
-        result.ReviewSummary.Should().Be("Legal AI review was not executed.");
-        result.Limitations.Should().Contain("Legal AI review was not executed.");
+        result.ReviewSummary.Should().Be("La revisión legal de IA no se ejecutó.");
+        result.Limitations.Should().Contain("La revisión legal de IA no se ejecutó.");
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public sealed class LegalAnalysisReviewContractsTests
     {
         var result = LegalAnalysisReviewResults.NotRun("Not run testing.");
 
-        result.Limitations.Should().Contain("This system does not provide legal advice.");
-        result.Limitations.Should().Contain("No definitive legal or regulatory conclusion is provided.");
+        result.Limitations.Should().Contain("Este sistema no brinda asesoramiento legal.");
+        result.Limitations.Should().Contain("No se proporciona ninguna conclusión legal o regulatoria definitiva.");
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public sealed class LegalAnalysisReviewContractsTests
     {
         const string json = """
         {
-          "reviewSummary": "Legal AI review was not executed.",
+          "reviewSummary": "La revisión legal de IA no se ejecutó.",
           "possibleRegulatoryReviewAreas": [],
           "evidenceReferences": [],
           "warnings": [],

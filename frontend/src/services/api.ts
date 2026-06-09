@@ -56,7 +56,7 @@ async function authenticatedFetch(url: string, options: RequestInit = {}): Promi
 export async function loadSessionEvents(sessionId: string): Promise<ActivityEvent[]> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`);
   if (!response.ok) {
-    throw new Error("Failed to load session events.");
+    throw new Error("No se pudieron cargar los eventos de la sesión.");
   }
   return (await response.json()) as ActivityEvent[];
 }
@@ -64,7 +64,7 @@ export async function loadSessionEvents(sessionId: string): Promise<ActivityEven
 export async function loadSavedSessions(): Promise<AnalysisSessionSummary[]> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions`);
   if (!response.ok) {
-    throw new Error("Failed to load saved analysis sessions.");
+    throw new Error("No se pudieron cargar las sesiones de análisis guardadas.");
   }
   return (await response.json()) as AnalysisSessionSummary[];
 }
@@ -72,7 +72,7 @@ export async function loadSavedSessions(): Promise<AnalysisSessionSummary[]> {
 export async function loadSessionDetails(sessionId: string): Promise<AnalysisSessionResponse> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}`);
   if (!response.ok) {
-    throw new Error("Failed to load analysis session.");
+    throw new Error("No se pudo cargar la sesión de análisis.");
   }
   return (await response.json()) as AnalysisSessionResponse;
 }
@@ -80,7 +80,7 @@ export async function loadSessionDetails(sessionId: string): Promise<AnalysisSes
 export async function loadStructuredFinancialMetrics(sessionId: string): Promise<GetFinancialMetricsResponse> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics`);
   if (!response.ok) {
-    throw new Error("Failed to load structured financial metrics.");
+    throw new Error("No se pudieron cargar las métricas financieras estructuradas.");
   }
   return (await response.json()) as GetFinancialMetricsResponse;
 }
@@ -88,7 +88,7 @@ export async function loadStructuredFinancialMetrics(sessionId: string): Promise
 export async function getStartPreflight(sessionId: string): Promise<AnalysisSessionStartPreflightResult> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/start-preflight`);
   if (!response.ok) {
-    throw new Error("Failed to check start readiness.");
+    throw new Error("No se pudo verificar la preparación de inicio.");
   }
   return (await response.json()) as AnalysisSessionStartPreflightResult;
 }
@@ -98,7 +98,7 @@ export async function createSession(): Promise<AnalysisSessionResponse> {
     method: "POST",
   });
   if (!response.ok) {
-    throw new Error("Failed to create analysis session.");
+    throw new Error("No se pudo crear la sesión de análisis.");
   }
   return (await response.json()) as AnalysisSessionResponse;
 }
@@ -119,7 +119,7 @@ export async function submitHumanDecision(
     body: JSON.stringify({ reason }),
   });
   if (!response.ok) {
-    throw new Error(`Failed to ${decision} analysis session.`);
+    throw new Error(`No se pudo ${decision === "approve" ? "aprobar" : "rechazar"} la sesión de análisis.`);
   }
   return (await response.json()) as AnalysisSessionResponse;
 }
@@ -133,7 +133,7 @@ export async function saveJsonMetrics(
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new Error("Failed to save structured financial metrics.");
+    throw new Error("No se pudieron guardar las métricas financieras estructuradas.");
   }
   return (await response.json()) as SaveFinancialMetricsResponse;
 }
@@ -147,7 +147,7 @@ export async function saveCsvMetrics(
     body: JSON.stringify(input),
   });
   if (!response.ok) {
-    throw new Error("Failed to save structured financial metrics.");
+    throw new Error("No se pudieron guardar las métricas financieras estructuradas.");
   }
   return (await response.json()) as SaveFinancialMetricsResponse;
 }
@@ -181,7 +181,7 @@ export async function uploadFinancialMetricsFile(
   if (!response.ok) {
     const uploadError = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(
-      uploadError.error ?? "File upload failed. Please check the file format and try again."
+      uploadError.error ?? "Falló la carga del archivo. Revise el formato e inténtelo nuevamente."
     );
   }
 
@@ -197,7 +197,7 @@ export async function login(request: LoginRequest): Promise<LoginResponse> {
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    throw new Error("Invalid email or password.");
+    throw new Error("Correo electrónico o contraseña no válidos.");
   }
   return (await response.json()) as LoginResponse;
 }

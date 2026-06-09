@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
@@ -9,17 +10,34 @@ public sealed class StructuredFinancialMetricsTextParser
     private static readonly IReadOnlyList<(string Alias, string Name)> MetricAliases =
     [
         ("Capital Expenditures", "capex"),
+        ("Deuda financiera total", "total_debt"),
         ("Short Term Investments", "short_term_investments"),
         ("Current Liabilities", "current_liabilities"),
+        ("Flujo de caja libre", "free_cash_flow"),
         ("Operating Income", "operating_income"),
         ("Current Assets", "current_assets"),
         ("Interest Expense", "interest_expense"),
         ("Free Cash Flow", "free_cash_flow"),
+        ("Resultado operativo", "operating_income"),
+        ("Pasivo corriente", "current_liabilities"),
+        ("Activo corriente", "current_assets"),
+        ("Ventas netas", "revenue"),
+        ("Ganancia bruta", "gross_profit"),
+        ("Patrimonio neto", "equity"),
+        ("Deuda neta", "net_debt"),
+        ("Margen EBITDA", "ebitda_margin"),
+        ("Margen bruto", "gross_margin"),
+        ("Margen neto", "net_margin"),
         ("Gross Profit", "gross_profit"),
+        ("Gross Margin", "gross_margin"),
+        ("EBITDA Margin", "ebitda_margin"),
+        ("Net Margin", "net_margin"),
         ("Total Debt", "total_debt"),
         ("Net Income", "net_income"),
         ("Receivables", "receivables"),
         ("Inventory", "inventory"),
+        ("Ingresos", "revenue"),
+        ("Ventas", "revenue"),
         ("Revenue", "revenue"),
         ("Sales", "revenue"),
         ("EBITDA", "ebitda"),
@@ -38,12 +56,12 @@ public sealed class StructuredFinancialMetricsTextParser
     );
 
     private static readonly Regex NumberRegex = new(
-        @"(?<!\w)\(?-?\d[\d,]*(?:\.\d+)?\)?(?!\w)",
+        @"(?<!\w)\(?-?\d[\d.,]*(?:[.,]\d+)?%?\)?(?!\w)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
 
     private static readonly Regex InlinePeriodValueRegex = new(
-        @"\b(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?\b\s+(?<value>\(?-?\d[\d,]*(?:\.\d+)?\)?)",
+        @"\b(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?\b\s+(?<value>\(?-?\d[\d.,]*(?:[.,]\d+)?%?\)?)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase
     );
 
@@ -185,12 +203,13 @@ public sealed class StructuredFinancialMetricsTextParser
     private static (string Alias, string Name)? MatchAlias(
         string line)
     {
-        foreach (var alias in MetricAliases)
+        var normalizedLine = NormalizeForMatch(line);
+
+        foreach (var alias in MetricAliases.OrderByDescending(alias => alias.Alias.Length))
         {
-            if (Regex.IsMatch(
-                line,
-                @"^\s*" + Regex.Escape(alias.Alias) + @"\b",
-                RegexOptions.CultureInvariant | RegexOptions.IgnoreCase))
+            var normalizedAlias = NormalizeForMatch(alias.Alias);
+
+            if (StartsWithAlias(normalizedLine, normalizedAlias))
             {
                 return alias;
             }
@@ -251,18 +270,105 @@ public sealed class StructuredFinancialMetricsTextParser
             trimmed = trimmed[1..^1];
         }
 
+        var isPercent = trimmed.EndsWith('%');
+
+        if (isPercent)
+        {
+            trimmed = trimmed[..^1];
+        }
+
+        trimmed = NormalizeNumericText(trimmed);
+
         if (decimal.TryParse(
             trimmed,
             NumberStyles.AllowThousands | NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
             CultureInfo.InvariantCulture,
             out var parsed))
         {
-            return isParenthesesNegative
+            var signed = isParenthesesNegative
                 ? -parsed
                 : parsed;
+
+            return isPercent
+                ? signed / 100m
+                : signed;
         }
 
         return null;
+    }
+
+    private static bool StartsWithAlias(
+        string normalizedLine,
+        string normalizedAlias)
+    {
+        if (!normalizedLine.StartsWith(normalizedAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return normalizedLine.Length == normalizedAlias.Length ||
+            !char.IsLetterOrDigit(normalizedLine[normalizedAlias.Length]);
+    }
+
+    private static string NormalizeForMatch(
+        string value)
+    {
+        var normalized = value.TrimStart().Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(normalized.Length);
+
+        foreach (var character in normalized)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(character);
+
+            if (category != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static string NormalizeNumericText(
+        string value)
+    {
+        var trimmed = value.Trim();
+        var commaIndex = trimmed.LastIndexOf(',');
+        var dotIndex = trimmed.LastIndexOf('.');
+
+        if (commaIndex >= 0 && dotIndex >= 0)
+        {
+            return commaIndex > dotIndex
+                ? trimmed.Replace(".", string.Empty).Replace(',', '.')
+                : trimmed.Replace(",", string.Empty);
+        }
+
+        if (commaIndex >= 0)
+        {
+            return NormalizeSingleSeparatorNumber(trimmed, commaIndex, ',');
+        }
+
+        if (dotIndex >= 0)
+        {
+            return NormalizeSingleSeparatorNumber(trimmed, dotIndex, '.');
+        }
+
+        return trimmed;
+    }
+
+    private static string NormalizeSingleSeparatorNumber(
+        string value,
+        int separatorIndex,
+        char separator)
+    {
+        var digitsAfterSeparator = value.Length - separatorIndex - 1;
+        var integerPart = value[..separatorIndex].TrimStart('-');
+        var usesThousandsSeparator = digitsAfterSeparator == 3
+            && integerPart != "0";
+
+        return usesThousandsSeparator
+            ? value.Replace(separator.ToString(), string.Empty)
+            : value.Replace(separator, '.');
     }
 
     private static string NormalizePeriod(

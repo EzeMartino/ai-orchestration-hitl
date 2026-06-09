@@ -316,7 +316,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
             string.IsNullOrWhiteSpace(rawValue))
         {
             value = "";
-            error = $"Missing required argument: {key}.";
+            error = $"Falta el argumento obligatorio: {key}.";
 
             return false;
         }
@@ -350,7 +350,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
             if (parsedRequest is null)
             {
                 request = default!;
-                error = "Invalid JSON argument: requestJson.";
+                error = "Argumento JSON no válido: requestJson.";
 
                 return false;
             }
@@ -363,7 +363,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         catch (JsonException)
         {
             request = default!;
-            error = "Invalid JSON argument: requestJson.";
+            error = "Argumento JSON no válido: requestJson.";
 
             return false;
         }
@@ -384,7 +384,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
 
         if (!Guid.TryParse(rawValue, out value))
         {
-            error = $"Invalid Guid argument: {key}.";
+            error = $"Argumento Guid no válido: {key}.";
 
             return false;
         }
@@ -423,7 +423,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
 
         if (!decimal.TryParse(rawValue, NumberStyles.Number, CultureInfo.InvariantCulture, out value))
         {
-            error = $"Invalid decimal argument: {key}.";
+            error = $"Argumento decimal no válido: {key}.";
 
             return false;
         }
@@ -466,7 +466,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
                 DateTimeStyles.RoundtripKind,
                 out value))
         {
-            error = $"Invalid DateTimeOffset argument: {key}.";
+            error = $"Argumento DateTimeOffset no válido: {key}.";
 
             return false;
         }
@@ -482,7 +482,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     {
         if (!int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
         {
-            error = $"Invalid int argument: {key}.";
+            error = $"Argumento int no válido: {key}.";
 
             return false;
         }
@@ -500,7 +500,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     {
         if (!bool.TryParse(rawValue, out value))
         {
-            error = $"Invalid bool argument: {key}.";
+            error = $"Argumento bool no válido: {key}.";
 
             return false;
         }

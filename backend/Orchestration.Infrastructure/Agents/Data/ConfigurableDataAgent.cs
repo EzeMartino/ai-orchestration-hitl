@@ -77,14 +77,14 @@ public sealed class ConfigurableDataAgent : IDataAgent
 
                 return fallback with
                 {
-                    Engine = $"{fallback.Engine} (legacy fallback)"
+                    Engine = $"{fallback.Engine} (respaldo legacy)"
                 };
             }
 
             return new DataAgentResult(
                 HasAnomaly: true,
                 Severity: "Medium",
-                Summary: "Financial analysis could not be completed. Human review recommended.",
+                Summary: "No se pudo completar el análisis financiero. Se recomienda revisión humana.",
                 Engine: "Financial Analysis Workflow",
                 Evidence: []
             );

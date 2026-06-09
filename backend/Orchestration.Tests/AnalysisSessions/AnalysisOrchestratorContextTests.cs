@@ -40,7 +40,7 @@ public class AnalysisOrchestratorContextTests
                 Summary: "Planner reviewed collected evidence.",
                 RecommendedActions: ["Review evidence."],
                 RiskFactors: ["High data severity."],
-                Limitations: ["No LLM reasoning was used."],
+                Limitations: ["No se usó razonamiento LLM."],
                 UsedLlm: false,
                 UsedFallback: true,
                 Provider: "OpenAI",
@@ -59,7 +59,7 @@ public class AnalysisOrchestratorContextTests
         planner.GetProperty("summary").GetString().Should().Be("Planner reviewed collected evidence.");
         planner.GetProperty("recommendedActions")[0].GetString().Should().Be("Review evidence.");
         planner.GetProperty("riskFactors")[0].GetString().Should().Be("High data severity.");
-        planner.GetProperty("limitations")[0].GetString().Should().Be("No LLM reasoning was used.");
+        planner.GetProperty("limitations")[0].GetString().Should().Be("No se usó razonamiento LLM.");
         planner.GetProperty("usedLlm").GetBoolean().Should().BeFalse();
         planner.GetProperty("usedFallback").GetBoolean().Should().BeTrue();
         planner.GetProperty("provider").GetString().Should().Be("OpenAI");
@@ -113,7 +113,7 @@ public class AnalysisOrchestratorContextTests
             [
                 new RejectedToolCall(
                     "workflow.complete",
-                    "Workflow transition tools are not allowed."
+                    "No se permiten herramientas de transición de workflow."
                 )
             ],
             ExecutedCalls:
@@ -149,7 +149,7 @@ public class AnalysisOrchestratorContextTests
 
         var rejectedCall = toolPlanElement.GetProperty("rejectedCalls")[0];
         rejectedCall.GetProperty("toolName").GetString().Should().Be("workflow.complete");
-        rejectedCall.GetProperty("reason").GetString().Should().Be("Workflow transition tools are not allowed.");
+        rejectedCall.GetProperty("reason").GetString().Should().Be("No se permiten herramientas de transición de workflow.");
 
         var executedCall = toolPlanElement.GetProperty("executedCalls")[0];
         executedCall.GetProperty("toolName").GetString().Should().Be("legal.search_cnv_regulation");
@@ -487,7 +487,7 @@ public class AnalysisOrchestratorContextTests
                 Summary: "Planner reviewed collected evidence.",
                 RecommendedActions: ["Review evidence."],
                 RiskFactors: ["High data severity."],
-                Limitations: ["No LLM reasoning was used."],
+                Limitations: ["No se usó razonamiento LLM."],
                 UsedLlm: false,
                 UsedFallback: true,
                 Provider: null,

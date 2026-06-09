@@ -38,7 +38,7 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         result.Should().HaveCount(1);
         result[0].Query.Should().Be("régimen informativo estados financieros emisoras");
         result[0].RegulationArea.Should().Be("general_reporting");
-        result[0].Reason.Should().Contain("No specific financial risk signals");
+        result[0].Reason.Should().Contain("No había señales específicas de riesgo financiero");
         result[0].RelatedFinancialSignals.Should().BeEmpty();
     }
 

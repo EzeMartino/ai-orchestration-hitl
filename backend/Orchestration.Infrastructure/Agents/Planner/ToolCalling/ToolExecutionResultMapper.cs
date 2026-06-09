@@ -13,7 +13,7 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     private const string LegalToolName = "legal.search_cnv_regulation";
     private const string LegalEngine = "Semantic Kernel + MCP CNV Regulation Server";
     private const string HumanReviewWarning =
-        "Automated regulatory retrieval only. Human legal review is required before making operational decisions.";
+        "Recuperación regulatoria automatizada únicamente. Se requiere revisión legal humana antes de tomar decisiones operativas.";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -77,8 +77,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
                 HasComplianceRisk: hasRisk,
                 RiskLevel: hasRisk ? "Medium" : "Low",
                 Summary: hasRisk
-                    ? "CNV regulatory evidence was found for the submitted financial anomaly. Human legal review is required."
-                    : "No cited CNV regulatory evidence was found.",
+                    ? "Se encontró evidencia regulatoria de la CNV para la anomalía financiera enviada. Se requiere revisión legal humana."
+                    : "No se encontró evidencia regulatoria citada de la CNV.",
                 Engine: LegalEngine,
                 Evidence: evidence,
                 Warnings: warnings

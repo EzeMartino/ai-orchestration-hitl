@@ -106,7 +106,7 @@ public class ToolExecutionResultMapperTests
         );
         result.Warnings.Should().Contain("Candidate source.");
         result.Warnings.Should().Contain(
-            "Automated regulatory retrieval only. Human legal review is required before making operational decisions."
+            "Recuperación regulatoria automatizada únicamente. Se requiere revisión legal humana antes de tomar decisiones operativas."
         );
     }
 

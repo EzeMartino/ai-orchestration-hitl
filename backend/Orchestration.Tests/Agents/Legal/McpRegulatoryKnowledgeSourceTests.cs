@@ -611,7 +611,7 @@ public class McpRegulatoryKnowledgeSourceTests
         result.LegalReview.Should().NotBeNull();
         result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
         result.LegalReview.EvidenceReferences.Should().BeEmpty();
-        result.LegalReview.Warnings.Should().Contain("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
+        result.LegalReview.Warnings.Should().Contain("Había señales de riesgo financiero, pero no había evidencia CNV/Infoleg citada disponible.");
     }
 
     [Fact]

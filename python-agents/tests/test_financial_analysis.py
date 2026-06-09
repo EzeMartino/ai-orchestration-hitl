@@ -61,7 +61,26 @@ class FinancialAnalysisRatioTests(unittest.TestCase):
         )
 
         self.assertEqual(response["ratios"], [])
-        self.assertTrue(any("Missing numerator input" in item for item in response["warnings"]))
+        self.assertTrue(any("Falta el numerador" in item for item in response["warnings"]))
+
+    def test_uses_reported_ratio_when_formula_inputs_are_missing(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [metric("gross_margin", "2024A", 0.415, confidence=0.82)],
+                "requestedRatios": ["gross_margin"],
+            },
+        )
+
+        self.assertEqual(response["warnings"], [])
+        self.assertEqual(len(response["ratios"]), 1)
+        ratio = response["ratios"][0]
+        self.assertEqual(ratio["name"], "gross_margin")
+        self.assertEqual(ratio["period"], "2024A")
+        self.assertAlmostEqual(ratio["value"], 0.415)
+        self.assertEqual(ratio["source"], "reported")
+        self.assertEqual(ratio["inputs"], ["gross_margin"])
+        self.assertEqual(ratio["confidence"], 0.82)
 
     def test_handles_zero_denominator_safely(self):
         response = call(
@@ -76,7 +95,7 @@ class FinancialAnalysisRatioTests(unittest.TestCase):
         )
 
         self.assertEqual(response["ratios"], [])
-        self.assertTrue(any("Zero denominator" in item for item in response["warnings"]))
+        self.assertTrue(any("Denominador cero" in item for item in response["warnings"]))
 
     def test_vista_fixture_can_feed_ratio_computation(self):
         fixture_path = (
@@ -151,7 +170,7 @@ class FinancialAnalysisComparisonTests(unittest.TestCase):
         )
 
         self.assertEqual(response["comparisons"], [])
-        self.assertTrue(any("Missing metric revenue" in item for item in response["warnings"]))
+        self.assertTrue(any("Falta la métrica revenue" in item for item in response["warnings"]))
 
 
 class FinancialAnalysisRiskSignalTests(unittest.TestCase):
@@ -321,7 +340,7 @@ class FinancialAnalysisEvidenceSummaryTests(unittest.TestCase):
         self.assertEqual(len(response["evidence"]), 2)
         self.assertEqual(response["evidence"][0]["severity"], "High")
         self.assertIn("Structured metrics only.", response["limitations"])
-        self.assertIn("Human review recommended", response["summary"])
+        self.assertIn("Se recomienda revisión humana", response["summary"])
 
     def test_includes_limitation_when_no_evidence_exists(self):
         response = call(

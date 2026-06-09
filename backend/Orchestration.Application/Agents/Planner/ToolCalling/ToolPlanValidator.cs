@@ -2,15 +2,15 @@ namespace Orchestration.Application.Agents.Planner.ToolCalling;
 
 public sealed class ToolPlanValidator : IToolPlanValidator
 {
-    private const string NotAllowlistedReason = "Tool is not allowlisted.";
-    private const string WorkflowReason = "Workflow transition tools are not allowed.";
-    private const string ApprovalReason = "Human approval tools cannot be called by LLM.";
-    private const string OperationalReason = "Operational financial tools are not allowed.";
-    private const string LegalConclusionReason = "Legal conclusion tools are not allowed.";
-    private const string MaxToolCallsReason = "Maximum tool call count exceeded.";
-    private const string FinancialToolsDisabledReason = "Financial analysis tools are disabled.";
-    private const string MissingRequestJsonReason = "Missing required argument: requestJson.";
-    private const string EmptyRequestJsonReason = "Empty required argument: requestJson.";
+    private const string NotAllowlistedReason = "La herramienta no está permitida.";
+    private const string WorkflowReason = "No se permiten herramientas de transición de workflow.";
+    private const string ApprovalReason = "El LLM no puede llamar herramientas de aprobación humana.";
+    private const string OperationalReason = "No se permiten herramientas financieras operativas.";
+    private const string LegalConclusionReason = "No se permiten herramientas de conclusión legal.";
+    private const string MaxToolCallsReason = "Se excedió la cantidad máxima de llamadas a herramientas.";
+    private const string FinancialToolsDisabledReason = "Las herramientas de análisis financiero están deshabilitadas.";
+    private const string MissingRequestJsonReason = "Falta el argumento obligatorio: requestJson.";
+    private const string EmptyRequestJsonReason = "El argumento obligatorio está vacío: requestJson.";
 
     private readonly HashSet<string> _allowedTools;
     private readonly int _maxToolCalls;

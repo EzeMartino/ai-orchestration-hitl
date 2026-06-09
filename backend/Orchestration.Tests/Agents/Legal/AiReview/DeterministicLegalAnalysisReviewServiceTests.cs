@@ -46,7 +46,7 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
         var result = await _service.ReviewAsync(input, CancellationToken.None);
 
         result.PossibleRegulatoryReviewAreas.Should().BeEmpty();
-        result.Warnings.Should().Contain("No financial risk signals were provided.");
+        result.Warnings.Should().Contain("No se proporcionaron señales de riesgo financiero.");
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
         var result = await _service.ReviewAsync(input, CancellationToken.None);
 
         result.PossibleRegulatoryReviewAreas.Should().BeEmpty();
-        result.Warnings.Should().Contain("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
+        result.Warnings.Should().Contain("Había señales de riesgo financiero, pero no había evidencia CNV/Infoleg citada disponible.");
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
 
         result.PossibleRegulatoryReviewAreas.Should().NotBeEmpty();
         var area = result.PossibleRegulatoryReviewAreas.First();
-        area.Title.Should().Be("Possible liquidity/disclosure review area");
+        area.Title.Should().Be("Posible área de revisión de liquidez/divulgación");
         area.Severity.Should().Be("High");
     }
 
@@ -114,7 +114,7 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
         var result = await _service.ReviewAsync(input, CancellationToken.None);
 
         result.EvidenceReferences.Should().ContainSingle().Which.Citation.Should().Be("CNV Art. 42");
-        result.Warnings.Should().Contain("Some CNV/Infoleg evidence was ignored because it had no citation.");
+        result.Warnings.Should().Contain("Se ignoró parte de la evidencia CNV/Infoleg porque no tenía cita.");
     }
 
     [Fact]
@@ -156,9 +156,9 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
 
         var result = await _service.ReviewAsync(input, CancellationToken.None);
 
-        result.Limitations.Should().Contain("This system does not provide legal advice.");
-        result.Limitations.Should().Contain("No definitive legal or regulatory conclusion is provided.");
-        result.Limitations.Should().Contain("Human legal review is required before making any legal determination.");
+        result.Limitations.Should().Contain("Este sistema no brinda asesoramiento legal.");
+        result.Limitations.Should().Contain("No se proporciona ninguna conclusión legal o regulatoria definitiva.");
+        result.Limitations.Should().Contain("Se requiere revisión legal humana antes de tomar cualquier determinación legal.");
     }
 
     [Fact]

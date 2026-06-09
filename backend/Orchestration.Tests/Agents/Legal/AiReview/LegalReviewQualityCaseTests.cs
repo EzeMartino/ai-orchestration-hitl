@@ -36,8 +36,8 @@ public sealed class LegalReviewQualityCaseTests
         var result = await _deterministic.ReviewAsync(CreateInput(qualityCase), CancellationToken.None);
 
         result.PossibleRegulatoryReviewAreas.Should().NotBeEmpty();
-        result.PossibleRegulatoryReviewAreas[0].Title.Should().Contain("Possible liquidity");
-        result.PossibleRegulatoryReviewAreas[0].Description.Should().Contain("human review");
+        result.PossibleRegulatoryReviewAreas[0].Title.Should().Contain("liquidez");
+        result.PossibleRegulatoryReviewAreas[0].Description.Should().Contain("revisión humana");
         result.PossibleRegulatoryReviewAreas[0].Severity.Should().Be("High");
         AssertOnlyProvidedCitationsUsed(result, qualityCase.ExpectedCitations);
         AssertDoesNotContainForbiddenLegalLanguage(result);
@@ -51,7 +51,7 @@ public sealed class LegalReviewQualityCaseTests
         var result = await _deterministic.ReviewAsync(CreateInput(qualityCase), CancellationToken.None);
 
         result.PossibleRegulatoryReviewAreas.Should().NotBeEmpty();
-        result.PossibleRegulatoryReviewAreas[0].Title.Should().Contain("Possible leverage");
+        result.PossibleRegulatoryReviewAreas[0].Title.Should().Contain("apalancamiento");
         result.PossibleRegulatoryReviewAreas[0].RelatedFinancialSignals.Should().Contain("HIGH_NET_DEBT_TO_EBITDA");
         result.PossibleRegulatoryReviewAreas[0].Severity.Should().Be("High");
         AssertOnlyProvidedCitationsUsed(result, qualityCase.ExpectedCitations);
@@ -67,8 +67,8 @@ public sealed class LegalReviewQualityCaseTests
 
         result.PossibleRegulatoryReviewAreas.Should().BeEmpty();
         result.EvidenceReferences.Should().BeEmpty();
-        result.Warnings.Should().Contain("Some CNV/Infoleg evidence was ignored because it had no citation.");
-        result.Warnings.Should().Contain("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
+        result.Warnings.Should().Contain("Se ignoró parte de la evidencia CNV/Infoleg porque no tenía cita.");
+        result.Warnings.Should().Contain("Había señales de riesgo financiero, pero no había evidencia CNV/Infoleg citada disponible.");
         AssertOnlyProvidedCitationsUsed(result, qualityCase.ExpectedCitations);
         AssertDoesNotContainForbiddenLegalLanguage(result);
     }
@@ -82,8 +82,8 @@ public sealed class LegalReviewQualityCaseTests
 
         result.PossibleRegulatoryReviewAreas.Should().BeEmpty();
         result.EvidenceReferences.Should().BeEmpty();
-        result.Warnings.Should().Contain("No CNV/Infoleg evidence was provided.");
-        result.Warnings.Should().Contain("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
+        result.Warnings.Should().Contain("No se proporcionó evidencia CNV/Infoleg.");
+        result.Warnings.Should().Contain("Había señales de riesgo financiero, pero no había evidencia CNV/Infoleg citada disponible.");
         AssertOnlyProvidedCitationsUsed(result, qualityCase.ExpectedCitations);
         AssertDoesNotContainForbiddenLegalLanguage(result);
     }

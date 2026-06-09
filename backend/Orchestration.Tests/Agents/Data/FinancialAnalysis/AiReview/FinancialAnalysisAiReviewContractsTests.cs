@@ -99,8 +99,8 @@ public sealed class FinancialAnalysisAiReviewContractsTests
         result.Provider.Should().BeNull();
         result.Model.Should().BeNull();
         result.FailureReason.Should().Be("AI review is disabled.");
-        result.Summary.Should().Be("AI review was not executed.");
-        result.Limitations.Should().Contain("AI review was not executed.");
+        result.Summary.Should().Be("La revisión de IA no se ejecutó.");
+        result.Limitations.Should().Contain("La revisión de IA no se ejecutó.");
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class FinancialAnalysisAiReviewContractsTests
     {
         const string json = """
         {
-          "summary": "AI review was not executed.",
+          "summary": "La revisión de IA no se ejecutó.",
           "keyFindings": [],
           "riskInterpretation": "No AI interpretation is available.",
           "dataQualityNotes": [],

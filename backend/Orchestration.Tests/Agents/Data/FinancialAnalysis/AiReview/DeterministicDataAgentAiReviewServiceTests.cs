@@ -37,8 +37,8 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
             CancellationToken.None
         );
 
-        result.Summary.Should().Contain("identified 2 risk signal(s)");
-        result.Summary.Should().Contain("metrics attached to the analysis session");
+        result.Summary.Should().Contain("identificó 2 señal(es) de riesgo");
+        result.Summary.Should().Contain("métricas adjuntas a la sesión de análisis");
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
             CancellationToken.None
         );
 
-        result.Summary.Should().Contain("did not identify major risk signals");
+        result.Summary.Should().Contain("no identificó señales de riesgo relevantes");
         result.KeyFindings.Should().BeEmpty();
     }
 
@@ -180,10 +180,10 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
         );
 
         result.Limitations.Should().Contain("No PDF extraction was performed.");
-        result.Limitations.Should().Contain("This review is deterministic and advisory.");
-        result.Limitations.Should().Contain("It does not recompute financial metrics.");
-        result.Limitations.Should().Contain("It does not verify accounting records.");
-        result.Limitations.Should().Contain("It does not provide portfolio or transaction recommendations.");
+        result.Limitations.Should().Contain("Esta revisión es determinista y asesora.");
+        result.Limitations.Should().Contain("No recalcula métricas financieras.");
+        result.Limitations.Should().Contain("No verifica registros contables.");
+        result.Limitations.Should().Contain("No brinda recomendaciones de cartera ni de transacciones.");
     }
 
     [Fact]
@@ -199,9 +199,9 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
             CancellationToken.None
         );
 
-        result.Summary.Should().Contain("metrics attached to the analysis session");
+        result.Summary.Should().Contain("métricas adjuntas a la sesión de análisis");
         result.DataQualityNotes.Should().NotContain(note =>
-            note.Message.Contains("Fixture fallback", StringComparison.OrdinalIgnoreCase)
+            note.Message.Contains("fixture de respaldo", StringComparison.OrdinalIgnoreCase)
         );
     }
 
@@ -218,9 +218,9 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
             CancellationToken.None
         );
 
-        result.Summary.Should().Contain("fixture fallback metrics");
+        result.Summary.Should().Contain("métricas fixture de respaldo");
         result.DataQualityNotes.Should().Contain(note =>
-            note.Message == "Fixture fallback metrics were used. This is intended for demo/development only." &&
+            note.Message == "Se usaron métricas fixture de respaldo. Esto está previsto solo para demo/desarrollo." &&
             note.Severity == "Warning"
         );
     }
@@ -238,9 +238,9 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
             CancellationToken.None
         );
 
-        result.Summary.Should().Be("Structured financial metrics were not available for review.");
+        result.Summary.Should().Be("No había métricas financieras estructuradas disponibles para la revisión.");
         result.DataQualityNotes.Should().Contain(note =>
-            note.Message == "No structured financial metrics were available for review." &&
+            note.Message == "No había métricas financieras estructuradas disponibles para la revisión." &&
             note.Severity == "Warning"
         );
     }
@@ -266,7 +266,7 @@ public sealed class DeterministicDataAgentAiReviewServiceTests
         );
 
         result.DataQualityNotes.Should().Contain(note =>
-            note.Message == "The structured metrics ingestion produced 3 warning(s)." &&
+            note.Message == "La ingesta de métricas estructuradas produjo 3 advertencia(s)." &&
             note.RelatedFields.Contains("metricsProvenance.warningCount")
         );
     }

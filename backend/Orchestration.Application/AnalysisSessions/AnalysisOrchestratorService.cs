@@ -348,7 +348,7 @@ namespace Orchestration.Application.AnalysisSessions
                             value = ratio.Value,
                             unit = ratio.Unit,
                             formula = ratio.Formula,
-                            source = "computed",
+                            source = ratio.Source,
                             inputMetrics = ratio.Inputs,
                             sourcePage = (int?)null,
                             confidence = 0.75m,

@@ -54,7 +54,7 @@ public class ToolCallingDiagnosticServiceTests
         );
 
         result.ApprovedCalls.Should().BeEmpty();
-        result.RejectedCalls.Should().ContainSingle().Which.Reason.Should().Be("Workflow transition tools are not allowed.");
+        result.RejectedCalls.Should().ContainSingle().Which.Reason.Should().Be("No se permiten herramientas de transición de workflow.");
         result.ExecutedCalls.Should().BeEmpty();
         executor.WasCalled.Should().BeFalse();
     }

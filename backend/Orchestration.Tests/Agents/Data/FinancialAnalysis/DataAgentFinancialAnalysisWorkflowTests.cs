@@ -145,7 +145,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             "No se calcularon índices financieros ni comparaciones de períodos porque no había métricas estructuradas disponibles."
         );
         result.FinancialAnalysis.AiReview.Should().NotBeNull();
-        result.FinancialAnalysis.AiReview!.Summary.Should().Be("AI review was not executed.");
+        result.FinancialAnalysis.AiReview!.Summary.Should().Be("La revisión de IA no se ejecutó.");
         result.FinancialAnalysis.AiReview.FailureReason.Should().Be("structured_financial_metrics_missing");
         service.ComputeCalls.Should().Be(0);
         publisher.PublishedEvents.Should().ContainSingle(e =>

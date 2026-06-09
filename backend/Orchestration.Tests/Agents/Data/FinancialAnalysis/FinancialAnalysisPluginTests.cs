@@ -113,8 +113,8 @@ public sealed class FinancialAnalysisPluginTests
 
         service.ComputeRequest.Should().BeNull();
         response.Ratios.Should().BeEmpty();
-        response.Warnings.Should().Contain("Invalid compute financial ratios request JSON.");
-        response.Warnings.Should().Contain("Financial ratios could not be computed from the provided request.");
+        response.Warnings.Should().Contain("JSON de solicitud para calcular ratios financieros no válido.");
+        response.Warnings.Should().Contain("No se pudieron calcular los ratios financieros a partir de la solicitud provista.");
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class FinancialAnalysisPluginTests
 
         service.CompareRequest.Should().BeNull();
         response.Comparisons.Should().BeEmpty();
-        response.Warnings.Should().Contain("Invalid compare periods request JSON.");
+        response.Warnings.Should().Contain("JSON de solicitud para comparar periodos no válido.");
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class FinancialAnalysisPluginTests
 
         service.SignalsRequest.Should().BeNull();
         response.Signals.Should().BeEmpty();
-        response.Result.Warnings.Should().Contain("Invalid detect financial risk signals request JSON.");
+        response.Result.Warnings.Should().Contain("JSON de solicitud para detectar señales de riesgo financiero no válido.");
     }
 
     [Fact]

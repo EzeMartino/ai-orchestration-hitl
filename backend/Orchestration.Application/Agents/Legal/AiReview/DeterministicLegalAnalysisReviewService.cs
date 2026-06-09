@@ -11,11 +11,11 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 {
     private static readonly string[] StandardLimitations =
     {
-        "This review is deterministic and advisory.",
-        "This system does not provide legal advice.",
-        "No definitive legal or regulatory conclusion is provided.",
-        "The review uses only the provided financial analysis and CNV/Infoleg evidence.",
-        "Human legal review is required before making any legal determination."
+        "Esta revisión es determinista y asesora.",
+        "Este sistema no brinda asesoramiento legal.",
+        "No se proporciona ninguna conclusión legal o regulatoria definitiva.",
+        "La revisión usa únicamente el análisis financiero y la evidencia CNV/Infoleg provistos.",
+        "Se requiere revisión legal humana antes de tomar cualquier determinación legal."
     };
 
     public Task<LegalAnalysisReviewResult> ReviewAsync(
@@ -91,22 +91,22 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
         if (ContainsAny("liquidity", "current_ratio", "quick_ratio", "cash_ratio"))
         {
-            return "Possible liquidity/disclosure review area";
+            return "Posible área de revisión de liquidez/divulgación";
         }
         if (ContainsAny("leverage", "debt", "indebtedness", "solvency", "gearing", "interest_coverage"))
         {
-            return "Possible leverage or indebtedness disclosure review area";
+            return "Posible área de revisión de apalancamiento o endeudamiento";
         }
         if (ContainsAny("margin", "profitability", "deterioration", "ebitda", "net_income", "gross_profit", "return"))
         {
-            return "Possible financial performance disclosure review area";
+            return "Posible área de revisión de desempeño financiero";
         }
         if (ContainsAny("quality", "missing", "data_quality", "reporting_quality", "metric_issue"))
         {
-            return "Possible reporting quality review area";
+            return "Posible área de revisión de calidad de reporte";
         }
 
-        return "Possible financial risk review area";
+        return "Posible área de revisión de riesgo financiero";
     }
 
     private static string DetermineSeverity(IReadOnlyList<FinancialRiskSignal> signals)
@@ -169,7 +169,7 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
                 return new PossibleRegulatoryReviewArea(
                     Title: title,
-                    Description: "Financial risk signals may require human review against the cited CNV/Infoleg evidence. This is not a legal conclusion.",
+                    Description: "Las señales de riesgo financiero pueden requerir revisión humana contra la evidencia CNV/Infoleg citada. Esto no es una conclusión legal.",
                     Severity: severity,
                     RelatedFinancialSignals: signalNames,
                     EvidenceCitations: citations
@@ -186,15 +186,15 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
     {
         if (riskSignals.Count == 0)
         {
-            return "No possible regulatory review areas were identified because no financial risk signals were provided. Human legal review is recommended before drawing any conclusion.";
+            return "No se identificaron posibles áreas de revisión regulatoria porque no se proporcionaron señales de riesgo financiero. Se recomienda revisión legal humana antes de extraer cualquier conclusión.";
         }
 
         if (citedEvidence.Count == 0)
         {
-            return "The available evidence is limited. No cited CNV/Infoleg evidence was available to support regulatory review areas. Human legal review is recommended before drawing any conclusion.";
+            return "La evidencia disponible es limitada. No había evidencia CNV/Infoleg citada para respaldar áreas de revisión regulatoria. Se recomienda revisión legal humana antes de extraer cualquier conclusión.";
         }
 
-        return "The legal review fallback identified possible regulatory review areas based on financial risk signals and provided CNV/Infoleg evidence. Human legal review is recommended before drawing any conclusion.";
+        return "El respaldo de revisión legal identificó posibles áreas de revisión regulatoria a partir de señales de riesgo financiero y evidencia CNV/Infoleg provista. Se recomienda revisión legal humana antes de extraer cualquier conclusión.";
     }
 
     private static IReadOnlyList<string> BuildWarnings(
@@ -209,27 +209,27 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
         if (riskSignals.Count == 0)
         {
-            warnings.Add("No financial risk signals were provided.");
+            warnings.Add("No se proporcionaron señales de riesgo financiero.");
         }
 
         if (cnvEvidence.Count == 0)
         {
-            warnings.Add("No CNV/Infoleg evidence was provided.");
+            warnings.Add("No se proporcionó evidencia CNV/Infoleg.");
         }
 
         if (hasIgnoredEvidence)
         {
-            warnings.Add("Some CNV/Infoleg evidence was ignored because it had no citation.");
+            warnings.Add("Se ignoró parte de la evidencia CNV/Infoleg porque no tenía cita.");
         }
 
         if (riskSignals.Count > 0 && citedEvidence.Count == 0)
         {
-            warnings.Add("Financial risk signals were present, but no cited CNV/Infoleg evidence was available.");
+            warnings.Add("Había señales de riesgo financiero, pero no había evidencia CNV/Infoleg citada disponible.");
         }
 
         if (input.FinancialAiReview == null)
         {
-            warnings.Add("DataAgent AI review was not available.");
+            warnings.Add("La revisión de IA de DataAgent no estaba disponible.");
         }
 
         // Add financial warnings from input

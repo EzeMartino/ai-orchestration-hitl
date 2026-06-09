@@ -144,7 +144,7 @@ public sealed class CnvRegulationStdioMcpClient(
                 ?? new CnvRegulationSearchResponse(
                     request.Query,
                     [],
-                    ["MCP tool returned an empty or invalid response."]
+                    ["La herramienta MCP devolvió una respuesta vacía o no válida."]
                 );
         }
         finally
@@ -163,7 +163,7 @@ public sealed class CnvRegulationStdioMcpClient(
         if (_options.Args.Length == 0)
         {
             throw new InvalidOperationException(
-                "MCP CNV regulation server args are missing."
+                "Faltan argumentos para el servidor MCP de regulación CNV."
             );
         }
 
@@ -303,7 +303,7 @@ public sealed class CnvRegulationStdioMcpClient(
         if (!LooksLikeJson(text))
         {
             throw new InvalidOperationException(
-                $"MCP tool returned non-JSON text content: {text}"
+                $"La herramienta MCP devolvió contenido de texto que no es JSON: {text}"
             );
         }
 
@@ -324,7 +324,7 @@ public sealed class CnvRegulationStdioMcpClient(
         if (string.IsNullOrWhiteSpace(text))
         {
             throw new InvalidOperationException(
-                "MCP tool did not return text content."
+                "La herramienta MCP no devolvió contenido de texto."
             );
         }
 
@@ -335,11 +335,11 @@ public sealed class CnvRegulationStdioMcpClient(
     {
         try
         {
-            return $"MCP tool returned an error: {ExtractText(result)}";
+            return $"La herramienta MCP devolvió un error: {ExtractText(result)}";
         }
         catch (InvalidOperationException ex)
         {
-            return $"MCP tool returned an error, but its text content could not be read: {ex.Message}";
+            return $"La herramienta MCP devolvió un error, pero no se pudo leer su contenido de texto: {ex.Message}";
         }
     }
 

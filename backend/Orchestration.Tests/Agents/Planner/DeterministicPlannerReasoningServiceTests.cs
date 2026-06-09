@@ -35,9 +35,9 @@ public class DeterministicPlannerReasoningServiceTests
         result.Provider.Should().BeNull();
         result.Model.Should().BeNull();
         result.FailureReason.Should().BeNull();
-        result.Limitations.Should().Contain("No LLM reasoning was used.");
-        result.Limitations.Should().Contain("This is not legal, financial, or investment advice.");
-        result.Limitations.Should().Contain("Human approval is required before completing risky workflows.");
-        result.RecommendedActions.Should().Contain("Approve or reject the session based on human judgment.");
+        result.Limitations.Should().Contain("No se usó razonamiento LLM.");
+        result.Limitations.Should().Contain("Esto no es asesoramiento legal, financiero ni de inversión.");
+        result.Limitations.Should().Contain("Se requiere aprobación humana antes de completar workflows riesgosos.");
+        result.RecommendedActions.Should().Contain("Aprobar o rechazar la sesión según el criterio humano.");
     }
 }

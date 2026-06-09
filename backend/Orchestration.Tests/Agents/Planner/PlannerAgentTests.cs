@@ -424,12 +424,12 @@ public class PlannerAgentTests
         result.ToolPlan.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 "workflow.complete",
-                "Workflow transition tools are not allowed."
+                "No se permiten herramientas de transición de workflow."
             )
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_rejected" &&
-            x.Message == "Llamada a herramienta 'workflow.complete' rechazada: Workflow transition tools are not allowed."
+            x.Message == "Llamada a herramienta 'workflow.complete' rechazada: No se permiten herramientas de transición de workflow."
         );
         publisher.PublishedEvents.Should().NotContain(x => x.Type == "tool_call_executed");
     }

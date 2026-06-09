@@ -19,7 +19,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
                 new(
                     Query: FallbackQueryString,
                     RegulationArea: "general_reporting",
-                    Reason: "No specific financial risk signals were available; using a general financial reporting query.",
+                    Reason: "No había señales específicas de riesgo financiero disponibles; se usó una consulta general sobre información financiera.",
                     RelatedFinancialSignals: Array.Empty<string>()
                 )
             };
@@ -71,8 +71,8 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         {
             var qualityCandidates = new[]
             {
-                ("deberes informativos emisoras información periódica", "data_quality", "Derived from missing metrics, data quality issues, or warnings."),
-                ("régimen informativo estados financieros emisoras", "data_quality", "Derived from missing metrics, data quality issues, or warnings.")
+                ("deberes informativos emisoras información periódica", "data_quality", "Derivada de métricas faltantes, problemas de calidad de datos o advertencias."),
+                ("régimen informativo estados financieros emisoras", "data_quality", "Derivada de métricas faltantes, problemas de calidad de datos o advertencias.")
             };
 
             foreach (var (candQuery, candArea, candReason) in qualityCandidates)
@@ -112,7 +112,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
                 new(
                     Query: FallbackQueryString,
                     RegulationArea: "general_reporting",
-                    Reason: "No specific financial risk signals were available; using a general financial reporting query.",
+                    Reason: "No había señales específicas de riesgo financiero disponibles; se usó una consulta general sobre información financiera.",
                     RelatedFinancialSignals: Array.Empty<string>()
                 )
             };
@@ -169,7 +169,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "hecho relevante información al mercado emisoras",
                 "material_deterioration",
-                $"Derived from high severity signal: {signal.Summary}"
+                $"Derivada de señal de severidad alta: {signal.Summary}"
             );
         }
 
@@ -179,12 +179,12 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "régimen informativo estados financieros liquidez",
                 "financial_reporting",
-                $"Derived from liquidity risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de liquidez: {signal.Summary}"
             );
             yield return (
                 "información financiera periódica estados contables",
                 "financial_reporting",
-                $"Derived from liquidity risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de liquidez: {signal.Summary}"
             );
         }
 
@@ -194,12 +194,12 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "endeudamiento información al mercado estados financieros",
                 "debt_leverage",
-                $"Derived from leverage risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de apalancamiento: {signal.Summary}"
             );
             yield return (
                 "obligaciones negociables endeudamiento régimen informativo",
                 "debt_leverage",
-                $"Derived from leverage risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de apalancamiento: {signal.Summary}"
             );
         }
 
@@ -209,12 +209,12 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "resultados estados financieros información periódica emisoras",
                 "profitability",
-                $"Derived from margin/profitability risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de margen/rentabilidad: {signal.Summary}"
             );
             yield return (
                 "hecho relevante deterioro resultados información al mercado",
                 "profitability",
-                $"Derived from margin/profitability risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de margen/rentabilidad: {signal.Summary}"
             );
         }
 
@@ -224,12 +224,12 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "flujo de fondos estados financieros régimen informativo",
                 "cash_flow",
-                $"Derived from cash flow risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de flujo de caja: {signal.Summary}"
             );
             yield return (
                 "información financiera periódica emisoras",
                 "cash_flow",
-                $"Derived from cash flow risk signal: {signal.Summary}"
+                $"Derivada de señal de riesgo de flujo de caja: {signal.Summary}"
             );
         }
 
@@ -239,12 +239,12 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             yield return (
                 "deberes informativos emisoras información periódica",
                 "data_quality",
-                $"Derived from missing metrics, data quality issues, or warnings: {signal.Summary}"
+                $"Derivada de métricas faltantes, problemas de calidad de datos o advertencias: {signal.Summary}"
             );
             yield return (
                 "régimen informativo estados financieros emisoras",
                 "data_quality",
-                $"Derived from missing metrics, data quality issues, or warnings: {signal.Summary}"
+                $"Derivada de métricas faltantes, problemas de calidad de datos o advertencias: {signal.Summary}"
             );
         }
     }

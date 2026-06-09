@@ -18,8 +18,8 @@ public sealed class MockRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
             : "Low";
 
         var summary = hasComplianceRisk
-            ? "The anomaly may require compliance review before operational action is taken."
-            : "No significant compliance risk detected for the submitted financial report.";
+            ? "La anomalía puede requerir revisión de cumplimiento antes de tomar una acción operativa."
+            : "No se detectó un riesgo de cumplimiento significativo para el informe financiero enviado.";
 
         IReadOnlyList<RegulatoryFinding> findings = hasComplianceRisk
             ?
@@ -27,14 +27,14 @@ public sealed class MockRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
                 new RegulatoryFinding(
                     Regulation: "Internal AML Policy",
                     Section: "Transaction Monitoring",
-                    Finding: "High-risk transaction patterns require human review before account-level action.",
-                    Source: "Mock regulatory knowledge source"
+                    Finding: "Los patrones transaccionales de alto riesgo requieren revisión humana antes de una acción a nivel de cuenta.",
+                    Source: "Fuente regulatoria simulada"
                 ),
                 new RegulatoryFinding(
                     Regulation: "Operational Risk Control",
                     Section: "Human Approval Safeguards",
-                    Finding: "Automated systems must pause before irreversible operational actions when anomaly severity is elevated.",
-                    Source: "Mock regulatory knowledge source"
+                    Finding: "Los sistemas automatizados deben detenerse antes de acciones operativas irreversibles cuando la severidad de la anomalía es elevada.",
+                    Source: "Fuente regulatoria simulada"
                 )
             ]
             :
@@ -42,8 +42,8 @@ public sealed class MockRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
                 new RegulatoryFinding(
                     Regulation: "Internal AML Policy",
                     Section: "Transaction Monitoring",
-                    Finding: "No escalation threshold was reached.",
-                    Source: "Mock regulatory knowledge source"
+                    Finding: "No se alcanzó ningún umbral de escalamiento.",
+                    Source: "Fuente regulatoria simulada"
                 )
             ];
 
@@ -51,11 +51,11 @@ public sealed class MockRegulatoryKnowledgeSource : IRegulatoryKnowledgeSource
             HasComplianceRisk: hasComplianceRisk,
             RiskLevel: riskLevel,
             Summary: summary,
-            SourceEngine: "Mock Regulatory Knowledge Source",
+            SourceEngine: "Fuente regulatoria simulada",
             Findings: findings,
             Warnings:
             [
-                "Mock regulatory knowledge source. Do not use for real legal decisions."
+                "Fuente regulatoria simulada. No usar para decisiones legales reales."
             ]
         );
 

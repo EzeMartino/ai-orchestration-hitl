@@ -116,7 +116,7 @@ No other action was taken.
             Summary: "Fallback summary.",
             RecommendedActions: ["Review evidence."],
             RiskFactors: ["Risk factor."],
-            Limitations: ["No LLM reasoning was used."],
+            Limitations: ["No se usó razonamiento LLM."],
             UsedLlm: false,
             UsedFallback: true,
             Provider: null,

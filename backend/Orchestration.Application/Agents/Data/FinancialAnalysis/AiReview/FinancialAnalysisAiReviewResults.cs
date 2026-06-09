@@ -5,11 +5,11 @@ public static class FinancialAnalysisAiReviewResults
     public static FinancialAnalysisAiReviewResult NotRun(string reason)
     {
         return new FinancialAnalysisAiReviewResult(
-            Summary: "AI review was not executed.",
+            Summary: "La revisión de IA no se ejecutó.",
             KeyFindings: [],
-            RiskInterpretation: "No AI interpretation is available.",
+            RiskInterpretation: "No hay interpretación de IA disponible.",
             DataQualityNotes: [],
-            Limitations: ["AI review was not executed."],
+            Limitations: ["La revisión de IA no se ejecutó."],
             UsedLlm: false,
             UsedFallback: true,
             Provider: null,
