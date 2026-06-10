@@ -107,6 +107,7 @@ __pycache__/
 # Local agent tooling
 .agents/
 skills-lock.json
+.worktrees/
 
 # Codegraph / local analysis artifacts
 .codegraph/
