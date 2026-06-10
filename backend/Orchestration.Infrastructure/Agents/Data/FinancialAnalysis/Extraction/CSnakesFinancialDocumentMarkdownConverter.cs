@@ -42,7 +42,13 @@ public sealed class CSnakesFinancialDocumentMarkdownConverter : IFinancialDocume
 
             return ParseResponse(responseJson);
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception)
+            when (exception.CancellationToken == cancellationToken &&
+                  cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
         {
             return ConversionFailed();
         }

@@ -90,6 +90,29 @@ public sealed class CSnakesFinancialDocumentMarkdownConverterTests
     }
 
     [Fact]
+    public async Task ConvertPdfAsync_Should_map_non_cancellation_exception_after_token_cancellation_to_safe_failure()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var converter = new CSnakesFinancialDocumentMarkdownConverter(
+            new FakeDocumentMarkdownModule(_ =>
+            {
+                cancellation.Cancel();
+                throw new InvalidOperationException("conversion failed");
+            }));
+
+        await using var pdf = new MemoryStream("%PDF-test"u8.ToArray());
+        var result = await converter.ConvertPdfAsync(pdf, 10_000, cancellation.Token);
+
+        result.Should().BeEquivalentTo(new
+        {
+            Succeeded = false,
+            Markdown = "",
+            Truncated = false,
+            FailureReason = "conversion_failed"
+        });
+    }
+
+    [Fact]
     public async Task ConvertPdfAsync_Should_preserve_caller_cancellation()
     {
         var module = new FakeDocumentMarkdownModule("unused");
