@@ -39,6 +39,7 @@ public sealed class CSnakesFinancialDocumentMarkdownConverter : IFinancialDocume
                     maxCharacters),
                 JsonOptions);
             var responseJson = _module.ConvertPdfToMarkdown(requestJson);
+            cancellationToken.ThrowIfCancellationRequested();
 
             return ParseResponse(responseJson);
         }

@@ -113,6 +113,30 @@ public sealed class CSnakesFinancialDocumentMarkdownConverterTests
     }
 
     [Fact]
+    public async Task ConvertPdfAsync_Should_observe_caller_cancellation_after_module_returns()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var converter = new CSnakesFinancialDocumentMarkdownConverter(
+            new FakeDocumentMarkdownModule(_ =>
+            {
+                cancellation.Cancel();
+                return """
+                    {
+                      "succeeded": true,
+                      "markdown": "# Income Statement",
+                      "truncated": false,
+                      "failureReason": null
+                    }
+                    """;
+            }));
+
+        await using var pdf = new MemoryStream("%PDF-test"u8.ToArray());
+        var action = () => converter.ConvertPdfAsync(pdf, 10_000, cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task ConvertPdfAsync_Should_preserve_caller_cancellation()
     {
         var module = new FakeDocumentMarkdownModule("unused");
