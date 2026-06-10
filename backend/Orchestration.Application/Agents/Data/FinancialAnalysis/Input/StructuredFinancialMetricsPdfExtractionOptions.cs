@@ -12,6 +12,10 @@ public sealed class StructuredFinancialMetricsPdfExtractionOptions
 
     public int OcrTimeoutSeconds { get; init; } = 60;
 
+    public long MaxTemporaryBytes { get; init; } = 536_870_912;
+
+    public long MaxSearchablePdfBytes { get; init; } = 104_857_600;
+
     public decimal MinimumMetricConfidence { get; init; } = 0.5m;
 
     public string PdfToPpmPath { get; init; } = "pdftoppm";

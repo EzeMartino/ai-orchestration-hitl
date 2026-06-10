@@ -27,12 +27,17 @@ internal sealed class LocalPdfToolException(
 
 internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
 {
+    private static readonly TimeSpan PostKillWaitTimeout =
+        TimeSpan.FromSeconds(1);
+
     public async Task RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (string.IsNullOrWhiteSpace(fileName))
         {
             throw new LocalPdfToolException(LocalPdfToolFailure.DependencyMissing);
@@ -75,57 +80,121 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
             throw new LocalPdfToolException(LocalPdfToolFailure.DependencyMissing);
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var timeoutCts = new CancellationTokenSource(
+            timeout > TimeSpan.Zero
+                ? timeout
+                : TimeSpan.FromMilliseconds(1));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             timeoutCts.Token);
 
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(linkedCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(linkedCts.Token);
+        var exitTask = process.WaitForExitAsync(linkedCts.Token);
+
         try
         {
-            await process.WaitForExitAsync(linkedCts.Token);
+            await Task.WhenAll(exitTask, stdoutTask, stderrTask);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
-            await KillProcessTreeAndWaitForExitAsync(process);
+            await KillProcessTreeAndObserveAsync(
+                process,
+                stdoutTask,
+                stderrTask);
+            cancellationToken.ThrowIfCancellationRequested();
             throw;
         }
-        catch (OperationCanceledException)
+        catch (Exception) when (timeoutCts.IsCancellationRequested)
         {
-            await KillProcessTreeAndWaitForExitAsync(process);
+            await KillProcessTreeAndObserveAsync(
+                process,
+                stdoutTask,
+                stderrTask);
             throw new LocalPdfToolException(LocalPdfToolFailure.Timeout);
         }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
 
         if (process.ExitCode == 0)
         {
             return;
         }
 
-        _ = stdout;
-
-        throw new LocalPdfToolException(
-            string.IsNullOrWhiteSpace(stderr)
-                ? LocalPdfToolFailure.DependencyMissing
-                : LocalPdfToolFailure.ToolFailed);
+        throw new LocalPdfToolException(LocalPdfToolFailure.ToolFailed);
     }
 
-    private static async Task KillProcessTreeAndWaitForExitAsync(Process process)
+    private static async Task KillProcessTreeAndObserveAsync(
+        Process process,
+        Task stdoutTask,
+        Task stderrTask)
     {
         try
         {
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync(CancellationToken.None);
             }
+        }
+        catch (Win32Exception)
+        {
         }
         catch (InvalidOperationException)
         {
+        }
+        catch (NotSupportedException)
+        {
+        }
+
+        using var cleanupCts =
+            new CancellationTokenSource(PostKillWaitTimeout);
+
+        var exitTask = ObserveTaskAsync(
+            WaitForExitAfterKillAsync(process, cleanupCts.Token));
+        var observeReadersTask = Task.WhenAll(
+            ObserveTaskAsync(stdoutTask),
+            ObserveTaskAsync(stderrTask));
+
+        try
+        {
+            await Task.WhenAll(exitTask, observeReadersTask)
+                .WaitAsync(cleanupCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static async Task WaitForExitAfterKillAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+        }
+        catch (Win32Exception)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+    }
+
+    private static async Task ObserveTaskAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception)
+        {
+            // Cleanup must observe background faults without masking the
+            // caller cancellation or timeout that triggered process teardown.
         }
     }
 }

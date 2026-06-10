@@ -15,28 +15,44 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
     private const string PathOutsideWorkingDirectoryFailure =
         "path_outside_working_directory";
     private const string OutputReadFailure = "output_read_failed";
+    private const string ResourceLimitFailure = "resource_limit_exceeded";
+    private const int CleanupAttempts = 3;
+    private static readonly TimeSpan CleanupRetryDelay =
+        TimeSpan.FromMilliseconds(50);
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
     private readonly ILocalPdfToolRunner _runner;
     private readonly ISearchablePdfMerger _merger;
+    private readonly Func<string> _workingDirectoryFactory;
 
     public LocalSearchablePdfOcrService(IPythonEnvironment pythonEnvironment)
         : this(
             new LocalPdfToolRunner(),
-            new CSnakesSearchablePdfMerger(pythonEnvironment))
+            new CSnakesSearchablePdfMerger(pythonEnvironment),
+            CreateWorkingDirectoryPath)
     {
     }
 
     internal LocalSearchablePdfOcrService(
         ILocalPdfToolRunner runner,
         ISearchablePdfMerger merger)
+        : this(runner, merger, CreateWorkingDirectoryPath)
+    {
+    }
+
+    internal LocalSearchablePdfOcrService(
+        ILocalPdfToolRunner runner,
+        ISearchablePdfMerger merger,
+        Func<string> workingDirectoryFactory)
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(merger);
+        ArgumentNullException.ThrowIfNull(workingDirectoryFactory);
 
         _runner = runner;
         _merger = merger;
+        _workingDirectoryFactory = workingDirectoryFactory;
     }
 
     public async Task<SearchablePdfOcrResult> CreateSearchablePdfAsync(
@@ -48,10 +64,12 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var workingDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "ai-orchestration-hitl-searchable-pdf-ocr",
-            Guid.NewGuid().ToString("N"));
+        if (options.MaxPages <= 0)
+        {
+            return Failure(ToolFailure);
+        }
+
+        var workingDirectory = _workingDirectoryFactory();
 
         Directory.CreateDirectory(workingDirectory);
 
@@ -74,6 +92,8 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 return Failure(ToolFailure);
             }
 
+            EnsureWithinTemporaryLimit(workingDirectory, options);
+
             IReadOnlyList<string> pagePaths;
             try
             {
@@ -93,6 +113,8 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 return Failure(ToolFailure);
             }
 
+            EnsureWithinTemporaryLimit(workingDirectory, options);
+
             var outputPath = Path.Combine(workingDirectory, "searchable.pdf");
             var mergeResult = MergePages(
                 workingDirectory,
@@ -103,6 +125,9 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             {
                 return Failure(NormalizeMergeFailure(mergeResult.FailureReason));
             }
+
+            EnsureWithinTemporaryLimit(workingDirectory, options);
+            EnsureSearchablePdfWithinLimit(outputPath, options);
 
             try
             {
@@ -125,9 +150,23 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 return Failure(OutputReadFailure);
             }
         }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ResourceLimitExceededException)
+        {
+            return Failure(ResourceLimitFailure);
+        }
+        catch (Exception)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Failure(ToolFailure);
+        }
         finally
         {
-            TryDeleteDirectory(workingDirectory);
+            await TryDeleteDirectoryAsync(workingDirectory);
         }
     }
 
@@ -154,6 +193,8 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             GetTimeout(options),
             cancellationToken);
 
+        EnsureWithinTemporaryLimit(workingDirectory, options);
+
         var imagePaths = Directory
             .EnumerateFiles(workingDirectory, "page-*.png")
             .OrderBy(GetGeneratedPageSortKey)
@@ -179,9 +220,11 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 GetTimeout(options),
                 cancellationToken);
 
+            EnsureWithinTemporaryLimit(workingDirectory, options);
             pagePaths.Add(outputPrefix + ".pdf");
         }
 
+        EnsureWithinTemporaryLimit(workingDirectory, options);
         return pagePaths;
     }
 
@@ -247,19 +290,105 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         };
     }
 
-    private static void TryDeleteDirectory(string directory)
+    private static string CreateWorkingDirectoryPath()
+    {
+        return Path.Combine(
+            Path.GetTempPath(),
+            "ai-orchestration-hitl-searchable-pdf-ocr",
+            Guid.NewGuid().ToString("N"));
+    }
+
+    private static void EnsureWithinTemporaryLimit(
+        string workingDirectory,
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        var limit = Math.Max(1, options.MaxTemporaryBytes);
+        long totalBytes = 0;
+
+        foreach (var filePath in Directory.EnumerateFiles(
+                     workingDirectory,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var fileLength = new FileInfo(filePath).Length;
+            if (fileLength > limit - totalBytes)
+            {
+                throw new ResourceLimitExceededException();
+            }
+
+            totalBytes += fileLength;
+        }
+    }
+
+    private static void EnsureSearchablePdfWithinLimit(
+        string outputPath,
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        if (!File.Exists(outputPath))
+        {
+            return;
+        }
+
+        var limit = Math.Max(1, options.MaxSearchablePdfBytes);
+        if (new FileInfo(outputPath).Length > limit)
+        {
+            throw new ResourceLimitExceededException();
+        }
+    }
+
+    private static async Task TryDeleteDirectoryAsync(string directory)
+    {
+        for (var attempt = 0; attempt < CleanupAttempts; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                Directory.Delete(directory, recursive: true);
+                return;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            TryClearReadOnlyAttributes(directory);
+
+            if (attempt < CleanupAttempts - 1)
+            {
+                await Task.Delay(CleanupRetryDelay, CancellationToken.None);
+            }
+        }
+    }
+
+    private static void TryClearReadOnlyAttributes(string directory)
     {
         try
         {
-            if (Directory.Exists(directory))
+            foreach (var filePath in Directory.EnumerateFiles(
+                         directory,
+                         "*",
+                         SearchOption.AllDirectories))
             {
-                Directory.Delete(directory, recursive: true);
+                var attributes = File.GetAttributes(filePath);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(
+                        filePath,
+                        attributes & ~FileAttributes.ReadOnly);
+                }
             }
         }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception)
         {
         }
     }
@@ -287,7 +416,7 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
 
     private static int GetMaxPages(StructuredFinancialMetricsPdfExtractionOptions options)
     {
-        return Math.Max(1, options.MaxPages);
+        return options.MaxPages;
     }
 
     private static TimeSpan GetTimeout(
@@ -312,6 +441,8 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
     private sealed record SearchablePdfMergeResponse(
         bool Succeeded,
         string? FailureReason);
+
+    private sealed class ResourceLimitExceededException : Exception;
 }
 
 internal interface ISearchablePdfMerger
