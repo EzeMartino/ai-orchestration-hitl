@@ -25,11 +25,14 @@ public sealed class PythonAgentTestFixture : IDisposable
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        var pythonHome = GetPythonHome();
 
         services
             .WithPython()
-            .WithHome(GetPythonHome())
-            .FromRedistributable();
+            .WithHome(pythonHome)
+            .FromRedistributable()
+            .WithVirtualEnvironment(Path.Combine(pythonHome, ".venv"))
+            .WithPipInstaller(Path.Combine(pythonHome, "requirements.txt"));
 
         services.AddSingleton<Orchestration.Application.FinancialAnalysis.Thresholds.IFinancialRiskThresholdProfileProvider, Orchestration.Application.FinancialAnalysis.Thresholds.InMemoryFinancialRiskThresholdProfileProvider>();
         services.AddScoped<CSnakesDataAgent>();

@@ -112,10 +112,15 @@ if (string.IsNullOrWhiteSpace(pythonHome) || !Directory.Exists(pythonHome))
         $"Python:Home configuration is missing or points to a directory that does not exist. Resolved value: '{pythonHome}'.");
 }
 
+var pythonVirtualEnvironment = Path.Combine(pythonHome, ".venv");
+var pythonRequirements = Path.Combine(pythonHome, "requirements.txt");
+
 builder.Services
     .WithPython()
     .WithHome(pythonHome)
-    .FromRedistributable();
+    .FromRedistributable()
+    .WithVirtualEnvironment(pythonVirtualEnvironment)
+    .WithPipInstaller(pythonRequirements);
 
 // Legal agent and regulatory knowledge source configuration
 builder.Services.Configure<CnvRegulationMcpOptions>(
