@@ -26,13 +26,23 @@ public sealed class PythonAgentTestFixture : IDisposable
         var services = new ServiceCollection();
         services.AddLogging();
         var pythonHome = GetPythonHome();
+        var pythonLockFile = Path.Combine(pythonHome, "requirements.lock");
+
+        if (!File.Exists(pythonLockFile))
+        {
+            throw new FileNotFoundException(
+                "Python dependency lock file was not found. "
+                + "Generate requirements.lock from requirements.txt before running Python-backed tests.",
+                pythonLockFile
+            );
+        }
 
         services
             .WithPython()
             .WithHome(pythonHome)
             .FromRedistributable()
             .WithVirtualEnvironment(Path.Combine(pythonHome, ".venv"))
-            .WithPipInstaller(Path.Combine(pythonHome, "requirements.txt"));
+            .WithPipInstaller(pythonLockFile);
 
         services.AddSingleton<Orchestration.Application.FinancialAnalysis.Thresholds.IFinancialRiskThresholdProfileProvider, Orchestration.Application.FinancialAnalysis.Thresholds.InMemoryFinancialRiskThresholdProfileProvider>();
         services.AddScoped<CSnakesDataAgent>();

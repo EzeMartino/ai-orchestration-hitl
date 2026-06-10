@@ -102,6 +102,7 @@ test-results/
 # Python generated files
 __pycache__/
 **/__pycache__/
+**/.venv/
 *.py[cod]
 
 # Local agent tooling

@@ -113,14 +113,21 @@ if (string.IsNullOrWhiteSpace(pythonHome) || !Directory.Exists(pythonHome))
 }
 
 var pythonVirtualEnvironment = Path.Combine(pythonHome, ".venv");
-var pythonRequirements = Path.Combine(pythonHome, "requirements.txt");
+var pythonLockFile = Path.Combine(pythonHome, "requirements.lock");
+
+if (!File.Exists(pythonLockFile))
+{
+    throw new InvalidOperationException(
+        $"Python dependency lock file was not found at '{pythonLockFile}'. "
+        + "Generate requirements.lock from requirements.txt before starting the API.");
+}
 
 builder.Services
     .WithPython()
     .WithHome(pythonHome)
     .FromRedistributable()
     .WithVirtualEnvironment(pythonVirtualEnvironment)
-    .WithPipInstaller(pythonRequirements);
+    .WithPipInstaller(pythonLockFile);
 
 // Legal agent and regulatory knowledge source configuration
 builder.Services.Configure<CnvRegulationMcpOptions>(
