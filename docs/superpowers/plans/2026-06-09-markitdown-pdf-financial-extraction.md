@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing `StructuredFinancialMetricsPdfExtractor` as the first strategy. Add a higher-level PDF ingestion orchestrator that evaluates extraction completeness, invokes local searchable-PDF OCR and MarkItDown when needed, asks a tool-free Semantic Kernel agent for strict field candidates, reconciles candidates deterministically, and either persists approved metrics through `StructuredFinancialMetricsSessionService` or creates a separate review draft. JSON/CSV paths remain unchanged.
 
-**Tech Stack:** .NET 10, ASP.NET Core controllers, EF Core/PostgreSQL JSONB, Semantic Kernel 1.75, OpenAI chat completion, CSnakes 1.2.1, Python, `markitdown[pdf]==0.1.6`, `pypdf==6.6.0`, Poppler, Tesseract, React 19, TypeScript 6, Vite 8, xUnit/FluentAssertions, Node test runner.
+**Tech Stack:** .NET 10, ASP.NET Core controllers, EF Core/PostgreSQL JSONB, Semantic Kernel 1.75, OpenAI chat completion, CSnakes 1.2.1, Python, `markitdown[pdf]==0.1.6`, `pypdf==6.13.1`, Poppler, Tesseract, React 19, TypeScript 6, Vite 8, xUnit/FluentAssertions, Node test runner.
 
 ---
 
@@ -169,7 +169,7 @@ Create `python-agents/data_agent/requirements.txt`:
 
 ```text
 markitdown[pdf]==0.1.6
-pypdf==6.6.0
+pypdf==6.13.1
 ```
 
 - [ ] **Step 4: Implement the MarkItDown wrapper**
