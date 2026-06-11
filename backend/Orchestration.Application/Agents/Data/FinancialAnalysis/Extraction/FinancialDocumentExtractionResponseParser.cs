@@ -175,6 +175,7 @@ public sealed class FinancialDocumentExtractionResponseParser
         candidate = null;
 
         return !properties.TryGetValue(fieldName, out var element) ||
+            element.ValueKind == JsonValueKind.Null ||
             TryReadMetadataCandidate(
                 fieldName,
                 element,

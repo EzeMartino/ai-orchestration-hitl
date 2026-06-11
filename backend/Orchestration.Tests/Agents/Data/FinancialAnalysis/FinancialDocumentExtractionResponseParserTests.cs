@@ -127,6 +127,39 @@ public sealed class FinancialDocumentExtractionResponseParserTests
     }
 
     [Fact]
+    public void Parse_Should_accept_metrics_when_all_metadata_fields_are_explicit_null()
+    {
+        var json = Mutate(root =>
+        {
+            Document(root)["company"] = null;
+            Document(root)["currency"] = null;
+            Document(root)["unit"] = null;
+        });
+
+        var result = Parse(json);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company.Should().BeNull();
+        result.Result.Currency.Should().BeNull();
+        result.Result.Unit.Should().BeNull();
+        result.Result.Metrics.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Parse_Should_reject_fully_empty_result_with_explicit_null_metadata()
+    {
+        var json = Mutate(root =>
+        {
+            Document(root)["company"] = null;
+            Document(root)["currency"] = null;
+            Document(root)["unit"] = null;
+            root["metrics"] = new JsonArray();
+        });
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    [Fact]
     public void Parse_Should_accept_null_metric_currency_and_unit()
     {
         var json = Mutate(root =>
