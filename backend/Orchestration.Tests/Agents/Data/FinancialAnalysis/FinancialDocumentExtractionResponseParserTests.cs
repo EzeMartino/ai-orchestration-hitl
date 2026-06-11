@@ -7,6 +7,7 @@ namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 public sealed class FinancialDocumentExtractionResponseParserTests
 {
     private const int MaxEvidenceExcerptCharacters = 50;
+    private const int MaxSourcePage = 100;
 
     private readonly FinancialDocumentExtractionResponseParser _parser = new();
 
@@ -32,8 +33,8 @@ public sealed class FinancialDocumentExtractionResponseParserTests
                 InferenceExplanation = (string?)null
             },
             options => options.ExcludingMissingMembers());
-        result.Result.Currency.FieldName.Should().Be("currency");
-        result.Result.Unit.FieldName.Should().Be("unit");
+        result.Result.Currency!.FieldName.Should().Be("currency");
+        result.Result.Unit!.FieldName.Should().Be("unit");
         result.Result.Metrics.Should().ContainSingle();
 
         var metric = result.Result.Metrics.Single();
@@ -91,10 +92,371 @@ public sealed class FinancialDocumentExtractionResponseParserTests
         var result = Parse(json);
 
         result.Succeeded.Should().BeTrue();
-        result.Result!.Company.ReviewState.Should()
+        result.Result!.Company!.ReviewState.Should()
             .Be(FinancialMetricCandidateReviewStates.Inferred);
         result.Result.Metrics.Single().ReviewState.Should()
             .Be(FinancialMetricCandidateReviewStates.Inferred);
+    }
+
+    [Fact]
+    public void Parse_Should_accept_metadata_only_result()
+    {
+        var json = Mutate(root => root["metrics"] = new JsonArray());
+
+        var result = Parse(json);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company.Should().NotBeNull();
+        result.Result.Currency.Should().NotBeNull();
+        result.Result.Unit.Should().NotBeNull();
+        result.Result.Metrics.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Parse_Should_accept_metrics_only_result_with_empty_document()
+    {
+        var json = Mutate(root => root["document"] = new JsonObject());
+
+        var result = Parse(json);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company.Should().BeNull();
+        result.Result.Currency.Should().BeNull();
+        result.Result.Unit.Should().BeNull();
+        result.Result.Metrics.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Parse_Should_accept_null_metric_currency_and_unit()
+    {
+        var json = Mutate(root =>
+        {
+            Metric(root)["currency"] = null;
+            Metric(root)["unit"] = null;
+        });
+
+        var result = Parse(json);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Single().Currency.Should().BeNull();
+        result.Result.Metrics.Single().Unit.Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractionRequest_Should_carry_max_source_page()
+    {
+        var request = new FinancialDocumentExtractionRequest(
+            Markdown: "# Financial report",
+            MaxEvidenceExcerptCharacters: 50,
+            MaxMarkdownChunks: 12,
+            MaxSourcePage: 250);
+
+        request.MaxSourcePage.Should().Be(250);
+    }
+
+    [Fact]
+    public void Parse_Should_accept_source_page_at_upper_bound()
+    {
+        var json = Mutate(root =>
+        {
+            Company(root)["sourcePage"] = MaxSourcePage;
+            Currency(root)["sourcePage"] = MaxSourcePage;
+            Unit(root)["sourcePage"] = MaxSourcePage;
+            Metric(root)["sourcePage"] = MaxSourcePage;
+        });
+
+        Parse(json).Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_Should_accept_null_source_pages()
+    {
+        var json = Mutate(root =>
+        {
+            Company(root)["sourcePage"] = null;
+            Currency(root)["sourcePage"] = null;
+            Unit(root)["sourcePage"] = null;
+            Metric(root)["sourcePage"] = null;
+        });
+
+        Parse(json).Succeeded.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("company")]
+    [InlineData("metric")]
+    public void Parse_Should_reject_source_page_above_upper_bound(string target)
+    {
+        var json = Mutate(root =>
+            Candidate(root, target)["sourcePage"] = MaxSourcePage + 1);
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Parse_Should_reject_invalid_max_source_page(int maxSourcePage)
+    {
+        AssertSchemaFailure(_parser.Parse(
+            CreateValidJson(),
+            MaxEvidenceExcerptCharacters,
+            maxSourcePage));
+    }
+
+    [Fact]
+    public void Parser_Should_expose_resource_limits()
+    {
+        FinancialDocumentExtractionResponseParser.MaxResponseCharacters.Should()
+            .Be(1_000_000);
+        FinancialDocumentExtractionResponseParser.MaxMetricCandidates.Should().Be(500);
+        FinancialDocumentExtractionResponseParser.MaxJsonDepth.Should().Be(8);
+    }
+
+    [Fact]
+    public void Parse_Should_accept_response_at_character_limit()
+    {
+        var content = CreateValidJson().PadRight(
+            FinancialDocumentExtractionResponseParser.MaxResponseCharacters);
+
+        Parse(content).Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_Should_reject_response_over_character_limit()
+    {
+        var content = CreateValidJson().PadRight(
+            FinancialDocumentExtractionResponseParser.MaxResponseCharacters + 1);
+
+        AssertSchemaFailure(Parse(content));
+    }
+
+    [Fact]
+    public void Parse_Should_accept_maximum_metric_candidate_count()
+    {
+        var result = Parse(CreateJsonWithMetricCount(
+            FinancialDocumentExtractionResponseParser.MaxMetricCandidates));
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().HaveCount(500);
+    }
+
+    [Fact]
+    public void Parse_Should_reject_metric_candidate_count_over_limit()
+    {
+        var result = Parse(CreateJsonWithMetricCount(
+            FinancialDocumentExtractionResponseParser.MaxMetricCandidates + 1));
+
+        AssertSchemaFailure(result);
+    }
+
+    [Fact]
+    public void Parse_Should_reject_json_deeper_than_maximum_depth()
+    {
+        var content = """
+{
+  "document": {
+    "company": {
+      "value": {"a":{"b":{"c":{"d":{"e":{"f":"Example Energy"}}}}}},
+      "sourceKind": "reported",
+      "confidence": 0.98,
+      "sourcePage": 1,
+      "evidence": "Example Energy Annual Report"
+    }
+  },
+  "metrics": []
+}
+""";
+
+        AssertSchemaFailure(Parse(content));
+    }
+
+    [Fact]
+    public void Parse_Should_accept_decoded_strings_at_configured_bounds()
+    {
+        var json = Mutate(root =>
+        {
+            Company(root)["value"] = new string('c', 500);
+            Metric(root)["currency"] = new string('c', 32);
+            Metric(root)["unit"] = new string('u', 128);
+            Metric(root)["sourceKind"] = "inferred";
+            Metric(root)["evidence"] = "";
+            Metric(root)["inferenceExplanation"] =
+                new string('i', MaxEvidenceExcerptCharacters);
+        });
+
+        Parse(json).Succeeded.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("currency")]
+    [InlineData("unit")]
+    [InlineData("inference")]
+    public void Parse_Should_reject_decoded_strings_over_configured_bounds(string target)
+    {
+        var json = Mutate(root =>
+        {
+            switch (target)
+            {
+                case "metadata":
+                    Company(root)["value"] = new string('c', 501);
+                    break;
+                case "currency":
+                    Metric(root)["currency"] = new string('c', 33);
+                    break;
+                case "unit":
+                    Metric(root)["unit"] = new string('u', 129);
+                    break;
+                case "inference":
+                    Metric(root)["sourceKind"] = "inferred";
+                    Metric(root)["evidence"] = "";
+                    Metric(root)["inferenceExplanation"] =
+                        new string('i', MaxEvidenceExcerptCharacters + 1);
+                    break;
+            }
+        });
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    [Fact]
+    public void Parse_Should_apply_evidence_limit_after_trimming()
+    {
+        var json = Mutate(root =>
+        {
+            Company(root)["evidence"] =
+                $" \t{new string('e', MaxEvidenceExcerptCharacters)}\r\n ";
+            Currency(root)["evidence"] = "currency";
+            Unit(root)["evidence"] = "unit";
+            Metric(root)["evidence"] =
+                $" \t{new string('e', MaxEvidenceExcerptCharacters)}\r\n ";
+        });
+
+        var result = Parse(json);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company!.Evidence.Should()
+            .HaveLength(MaxEvidenceExcerptCharacters);
+        result.Result.Metrics.Single().Evidence.Should()
+            .HaveLength(MaxEvidenceExcerptCharacters);
+    }
+
+    [Theory]
+    [InlineData("1e1000")]
+    [InlineData("-1e1000")]
+    public void Parse_Should_reject_metric_values_outside_decimal_range(string value)
+    {
+        var json = CreateValidJson().Replace(
+            "\"value\": 100.0",
+            $"\"value\": {value}",
+            StringComparison.Ordinal);
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    public static IEnumerable<object[]> UnsafeDecodedStringCases()
+    {
+        var targets = new[]
+        {
+            "metadata",
+            "name",
+            "period",
+            "currency",
+            "unit",
+            "evidence",
+            "inference",
+            "sourceKind"
+        };
+
+        foreach (var target in targets)
+        {
+            yield return [target, 0];
+            yield return [target, 1];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsafeDecodedStringCases))]
+    public void Parse_Should_reject_unsafe_decoded_control_characters(
+        string target,
+        int characterCode)
+    {
+        var unsafeCharacter = ((char)characterCode).ToString();
+        var json = Mutate(root =>
+        {
+            switch (target)
+            {
+                case "metadata":
+                    Company(root)["value"] = $"Example{unsafeCharacter} Energy";
+                    break;
+                case "name":
+                    Metric(root)["name"] = $"revenue{unsafeCharacter}";
+                    break;
+                case "period":
+                    Metric(root)["period"] = $"2024A{unsafeCharacter}";
+                    break;
+                case "currency":
+                    Metric(root)["currency"] = $"USD{unsafeCharacter}";
+                    break;
+                case "unit":
+                    Metric(root)["unit"] = $"USD{unsafeCharacter}_million";
+                    break;
+                case "evidence":
+                    Metric(root)["evidence"] = $"Revenue{unsafeCharacter}100";
+                    break;
+                case "inference":
+                    Metric(root)["sourceKind"] = "inferred";
+                    Metric(root)["evidence"] = "";
+                    Metric(root)["inferenceExplanation"] =
+                        $"Derived{unsafeCharacter}from context";
+                    break;
+                case "sourceKind":
+                    Metric(root)["sourceKind"] = $"reported{unsafeCharacter}";
+                    break;
+            }
+        });
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    [Fact]
+    public void Parse_Should_allow_cr_lf_and_tab_in_free_text()
+    {
+        var json = Mutate(root =>
+        {
+            Company(root)["value"] = "Example\tEnergy";
+            Company(root)["evidence"] = "Example\r\n\tEnergy";
+            Metric(root)["sourceKind"] = "inferred";
+            Metric(root)["currency"] = "U\tSD";
+            Metric(root)["unit"] = "USD\r\nmillion";
+            Metric(root)["evidence"] = "";
+            Metric(root)["inferenceExplanation"] = "Derived\r\n\tfrom context";
+        });
+
+        Parse(json).Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_Should_reject_unpaired_utf16_surrogate_when_exposed()
+    {
+        var json = CreateValidJson().Replace(
+            "\"currency\": \"USD\",",
+            "\"currency\": \"\\uD800\",",
+            StringComparison.Ordinal);
+
+        AssertSchemaFailure(Parse(json));
+    }
+
+    [Fact]
+    public void Parse_Should_reject_unpaired_utf16_surrogate_in_property_name()
+    {
+        var json = CreateValidJson().Replace(
+            "\"document\": {",
+            "\"\\uD800\": null,\n  \"document\": {",
+            StringComparison.Ordinal);
+
+        AssertSchemaFailure(Parse(json));
     }
 
     [Fact]
@@ -147,7 +509,7 @@ public sealed class FinancialDocumentExtractionResponseParserTests
             Metric(root)["evidence"] = "x";
         });
 
-        _parser.Parse(json, 0).Succeeded.Should().BeTrue();
+        _parser.Parse(json, 0, MaxSourcePage).Succeeded.Should().BeTrue();
 
         var tooLong = Mutate(root =>
         {
@@ -157,7 +519,7 @@ public sealed class FinancialDocumentExtractionResponseParserTests
             Metric(root)["evidence"] = "xx";
         });
 
-        AssertSchemaFailure(_parser.Parse(tooLong, 0));
+        AssertSchemaFailure(_parser.Parse(tooLong, 0, MaxSourcePage));
     }
 
     [Theory]
@@ -292,17 +654,6 @@ public sealed class FinancialDocumentExtractionResponseParserTests
     public void Parse_Should_reject_missing_required_root_fields(string propertyName)
     {
         var json = Mutate(root => root.Remove(propertyName));
-
-        AssertSchemaFailure(Parse(json));
-    }
-
-    [Theory]
-    [InlineData("company")]
-    [InlineData("currency")]
-    [InlineData("unit")]
-    public void Parse_Should_reject_missing_required_document_fields(string propertyName)
-    {
-        var json = Mutate(root => Document(root).Remove(propertyName));
 
         AssertSchemaFailure(Parse(json));
     }
@@ -484,9 +835,13 @@ public sealed class FinancialDocumentExtractionResponseParserTests
     }
 
     [Fact]
-    public void Parse_Should_reject_empty_metrics_list()
+    public void Parse_Should_reject_fully_empty_result()
     {
-        var json = Mutate(root => root["metrics"] = new JsonArray());
+        var json = Mutate(root =>
+        {
+            root["document"] = new JsonObject();
+            root["metrics"] = new JsonArray();
+        });
 
         AssertSchemaFailure(Parse(json));
     }
@@ -504,7 +859,10 @@ public sealed class FinancialDocumentExtractionResponseParserTests
 
     private FinancialDocumentExtractionParseResult Parse(string content)
     {
-        return _parser.Parse(content, MaxEvidenceExcerptCharacters);
+        return _parser.Parse(
+            content,
+            MaxEvidenceExcerptCharacters,
+            MaxSourcePage);
     }
 
     private static void AssertSchemaFailure(FinancialDocumentExtractionParseResult result)
@@ -556,6 +914,21 @@ public sealed class FinancialDocumentExtractionResponseParserTests
     {
         var root = JsonNode.Parse(CreateValidJson())!.AsObject();
         mutation(root);
+        return root.ToJsonString();
+    }
+
+    private static string CreateJsonWithMetricCount(int count)
+    {
+        var root = JsonNode.Parse(CreateValidJson())!.AsObject();
+        var template = Metric(root).DeepClone();
+        var metrics = new JsonArray();
+
+        for (var index = 0; index < count; index++)
+        {
+            metrics.Add(template.DeepClone());
+        }
+
+        root["metrics"] = metrics;
         return root.ToJsonString();
     }
 

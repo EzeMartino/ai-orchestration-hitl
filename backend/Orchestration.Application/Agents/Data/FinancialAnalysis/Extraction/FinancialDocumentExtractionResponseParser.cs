@@ -9,6 +9,15 @@ public sealed class FinancialDocumentExtractionResponseParser
 {
     public const string SchemaValidationFailed = "schema_validation_failed";
     public const string ExtractionStrategy = "semantic_markdown_agent";
+    public const int MaxResponseCharacters = 1_000_000;
+    public const int MaxMetricCandidates = 500;
+    public const int MaxJsonDepth = 8;
+
+    private const int MaxMetadataValueCharacters = 500;
+    private const int MaxMetricNameCharacters = 128;
+    private const int MaxPeriodCharacters = 16;
+    private const int MaxCurrencyCharacters = 32;
+    private const int MaxUnitCharacters = 128;
 
     private static readonly Regex PeriodRegex = new(
         @"^(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?$",
@@ -25,6 +34,8 @@ public sealed class FinancialDocumentExtractionResponseParser
         "company",
         "currency",
         "unit");
+
+    private static readonly IReadOnlySet<string> NoRequiredProperties = Properties();
 
     private static readonly IReadOnlySet<string> MetadataProperties = Properties(
         "value",
@@ -55,9 +66,13 @@ public sealed class FinancialDocumentExtractionResponseParser
 
     public FinancialDocumentExtractionParseResult Parse(
         string? content,
-        int maxEvidenceExcerptCharacters)
+        int maxEvidenceExcerptCharacters,
+        int maxSourcePage)
     {
-        if (string.IsNullOrWhiteSpace(content))
+        if (content is null ||
+            content.Length > MaxResponseCharacters ||
+            string.IsNullOrWhiteSpace(content) ||
+            maxSourcePage < 1)
         {
             return Fail();
         }
@@ -76,7 +91,8 @@ public sealed class FinancialDocumentExtractionResponseParser
                 new JsonDocumentOptions
                 {
                     AllowTrailingCommas = false,
-                    CommentHandling = JsonCommentHandling.Disallow
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = MaxJsonDepth
                 });
 
             if (!TryReadObject(
@@ -87,7 +103,7 @@ public sealed class FinancialDocumentExtractionResponseParser
                 !TryReadObject(
                     root["document"],
                     DocumentProperties,
-                    DocumentProperties,
+                    NoRequiredProperties,
                     out var documentProperties))
             {
                 return Fail();
@@ -95,25 +111,37 @@ public sealed class FinancialDocumentExtractionResponseParser
 
             var maxEvidenceLength = Math.Max(1, maxEvidenceExcerptCharacters);
 
-            if (!TryReadMetadataCandidate(
+            if (!TryReadOptionalMetadataCandidate(
                     "company",
-                    documentProperties["company"],
+                    documentProperties,
                     maxEvidenceLength,
+                    maxSourcePage,
                     out var company) ||
-                !TryReadMetadataCandidate(
+                !TryReadOptionalMetadataCandidate(
                     "currency",
-                    documentProperties["currency"],
+                    documentProperties,
                     maxEvidenceLength,
+                    maxSourcePage,
                     out var currency) ||
-                !TryReadMetadataCandidate(
+                !TryReadOptionalMetadataCandidate(
                     "unit",
-                    documentProperties["unit"],
+                    documentProperties,
                     maxEvidenceLength,
+                    maxSourcePage,
                     out var unit) ||
                 !TryReadMetrics(
                     root["metrics"],
                     maxEvidenceLength,
+                    maxSourcePage,
                     out var metrics))
+            {
+                return Fail();
+            }
+
+            if (company is null &&
+                currency is null &&
+                unit is null &&
+                metrics.Count == 0)
             {
                 return Fail();
             }
@@ -131,12 +159,35 @@ public sealed class FinancialDocumentExtractionResponseParser
         {
             return Fail();
         }
+        catch (InvalidOperationException)
+        {
+            return Fail();
+        }
+    }
+
+    private static bool TryReadOptionalMetadataCandidate(
+        string fieldName,
+        IReadOnlyDictionary<string, JsonElement> properties,
+        int maxEvidenceLength,
+        int maxSourcePage,
+        out FinancialDocumentMetadataCandidate? candidate)
+    {
+        candidate = null;
+
+        return !properties.TryGetValue(fieldName, out var element) ||
+            TryReadMetadataCandidate(
+                fieldName,
+                element,
+                maxEvidenceLength,
+                maxSourcePage,
+                out candidate);
     }
 
     private static bool TryReadMetadataCandidate(
         string fieldName,
         JsonElement element,
         int maxEvidenceLength,
+        int maxSourcePage,
         out FinancialDocumentMetadataCandidate candidate)
     {
         candidate = null!;
@@ -146,10 +197,16 @@ public sealed class FinancialDocumentExtractionResponseParser
                 MetadataProperties,
                 RequiredMetadataProperties,
                 out var properties) ||
-            !TryReadNonblankString(properties["value"], out var value) ||
+            !TryReadBoundedNonblankString(
+                properties["value"],
+                MaxMetadataValueCharacters,
+                out var value) ||
             !TryReadSourceKind(properties["sourceKind"], out var sourceKind) ||
             !TryReadConfidence(properties["confidence"], out var confidence) ||
-            !TryReadSourcePage(properties["sourcePage"], out var sourcePage) ||
+            !TryReadSourcePage(
+                properties["sourcePage"],
+                maxSourcePage,
+                out var sourcePage) ||
             !TryReadEvidence(
                 properties["evidence"],
                 sourceKind,
@@ -158,6 +215,7 @@ public sealed class FinancialDocumentExtractionResponseParser
             !TryReadOptionalExplanation(
                 properties,
                 sourceKind,
+                maxEvidenceLength,
                 out var inferenceExplanation))
         {
             return false;
@@ -181,23 +239,31 @@ public sealed class FinancialDocumentExtractionResponseParser
     private static bool TryReadMetrics(
         JsonElement element,
         int maxEvidenceLength,
+        int maxSourcePage,
         out IReadOnlyList<FinancialMetricCandidate> metrics)
     {
         metrics = [];
 
-        if (element.ValueKind != JsonValueKind.Array ||
-            element.GetArrayLength() == 0)
+        if (element.ValueKind != JsonValueKind.Array)
         {
             return false;
         }
 
-        var parsed = new List<FinancialMetricCandidate>();
+        var count = element.GetArrayLength();
+
+        if (count > MaxMetricCandidates)
+        {
+            return false;
+        }
+
+        var parsed = new List<FinancialMetricCandidate>(count);
 
         foreach (var metricElement in element.EnumerateArray())
         {
             if (!TryReadMetricCandidate(
                     metricElement,
                     maxEvidenceLength,
+                    maxSourcePage,
                     out var metric))
             {
                 return false;
@@ -213,6 +279,7 @@ public sealed class FinancialDocumentExtractionResponseParser
     private static bool TryReadMetricCandidate(
         JsonElement element,
         int maxEvidenceLength,
+        int maxSourcePage,
         out FinancialMetricCandidate candidate)
     {
         candidate = null!;
@@ -222,24 +289,40 @@ public sealed class FinancialDocumentExtractionResponseParser
                 MetricProperties,
                 MetricProperties,
                 out var properties) ||
-            !TryReadNonblankString(properties["name"], out var suppliedName) ||
+            !TryReadBoundedNonblankString(
+                properties["name"],
+                MaxMetricNameCharacters,
+                out var suppliedName) ||
             !TryNormalizeMetricName(suppliedName, out var name) ||
-            !TryReadNonblankString(properties["period"], out var suppliedPeriod) ||
+            !TryReadBoundedNonblankString(
+                properties["period"],
+                MaxPeriodCharacters,
+                out var suppliedPeriod) ||
             !TryNormalizePeriod(suppliedPeriod, out var period) ||
             properties["value"].ValueKind != JsonValueKind.Number ||
             !properties["value"].TryGetDecimal(out var value) ||
-            !TryReadNonblankString(properties["currency"], out var currency) ||
-            !TryReadNonblankString(properties["unit"], out var unit) ||
+            !TryReadNullableBoundedNonblankString(
+                properties["currency"],
+                MaxCurrencyCharacters,
+                out var currency) ||
+            !TryReadNullableBoundedNonblankString(
+                properties["unit"],
+                MaxUnitCharacters,
+                out var unit) ||
             !TryReadSourceKind(properties["sourceKind"], out var sourceKind) ||
             !TryReadConfidence(properties["confidence"], out var confidence) ||
-            !TryReadSourcePage(properties["sourcePage"], out var sourcePage) ||
+            !TryReadSourcePage(
+                properties["sourcePage"],
+                maxSourcePage,
+                out var sourcePage) ||
             !TryReadEvidence(
                 properties["evidence"],
                 sourceKind,
                 maxEvidenceLength,
                 out var evidence) ||
-            !TryReadNullableString(
+            !TryReadNullableBoundedString(
                 properties["inferenceExplanation"],
+                maxEvidenceLength,
                 out var inferenceExplanation) ||
             !HasRequiredInferenceExplanation(sourceKind, inferenceExplanation))
         {
@@ -262,6 +345,17 @@ public sealed class FinancialDocumentExtractionResponseParser
             InferenceExplanation: inferenceExplanation);
 
         return true;
+    }
+
+    private static bool TryReadNullableBoundedNonblankString(
+        JsonElement element,
+        int maxLength,
+        out string? value)
+    {
+        value = null;
+
+        return element.ValueKind == JsonValueKind.Null ||
+            TryReadBoundedNonblankString(element, maxLength, out value);
     }
 
     private static bool TryReadObject(
@@ -290,18 +384,17 @@ public sealed class FinancialDocumentExtractionResponseParser
         return requiredProperties.All(parsed.ContainsKey);
     }
 
-    private static bool TryReadNonblankString(
+    private static bool TryReadBoundedNonblankString(
         JsonElement element,
+        int maxLength,
         out string value)
     {
         value = string.Empty;
 
-        if (element.ValueKind != JsonValueKind.String)
+        if (!TryReadSafeString(element, out var raw))
         {
             return false;
         }
-
-        var raw = element.GetString();
 
         if (string.IsNullOrWhiteSpace(raw))
         {
@@ -309,11 +402,12 @@ public sealed class FinancialDocumentExtractionResponseParser
         }
 
         value = raw.Trim();
-        return true;
+        return value.Length <= maxLength;
     }
 
-    private static bool TryReadNullableString(
+    private static bool TryReadNullableBoundedString(
         JsonElement element,
+        int maxLength,
         out string? value)
     {
         value = null;
@@ -323,13 +417,13 @@ public sealed class FinancialDocumentExtractionResponseParser
             return true;
         }
 
-        if (element.ValueKind != JsonValueKind.String)
+        if (!TryReadSafeString(element, out var raw))
         {
             return false;
         }
 
-        value = element.GetString()?.Trim();
-        return true;
+        value = raw.Trim();
+        return value.Length <= maxLength;
     }
 
     private static bool TryReadSourceKind(
@@ -338,12 +432,10 @@ public sealed class FinancialDocumentExtractionResponseParser
     {
         sourceKind = string.Empty;
 
-        if (element.ValueKind != JsonValueKind.String)
+        if (!TryReadSafeString(element, out sourceKind))
         {
             return false;
         }
-
-        sourceKind = element.GetString() ?? string.Empty;
 
         return sourceKind is
             FinancialMetricCandidateSourceKinds.Reported or
@@ -363,6 +455,7 @@ public sealed class FinancialDocumentExtractionResponseParser
 
     private static bool TryReadSourcePage(
         JsonElement element,
+        int maxSourcePage,
         out int? sourcePage)
     {
         sourcePage = null;
@@ -374,7 +467,8 @@ public sealed class FinancialDocumentExtractionResponseParser
 
         if (element.ValueKind != JsonValueKind.Number ||
             !element.TryGetInt32(out var parsed) ||
-            parsed < 1)
+            parsed < 1 ||
+            parsed > maxSourcePage)
         {
             return false;
         }
@@ -391,38 +485,94 @@ public sealed class FinancialDocumentExtractionResponseParser
     {
         evidence = string.Empty;
 
-        if (element.ValueKind != JsonValueKind.String)
+        if (!TryReadSafeString(element, out var raw))
         {
             return false;
         }
 
-        var raw = element.GetString() ?? string.Empty;
+        var trimmed = raw.Trim();
 
-        if (raw.Length > maxEvidenceLength ||
+        if (trimmed.Length > maxEvidenceLength ||
             sourceKind == FinancialMetricCandidateSourceKinds.Reported &&
-            string.IsNullOrWhiteSpace(raw))
+            string.IsNullOrWhiteSpace(trimmed))
         {
             return false;
         }
 
-        evidence = raw.Trim();
+        evidence = trimmed;
         return true;
     }
 
     private static bool TryReadOptionalExplanation(
         IReadOnlyDictionary<string, JsonElement> properties,
         string sourceKind,
+        int maxExplanationLength,
         out string? inferenceExplanation)
     {
         inferenceExplanation = null;
 
         if (properties.TryGetValue("inferenceExplanation", out var element) &&
-            !TryReadNullableString(element, out inferenceExplanation))
+            !TryReadNullableBoundedString(
+                element,
+                maxExplanationLength,
+                out inferenceExplanation))
         {
             return false;
         }
 
         return HasRequiredInferenceExplanation(sourceKind, inferenceExplanation);
+    }
+
+    private static bool TryReadSafeString(
+        JsonElement element,
+        out string value)
+    {
+        value = string.Empty;
+
+        if (element.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = element.GetString() ?? string.Empty;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        return IsSafeDecodedText(value);
+    }
+
+    private static bool IsSafeDecodedText(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+
+            if (char.IsHighSurrogate(character))
+            {
+                if (index + 1 >= value.Length ||
+                    !char.IsLowSurrogate(value[index + 1]))
+                {
+                    return false;
+                }
+
+                index++;
+                continue;
+            }
+
+            if (char.IsLowSurrogate(character) ||
+                char.IsControl(character) &&
+                character is not ('\r' or '\n' or '\t'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool HasRequiredInferenceExplanation(

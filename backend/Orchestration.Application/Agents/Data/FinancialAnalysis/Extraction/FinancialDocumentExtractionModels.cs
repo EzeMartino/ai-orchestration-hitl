@@ -13,9 +13,9 @@ public sealed record FinancialDocumentMetadataCandidate(
     string? InferenceExplanation);
 
 public sealed record FinancialDocumentExtractionResult(
-    FinancialDocumentMetadataCandidate Company,
-    FinancialDocumentMetadataCandidate Currency,
-    FinancialDocumentMetadataCandidate Unit,
+    FinancialDocumentMetadataCandidate? Company,
+    FinancialDocumentMetadataCandidate? Currency,
+    FinancialDocumentMetadataCandidate? Unit,
     IReadOnlyList<FinancialMetricCandidate> Metrics);
 
 public sealed record FinancialDocumentExtractionParseResult(
@@ -26,4 +26,5 @@ public sealed record FinancialDocumentExtractionParseResult(
 public sealed record FinancialDocumentExtractionRequest(
     string Markdown,
     int MaxEvidenceExcerptCharacters,
-    int MaxMarkdownChunks);
+    int MaxMarkdownChunks,
+    int MaxSourcePage);
