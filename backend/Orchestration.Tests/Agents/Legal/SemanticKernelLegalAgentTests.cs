@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Shared;
@@ -36,12 +36,12 @@ public class SemanticKernelLegalAgentTests
             CancellationToken.None
         );
 
-        result.Engine.Should().Be("Semantic Kernel + Mock Regulatory Knowledge Source");
+        result.Engine.Should().Be("Semantic Kernel + Fuente regulatoria simulada");
         result.HasComplianceRisk.Should().BeTrue();
         result.RiskLevel.Should().Be("Medium");
         result.Evidence.Should().NotBeEmpty();
         result.Warnings.Should().Contain(
-            "Mock regulatory knowledge source. Do not use for real legal decisions."
+            "Fuente regulatoria simulada. No usar para decisiones legales reales."
         );
 
         result.Evidence

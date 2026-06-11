@@ -29,7 +29,7 @@ public class CnvRegulationStdioMcpClientTests
         var act = async () => await client.SearchAsync(request, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*args are missing*");
+            .WithMessage("*Faltan argumentos*");
 
         client.IsConnected.Should().BeFalse();
         client.ColdStartCount.Should().Be(0);
