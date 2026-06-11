@@ -21,6 +21,23 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
     private readonly FinancialMetricsExtractionCompletenessEvaluator _evaluator = new();
 
     [Fact]
+    public void FinancialMetricsExtractionOptions_Should_have_required_contract_defaults()
+    {
+        var options = new FinancialMetricsExtractionOptions();
+
+        FinancialMetricsExtractionOptions.SectionName.Should().Be("FinancialMetricsExtraction");
+        options.SemanticEnrichmentEnabled.Should().BeFalse();
+        options.Mode.Should().Be("ReviewOnly");
+        options.DeterministicCoverageThreshold.Should().Be(0.7m);
+        options.AutomaticAcceptanceConfidence.Should().Be(0.9m);
+        options.MaxMarkdownCharacters.Should().Be(200_000);
+        options.MaxMarkdownChunks.Should().Be(12);
+        options.ConversionTimeoutSeconds.Should().Be(60);
+        options.SemanticExtractionTimeoutSeconds.Should().Be(90);
+        options.MaxEvidenceExcerptCharacters.Should().Be(500);
+    }
+
+    [Fact]
     public void Evaluate_Should_require_fallback_when_currency_is_missing()
     {
         var result = CreateResult(currency: " ");
@@ -158,16 +175,42 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
         decision.ReasonCodes.Should().BeEmpty();
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Evaluate_Should_support_computed_ratio_input_alternatives(
-        bool useDirectNetDebt)
+    [Fact]
+    public void Evaluate_Should_require_ratio_inputs_when_only_total_debt_cash_and_ebitda_are_available()
     {
-        var canonicalMetrics = CanonicalBaseMetrics
-            .Where(name => !useDirectNetDebt || name is not ("cash" or "total_debt"))
-            .Select(name => Metric(name, "2024A"));
-        var metrics = canonicalMetrics
+        var metrics = CreateComputedRatioMetrics()
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
+        decision.ReasonCodes.Should().Equal("required_ratio_inputs_missing");
+    }
+
+    [Fact]
+    public void Evaluate_Should_support_net_debt_and_ebitda_for_net_debt_ratio()
+    {
+        var metrics = CreateComputedRatioMetrics()
+            .Where(metric => metric.Name is not ("cash" or "total_debt"))
+            .Concat(
+            [
+                Metric("net_debt", "2024A"),
+                Metric("debt_to_equity", "2024A")
+            ])
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeFalse();
+        decision.ReasonCodes.Should().BeEmpty();
+    }
+
+    private static IEnumerable<StructuredFinancialMetricInput> CreateComputedRatioMetrics()
+    {
+        return CanonicalBaseMetrics
+            .Select(name => Metric(name, "2024A"))
             .Concat(
             [
                 Metric("revenue", "2025E"),
@@ -177,21 +220,7 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
                 Metric("ebit", "2024A"),
                 Metric("interest_expense", "2024A"),
                 Metric("capex", "2024A")
-            ])
-            .Concat(useDirectNetDebt
-                ?
-                [
-                    Metric("net_debt", "2024A"),
-                    Metric("debt_to_equity", "2024A")
-                ]
-                : [])
-            .ToArray();
-        var result = CreateResult(metrics: metrics);
-
-        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
-
-        decision.RequiresSemanticFallback.Should().BeFalse();
-        decision.ReasonCodes.Should().BeEmpty();
+            ]);
     }
 
     private static StructuredFinancialMetricsPdfExtractionResult CreateResult(

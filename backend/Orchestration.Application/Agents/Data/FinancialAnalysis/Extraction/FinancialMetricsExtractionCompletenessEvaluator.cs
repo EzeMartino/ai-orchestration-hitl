@@ -34,12 +34,7 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluator
                 ["receivables", "current_liabilities"]
             ]),
         new("debt_to_equity", [["total_debt", "equity"]]),
-        new(
-            "net_debt_to_ebitda",
-            [
-                ["net_debt", "ebitda"],
-                ["total_debt", "cash", "ebitda"]
-            ]),
+        new("net_debt_to_ebitda", [["net_debt", "ebitda"]]),
         new("interest_coverage", [["ebit", "interest_expense"]]),
         new("fcf_margin", [["free_cash_flow", "revenue"]]),
         new("capex_to_revenue", [["capex", "revenue"]])
