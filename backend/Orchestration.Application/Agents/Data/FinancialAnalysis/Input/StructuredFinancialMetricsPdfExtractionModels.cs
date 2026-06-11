@@ -28,5 +28,6 @@ public sealed record StructuredFinancialMetricsPdfExtractionResult(
     StructuredFinancialMetricsInput? Input,
     IReadOnlyList<FinancialMetricsValidationIssue> Errors,
     IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
-    bool UsedOcr
+    bool UsedOcr,
+    bool NativeTextAvailable = false
 );
