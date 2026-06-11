@@ -16,6 +16,8 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         "path_outside_working_directory";
     private const string OutputReadFailure = "output_read_failed";
     private const string ResourceLimitFailure = "resource_limit_exceeded";
+    private const string WorkingDirectoryPrefix =
+        "ai-orchestration-hitl-searchable-pdf-ocr-";
     private const int CleanupAttempts = 3;
     private static readonly TimeSpan CleanupRetryDelay =
         TimeSpan.FromMilliseconds(50);
@@ -24,35 +26,35 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
 
     private readonly ILocalPdfToolRunner _runner;
     private readonly ISearchablePdfMerger _merger;
-    private readonly Func<string> _workingDirectoryFactory;
+    private readonly Func<string> _createdWorkingDirectoryFactory;
 
     public LocalSearchablePdfOcrService(IPythonEnvironment pythonEnvironment)
         : this(
             new LocalPdfToolRunner(),
             new CSnakesSearchablePdfMerger(pythonEnvironment),
-            CreateWorkingDirectoryPath)
+            CreateWorkingDirectory)
     {
     }
 
     internal LocalSearchablePdfOcrService(
         ILocalPdfToolRunner runner,
         ISearchablePdfMerger merger)
-        : this(runner, merger, CreateWorkingDirectoryPath)
+        : this(runner, merger, CreateWorkingDirectory)
     {
     }
 
     internal LocalSearchablePdfOcrService(
         ILocalPdfToolRunner runner,
         ISearchablePdfMerger merger,
-        Func<string> workingDirectoryFactory)
+        Func<string> createdWorkingDirectoryFactory)
     {
         ArgumentNullException.ThrowIfNull(runner);
         ArgumentNullException.ThrowIfNull(merger);
-        ArgumentNullException.ThrowIfNull(workingDirectoryFactory);
+        ArgumentNullException.ThrowIfNull(createdWorkingDirectoryFactory);
 
         _runner = runner;
         _merger = merger;
-        _workingDirectoryFactory = workingDirectoryFactory;
+        _createdWorkingDirectoryFactory = createdWorkingDirectoryFactory;
     }
 
     public async Task<SearchablePdfOcrResult> CreateSearchablePdfAsync(
@@ -69,12 +71,12 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             return Failure(ToolFailure);
         }
 
-        var workingDirectory = _workingDirectoryFactory();
-
-        Directory.CreateDirectory(workingDirectory);
+        string? workingDirectory = null;
 
         try
         {
+            workingDirectory = _createdWorkingDirectoryFactory();
+
             var inputPath = Path.Combine(workingDirectory, "input.pdf");
             try
             {
@@ -116,6 +118,7 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             EnsureWithinTemporaryLimit(workingDirectory, options);
 
             var outputPath = Path.Combine(workingDirectory, "searchable.pdf");
+            cancellationToken.ThrowIfCancellationRequested();
             var mergeResult = MergePages(
                 workingDirectory,
                 pagePaths,
@@ -166,7 +169,10 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         }
         finally
         {
-            await TryDeleteDirectoryAsync(workingDirectory);
+            if (workingDirectory is not null)
+            {
+                await TryDeleteDirectoryAsync(workingDirectory);
+            }
         }
     }
 
@@ -290,12 +296,9 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         };
     }
 
-    private static string CreateWorkingDirectoryPath()
+    private static string CreateWorkingDirectory()
     {
-        return Path.Combine(
-            Path.GetTempPath(),
-            "ai-orchestration-hitl-searchable-pdf-ocr",
-            Guid.NewGuid().ToString("N"));
+        return Directory.CreateTempSubdirectory(WorkingDirectoryPrefix).FullName;
     }
 
     private static void EnsureWithinTemporaryLimit(

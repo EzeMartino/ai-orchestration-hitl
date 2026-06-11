@@ -8,6 +8,8 @@ namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 public sealed class LocalSearchablePdfOcrServiceTests
 {
+    private const string WorkingDirectoryPrefix =
+        "ai-orchestration-hitl-searchable-pdf-ocr-";
     private static readonly byte[] SearchablePdfBytes = "%PDF-searchable"u8.ToArray();
 
     [Fact]
@@ -64,13 +66,17 @@ public sealed class LocalSearchablePdfOcrServiceTests
     [Fact]
     public async Task CreateSearchablePdfAsync_Should_reject_nonpositive_max_pages_without_tool_work()
     {
-        var workingDirectory = CreateTemporaryDirectoryPath();
+        var factoryCalled = false;
         var runner = new FakePdfToolRunner();
         var merger = new FakeSearchablePdfMerger();
         var service = new LocalSearchablePdfOcrService(
             runner,
             merger,
-            () => workingDirectory);
+            () =>
+            {
+                factoryCalled = true;
+                return CreateTemporaryDirectory();
+            });
 
         await using var input = new MemoryStream("%PDF-test"u8.ToArray());
         var result = await service.CreateSearchablePdfAsync(
@@ -82,19 +88,109 @@ public sealed class LocalSearchablePdfOcrServiceTests
         result.FailureReason.Should().Be("tool_failed");
         runner.Commands.Should().BeEmpty();
         merger.CallCount.Should().Be(0);
-        Directory.Exists(workingDirectory).Should().BeFalse();
+        factoryCalled.Should().BeFalse();
     }
 
     [Fact]
-    public async Task CreateSearchablePdfAsync_Should_limit_input_temporary_bytes_and_cleanup()
+    public async Task CreateSearchablePdfAsync_Should_return_safe_failure_when_working_directory_creation_fails()
     {
-        var workingDirectory = CreateTemporaryDirectoryPath();
         var runner = new FakePdfToolRunner();
         var merger = new FakeSearchablePdfMerger();
         var service = new LocalSearchablePdfOcrService(
             runner,
             merger,
-            () => workingDirectory);
+            () => throw new IOException(
+                @"Unable to create C:\sensitive\searchable-pdf-workspace"));
+
+        await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+        var result = await service.CreateSearchablePdfAsync(
+            input,
+            TestOptions(),
+            CancellationToken.None);
+
+        result.Should().BeEquivalentTo(new
+        {
+            Succeeded = false,
+            PdfBytes = Array.Empty<byte>(),
+            FailureReason = "tool_failed"
+        });
+        runner.Commands.Should().BeEmpty();
+        merger.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateSearchablePdfAsync_Should_create_unique_private_production_working_directories()
+    {
+        var workingDirectories = new List<string>();
+        var existedDuringRun = new List<bool>();
+        var unixModes = new List<UnixFileMode>();
+        var runner = new FakePdfToolRunner(
+            (_, arguments, _) =>
+            {
+                var workingDirectory = Path.GetDirectoryName(arguments[^2])!;
+                workingDirectories.Add(workingDirectory);
+                existedDuringRun.Add(Directory.Exists(workingDirectory));
+                if (!OperatingSystem.IsWindows())
+                {
+                    unixModes.Add(File.GetUnixFileMode(workingDirectory));
+                }
+
+                throw new LocalPdfToolException(LocalPdfToolFailure.ToolFailed);
+            });
+        var service = new LocalSearchablePdfOcrService(
+            runner,
+            new FakeSearchablePdfMerger());
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+            var result = await service.CreateSearchablePdfAsync(
+                input,
+                TestOptions(),
+                CancellationToken.None);
+
+            result.Succeeded.Should().BeFalse();
+            result.FailureReason.Should().Be("tool_failed");
+        }
+
+        workingDirectories.Should().HaveCount(2).And.OnlyHaveUniqueItems();
+        existedDuringRun.Should().OnlyContain(existed => existed);
+        workingDirectories.Should().OnlyContain(
+            directory => Path.GetFileName(directory).StartsWith(
+                WorkingDirectoryPrefix,
+                StringComparison.Ordinal));
+        workingDirectories.Should().OnlyContain(
+            directory => Path.TrimEndingDirectorySeparator(
+                    new DirectoryInfo(directory).Parent!.FullName)
+                == Path.TrimEndingDirectorySeparator(
+                    new DirectoryInfo(Path.GetTempPath()).FullName));
+        workingDirectories.Should().OnlyContain(
+            directory => !Directory.Exists(directory));
+
+        if (!OperatingSystem.IsWindows())
+        {
+            const UnixFileMode groupOrOtherPermissions =
+                UnixFileMode.GroupRead
+                | UnixFileMode.GroupWrite
+                | UnixFileMode.GroupExecute
+                | UnixFileMode.OtherRead
+                | UnixFileMode.OtherWrite
+                | UnixFileMode.OtherExecute;
+            unixModes.Should().OnlyContain(
+                mode => (mode & groupOrOtherPermissions) == 0);
+        }
+    }
+
+    [Fact]
+    public async Task CreateSearchablePdfAsync_Should_limit_input_temporary_bytes_and_cleanup()
+    {
+        string? workingDirectory = null;
+        var runner = new FakePdfToolRunner();
+        var merger = new FakeSearchablePdfMerger();
+        var service = new LocalSearchablePdfOcrService(
+            runner,
+            merger,
+            () => workingDirectory = CreateTemporaryDirectory());
 
         await using var input = new MemoryStream("%PDF-test"u8.ToArray());
         var result = await service.CreateSearchablePdfAsync(
@@ -106,7 +202,8 @@ public sealed class LocalSearchablePdfOcrServiceTests
         result.FailureReason.Should().Be("resource_limit_exceeded");
         runner.Commands.Should().BeEmpty();
         merger.CallCount.Should().Be(0);
-        Directory.Exists(workingDirectory).Should().BeFalse();
+        workingDirectory.Should().NotBeNull();
+        Directory.Exists(workingDirectory!).Should().BeFalse();
     }
 
     [Fact]
@@ -314,6 +411,52 @@ public sealed class LocalSearchablePdfOcrServiceTests
     }
 
     [Fact]
+    public async Task CreateSearchablePdfAsync_Should_cancel_after_final_tesseract_before_merge_and_cleanup()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var tesseractCallCount = 0;
+        var runner = new FakePdfToolRunner(
+            async (fileName, arguments, cancellationToken) =>
+            {
+                if (fileName == "pdftoppm")
+                {
+                    await File.WriteAllBytesAsync(
+                        arguments[^1] + "-10.png",
+                        [1],
+                        cancellationToken);
+                    await File.WriteAllBytesAsync(
+                        arguments[^1] + "-2.png",
+                        [2],
+                        cancellationToken);
+                    return;
+                }
+
+                await File.WriteAllBytesAsync(
+                    arguments[1] + ".pdf",
+                    "%PDF-page"u8.ToArray(),
+                    cancellationToken);
+                tesseractCallCount++;
+                if (tesseractCallCount == 2)
+                {
+                    cancellation.Cancel();
+                }
+            });
+        var merger = new FakeSearchablePdfMerger();
+        var service = new LocalSearchablePdfOcrService(runner, merger);
+
+        await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+        var action = () => service.CreateSearchablePdfAsync(
+            input,
+            TestOptions(),
+            cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        runner.Commands.Should().HaveCount(3);
+        merger.CallCount.Should().Be(0);
+        AssertTemporaryDirectoryDeleted(runner);
+    }
+
+    [Fact]
     public async Task CreateSearchablePdfAsync_Should_retry_cleanup_for_read_only_files()
     {
         var runner = new FakePdfToolRunner();
@@ -357,12 +500,10 @@ public sealed class LocalSearchablePdfOcrServiceTests
         };
     }
 
-    private static string CreateTemporaryDirectoryPath()
+    private static string CreateTemporaryDirectory()
     {
-        return Path.Combine(
-            Path.GetTempPath(),
-            "ai-orchestration-hitl-searchable-pdf-ocr-tests",
-            Guid.NewGuid().ToString("N"));
+        return Directory.CreateTempSubdirectory(
+            "ai-orchestration-hitl-searchable-pdf-ocr-tests-").FullName;
     }
 
     private static void AssertTemporaryDirectoryDeleted(FakePdfToolRunner runner)
