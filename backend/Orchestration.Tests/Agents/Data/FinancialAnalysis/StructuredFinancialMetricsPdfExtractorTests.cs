@@ -132,6 +132,44 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             metric.Confidence == 0.64m);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-10)]
+    public async Task ExtractAsync_Should_not_report_native_text_for_nonpositive_threshold(
+        int nativeTextMinimumCharacters)
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: "   ")
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 4,
+                Text: """
+                    Metric 2024A
+                    Revenue 3,500
+                    """,
+                OcrConfidence: 0.82m)
+        ]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            nativeTextMinimumCharacters: nativeTextMinimumCharacters);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeFalse();
+        ocrExtractor.CallCount.Should().Be(1);
+    }
+
     [Fact]
     public async Task ExtractAsync_Should_fallback_to_ocr_when_native_text_has_no_metrics()
     {

@@ -22,22 +22,19 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluator
 
     private static readonly RatioRequirement[] RequiredRatios =
     [
-        new("gross_margin", [["gross_profit", "revenue"]]),
-        new("ebitda_margin", [["ebitda", "revenue"]]),
-        new("net_margin", [["net_income", "revenue"]]),
-        new("current_ratio", [["current_assets", "current_liabilities"]]),
+        new("gross_margin", ["gross_profit"], "revenue"),
+        new("ebitda_margin", ["ebitda"], "revenue"),
+        new("net_margin", ["net_income"], "revenue"),
+        new("current_ratio", ["current_assets"], "current_liabilities"),
         new(
             "quick_ratio",
-            [
-                ["cash", "current_liabilities"],
-                ["short_term_investments", "current_liabilities"],
-                ["receivables", "current_liabilities"]
-            ]),
-        new("debt_to_equity", [["total_debt", "equity"]]),
-        new("net_debt_to_ebitda", [["net_debt", "ebitda"]]),
-        new("interest_coverage", [["ebit", "interest_expense"]]),
-        new("fcf_margin", [["free_cash_flow", "revenue"]]),
-        new("capex_to_revenue", [["capex", "revenue"]])
+            ["cash", "short_term_investments", "receivables"],
+            "current_liabilities"),
+        new("debt_to_equity", ["total_debt"], "equity"),
+        new("net_debt_to_ebitda", ["net_debt"], "ebitda"),
+        new("interest_coverage", ["ebit"], "interest_expense"),
+        new("fcf_margin", ["free_cash_flow"], "revenue"),
+        new("capex_to_revenue", ["capex"], "revenue")
     ];
 
     public FinancialMetricsExtractionDecision Evaluate(
@@ -57,28 +54,19 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluator
             reasons.Add(UnitMissing);
         }
 
-        var availableMetrics = input?.Metrics
-            .Where(metric => metric.Value.HasValue && !string.IsNullOrWhiteSpace(metric.Name))
-            .Select(metric => metric.Name.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase)
-            ?? [];
+        var metricsByPeriod = BuildMetricLookup(input?.Metrics ?? []);
 
-        if (RequiredRatios.Any(requirement => !requirement.CanBeSupportedBy(availableMetrics)))
+        if (RequiredRatios.Any(requirement =>
+                !metricsByPeriod.Values.Any(requirement.CanBeSupportedBy)))
         {
             reasons.Add(RequiredRatioInputsMissing);
         }
 
         var threshold = Math.Clamp(options.DeterministicCoverageThreshold, 0m, 1m);
-        var coverage = CanonicalBaseMetrics.Count(availableMetrics.Contains)
-            / (decimal)CanonicalBaseMetrics.Length;
-        var distinctPeriods = input?.Metrics
-            .Where(metric => metric.Value.HasValue && !string.IsNullOrWhiteSpace(metric.Period))
-            .Select(metric => metric.Period.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Count()
-            ?? 0;
+        var periodsMeetingCoverage = metricsByPeriod.Values.Count(
+            metrics => CalculateCoverage(metrics) >= threshold);
 
-        if (coverage < threshold || distinctPeriods < 2)
+        if (!result.IsValid || periodsMeetingCoverage < 2)
         {
             reasons.Add(MetricCoverageBelowThreshold);
         }
@@ -88,15 +76,74 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluator
             ReasonCodes: reasons);
     }
 
+    private static Dictionary<string, Dictionary<string, decimal?>> BuildMetricLookup(
+        IReadOnlyList<StructuredFinancialMetricInput> metrics)
+    {
+        var metricsByPeriod = new Dictionary<string, Dictionary<string, decimal?>>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var metric in metrics)
+        {
+            if (string.IsNullOrWhiteSpace(metric.Period))
+            {
+                continue;
+            }
+
+            var period = metric.Period.Trim();
+
+            if (!metricsByPeriod.TryGetValue(period, out var periodMetrics))
+            {
+                periodMetrics = new Dictionary<string, decimal?>(
+                    StringComparer.OrdinalIgnoreCase);
+                metricsByPeriod.Add(period, periodMetrics);
+            }
+
+            if (!string.IsNullOrWhiteSpace(metric.Name))
+            {
+                periodMetrics[metric.Name.Trim()] = metric.Value;
+            }
+        }
+
+        return metricsByPeriod;
+    }
+
+    private static decimal CalculateCoverage(
+        IReadOnlyDictionary<string, decimal?> metrics)
+    {
+        var presentMetrics = CanonicalBaseMetrics.Count(
+            name => HasValue(metrics, name));
+
+        return presentMetrics / (decimal)CanonicalBaseMetrics.Length;
+    }
+
+    private static bool HasValue(
+        IReadOnlyDictionary<string, decimal?> metrics,
+        string name)
+    {
+        return metrics.TryGetValue(name, out var value) && value.HasValue;
+    }
+
     private sealed record RatioRequirement(
         string ReportedMetricName,
-        IReadOnlyList<IReadOnlyList<string>> InputAlternatives)
+        IReadOnlyList<string> NumeratorMetricNames,
+        string DenominatorMetricName)
     {
-        public bool CanBeSupportedBy(IReadOnlySet<string> availableMetrics)
+        public bool CanBeSupportedBy(
+            IReadOnlyDictionary<string, decimal?> metrics)
         {
-            return availableMetrics.Contains(ReportedMetricName)
-                || InputAlternatives.Any(alternative =>
-                    alternative.All(availableMetrics.Contains));
+            if (HasValue(metrics, ReportedMetricName))
+            {
+                return true;
+            }
+
+            if (!metrics.TryGetValue(DenominatorMetricName, out var denominator)
+                || !denominator.HasValue
+                || denominator.Value == 0m)
+            {
+                return false;
+            }
+
+            return NumeratorMetricNames.Any(name => HasValue(metrics, name));
         }
     }
 }

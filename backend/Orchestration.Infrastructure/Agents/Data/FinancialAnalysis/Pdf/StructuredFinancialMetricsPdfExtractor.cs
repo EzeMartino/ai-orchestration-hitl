@@ -52,7 +52,7 @@ public sealed class StructuredFinancialMetricsPdfExtractor
             _options.MaxPages,
             cancellationToken);
         var nativeTextCharacterCount = GetTextLength(nativePages);
-        var nativeTextMinimumCharacters = Math.Max(0, _options.NativeTextMinimumCharacters);
+        var nativeTextMinimumCharacters = Math.Max(1, _options.NativeTextMinimumCharacters);
         var nativeTextAvailable = nativeTextCharacterCount >= nativeTextMinimumCharacters;
 
         if (nativeTextAvailable)

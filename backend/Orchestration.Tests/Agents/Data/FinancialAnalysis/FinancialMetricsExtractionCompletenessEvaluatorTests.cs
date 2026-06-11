@@ -92,6 +92,61 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
     }
 
     [Fact]
+    public void Evaluate_Should_require_ratio_inputs_when_formula_inputs_are_split_across_periods()
+    {
+        var metrics = CreateCompleteMetrics()
+            .Where(metric => metric.Name != "gross_margin")
+            .Where(metric =>
+                !(metric.Name == "revenue" && metric.Period == "2024A"))
+            .Where(metric =>
+                !(metric.Name == "gross_profit" && metric.Period == "2025E"))
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
+        decision.ReasonCodes.Should().Equal("required_ratio_inputs_missing");
+    }
+
+    [Fact]
+    public void Evaluate_Should_require_ratio_inputs_when_formula_denominator_is_zero()
+    {
+        var metrics = CreateCompleteMetrics()
+            .Where(metric => metric.Name != "gross_margin")
+            .Select(metric => metric.Name == "revenue"
+                ? metric with { Value = 0m }
+                : metric)
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
+        decision.ReasonCodes.Should().Equal("required_ratio_inputs_missing");
+    }
+
+    [Fact]
+    public void Evaluate_Should_support_same_normalized_period_with_zero_numerator()
+    {
+        var metrics = CreateCompleteMetrics()
+            .Where(metric => metric.Name != "gross_margin")
+            .Where(metric =>
+                !(metric.Name == "gross_profit" && metric.Period == "2025E"))
+            .Select(metric =>
+                metric.Name == "gross_profit" && metric.Period == "2024A"
+                    ? metric with { Period = " 2024a ", Value = 0m }
+                    : metric)
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.ReasonCodes.Should().NotContain("required_ratio_inputs_missing");
+        decision.RequiresSemanticFallback.Should().BeFalse();
+    }
+
+    [Fact]
     public void Evaluate_Should_skip_fallback_for_complete_multi_period_result()
     {
         var result = CreateResult();
@@ -137,6 +192,31 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
 
         var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
 
+        decision.ReasonCodes.Should().Equal("metric_coverage_below_threshold");
+    }
+
+    [Fact]
+    public void Evaluate_Should_require_coverage_when_only_one_period_has_canonical_metrics()
+    {
+        var metrics = CanonicalMetrics("2024A")
+            .Concat(ReportedRatioMetrics())
+            .ToArray();
+        var result = CreateResult(metrics: metrics);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
+        decision.ReasonCodes.Should().Equal("metric_coverage_below_threshold");
+    }
+
+    [Fact]
+    public void Evaluate_Should_require_coverage_when_invalid_result_retains_complete_input()
+    {
+        var result = CreateResult(isValid: false);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
         decision.ReasonCodes.Should().Equal("metric_coverage_below_threshold");
     }
 
@@ -209,11 +289,10 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
 
     private static IEnumerable<StructuredFinancialMetricInput> CreateComputedRatioMetrics()
     {
-        return CanonicalBaseMetrics
-            .Select(name => Metric(name, "2024A"))
+        return CanonicalMetrics("2024A")
+            .Concat(CanonicalMetrics("2025E"))
             .Concat(
             [
-                Metric("revenue", "2025E"),
                 Metric("current_assets", "2024A"),
                 Metric("current_liabilities", "2024A"),
                 Metric("receivables", "2024A"),
@@ -226,10 +305,11 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
     private static StructuredFinancialMetricsPdfExtractionResult CreateResult(
         string? currency = "USD",
         string? unit = "USD_thousand",
-        IReadOnlyList<StructuredFinancialMetricInput>? metrics = null)
+        IReadOnlyList<StructuredFinancialMetricInput>? metrics = null,
+        bool isValid = true)
     {
         return new StructuredFinancialMetricsPdfExtractionResult(
-            IsValid: true,
+            IsValid: isValid,
             Input: new StructuredFinancialMetricsInput(
                 DocumentId: "report-1",
                 Company: "Vista Energy",
@@ -243,11 +323,16 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
 
     private static IReadOnlyList<StructuredFinancialMetricInput> CreateCompleteMetrics()
     {
-        return CanonicalBaseMetrics
-            .Select(name => Metric(name, "2024A"))
+        return CanonicalMetrics("2024A")
+            .Concat(CanonicalMetrics("2025E"))
             .Concat(ReportedRatioMetrics())
-            .Concat([Metric("revenue", "2025E")])
             .ToArray();
+    }
+
+    private static IEnumerable<StructuredFinancialMetricInput> CanonicalMetrics(
+        string period)
+    {
+        return CanonicalBaseMetrics.Select(name => Metric(name, period));
     }
 
     private static IReadOnlyList<StructuredFinancialMetricInput> ReportedRatioMetrics()
