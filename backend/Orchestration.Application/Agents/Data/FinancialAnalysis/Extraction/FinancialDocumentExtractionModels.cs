@@ -16,7 +16,8 @@ public sealed record FinancialDocumentExtractionResult(
     FinancialDocumentMetadataCandidate? Company,
     FinancialDocumentMetadataCandidate? Currency,
     FinancialDocumentMetadataCandidate? Unit,
-    IReadOnlyList<FinancialMetricCandidate> Metrics);
+    IReadOnlyList<FinancialMetricCandidate> Metrics,
+    IReadOnlyList<FinancialDocumentMetadataCandidate>? MetadataCandidates = null);
 
 public sealed record FinancialDocumentExtractionParseResult(
     bool Succeeded,

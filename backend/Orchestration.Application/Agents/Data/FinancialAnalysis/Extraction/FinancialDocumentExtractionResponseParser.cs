@@ -67,7 +67,8 @@ public sealed class FinancialDocumentExtractionResponseParser
     public FinancialDocumentExtractionParseResult Parse(
         string? content,
         int maxEvidenceExcerptCharacters,
-        int maxSourcePage)
+        int maxSourcePage,
+        bool allowEmptyResult = false)
     {
         if (content is null ||
             content.Length > MaxResponseCharacters ||
@@ -138,7 +139,8 @@ public sealed class FinancialDocumentExtractionResponseParser
                 return Fail();
             }
 
-            if (company is null &&
+            if (!allowEmptyResult &&
+                company is null &&
                 currency is null &&
                 unit is null &&
                 metrics.Count == 0)
@@ -146,13 +148,21 @@ public sealed class FinancialDocumentExtractionResponseParser
                 return Fail();
             }
 
+            var metadataCandidates = new[]
+            {
+                company,
+                currency,
+                unit
+            }.OfType<FinancialDocumentMetadataCandidate>().ToArray();
+
             return new FinancialDocumentExtractionParseResult(
                 Succeeded: true,
                 Result: new FinancialDocumentExtractionResult(
                     Company: company,
                     Currency: currency,
                     Unit: unit,
-                    Metrics: metrics),
+                    Metrics: metrics,
+                    MetadataCandidates: metadataCandidates),
                 FailureReason: null);
         }
         catch (JsonException)

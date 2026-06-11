@@ -35,6 +35,11 @@ public sealed class FinancialDocumentExtractionResponseParserTests
             options => options.ExcludingMissingMembers());
         result.Result.Currency!.FieldName.Should().Be("currency");
         result.Result.Unit!.FieldName.Should().Be("unit");
+        result.Result.MetadataCandidates.Should().NotBeNull();
+        result.Result.MetadataCandidates!
+            .Select(candidate => candidate.FieldName)
+            .Should()
+            .Equal("company", "currency", "unit");
         result.Result.Metrics.Should().ContainSingle();
 
         var metric = result.Result.Metrics.Single();
@@ -877,6 +882,31 @@ public sealed class FinancialDocumentExtractionResponseParserTests
         });
 
         AssertSchemaFailure(Parse(json));
+    }
+
+    [Fact]
+    public void Parse_Should_accept_fully_empty_result_in_chunk_mode()
+    {
+        var json = Mutate(root =>
+        {
+            root["document"] = new JsonObject();
+            root["metrics"] = new JsonArray();
+        });
+
+        var result = _parser.Parse(
+            json,
+            MaxEvidenceExcerptCharacters,
+            MaxSourcePage,
+            allowEmptyResult: true);
+
+        result.Succeeded.Should().BeTrue();
+        result.FailureReason.Should().BeNull();
+        result.Result.Should().NotBeNull();
+        result.Result!.Company.Should().BeNull();
+        result.Result.Currency.Should().BeNull();
+        result.Result.Unit.Should().BeNull();
+        result.Result.Metrics.Should().BeEmpty();
+        result.Result.MetadataCandidates.Should().BeEmpty();
     }
 
     [Theory]

@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -37,7 +39,9 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var agent = CreateAgent(chat);
 
         var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\n| Revenue | 100 |"),
+            CreateRequest(
+                "# Page 1\nExample Energy\nCompany evidence\nCurrency evidence\n" +
+                "Unit evidence\nrevenue evidence"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -65,6 +69,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
             .BeOfType<OpenAIPromptExecutionSettings>()
             .Subject;
         executionSettings.ResponseFormat.Should().NotBeNull();
+        executionSettings.MaxTokens.Should().Be(4096);
         executionSettings.ToolCallBehavior.Should().BeNull();
 
         chat.Kernels.Should().ContainSingle().Which.Should().BeNull();
@@ -88,14 +93,40 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
     [Fact]
     public async Task ExtractAsync_EmptyParsedAggregate_ReturnsSchemaValidationFailed()
     {
-        var agent = CreateAgent(
-            new FakeChatCompletionService(CreateResponse()));
+        var chat = new FakeChatCompletionService(
+            CreateResponse(),
+            CreateResponse());
+        var agent = CreateAgent(chat);
 
         var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\nNo supported values"),
+            CreateRequest(
+                "# Page 1\nNo supported values\n# Page 2\nStill no supported values"),
             CancellationToken.None);
 
         AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+        chat.Calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmptyChunkBeforeCandidate_AggregatesLaterCandidate()
+    {
+        var chat = new FakeChatCompletionService(
+            CreateResponse(),
+            CreateResponse(
+                metricName: "ebitda",
+                metricValue: 20m,
+                sourcePage: 2));
+        var agent = CreateAgent(chat);
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(
+                "# Page 1\nNo supported values\n# Page 2\nebitda evidence"),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Name.Should().Be("ebitda");
+        chat.Calls.Should().Be(2);
     }
 
     [Fact]
@@ -107,7 +138,8 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var agent = CreateAgent(chat);
 
         var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\nRevenue\n# Page 2\nEBITDA"),
+            CreateRequest(
+                "# Page 1\nrevenue evidence\n# Page 2\nEBITDA"),
             CancellationToken.None);
 
         AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
@@ -117,17 +149,26 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
     [Fact]
     public async Task ExtractAsync_ProviderError_ReturnsStableNonSensitiveReason()
     {
+        var logger =
+            new CapturingLogger<SemanticKernelFinancialDocumentExtractionAgent>();
         var chat = new FakeChatCompletionService(
             (_, _) => throw new InvalidOperationException(
                 "provider-secret-and-stack-details"));
-        var agent = CreateAgent(chat);
+        var agent = CreateAgent(chat, logger: logger);
 
         var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\nRevenue"),
+            CreateRequest("# Page 1\nDOCUMENT_SECRET"),
             CancellationToken.None);
 
         AssertFailure(result, "provider_error");
         result.FailureReason.Should().NotContain("provider-secret");
+        logger.Entries.Should().ContainSingle();
+        logger.Entries.Single().Level.Should().Be(LogLevel.Warning);
+        logger.Entries.Single().Message.Should().Be(
+            "Financial document extraction provider failed.");
+        logger.Entries.Single().Message.Should().NotContain("DOCUMENT_SECRET");
+        logger.Entries.Single().Message.Should().NotContain("provider-secret");
+        logger.Entries.Single().Exception.Should().BeNull();
     }
 
     [Fact]
@@ -171,6 +212,29 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         chat.Calls.Should().Be(0);
     }
 
+    [Fact]
+    public async Task ExtractAsync_CallerCancellationAfterProviderResponse_Rethrows()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var chat = new FakeChatCompletionService(
+            (_, _) =>
+            {
+                cancellation.Cancel();
+                return Task.FromResult(
+                    CreateResponse(
+                        metricName: "revenue",
+                        metricValue: 100m));
+            });
+        var agent = CreateAgent(chat);
+
+        Func<Task> act = () => agent.ExtractAsync(
+            CreateRequest("# Page 1\nrevenue evidence"),
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        chat.Calls.Should().Be(1);
+    }
+
     [Theory]
     [InlineData(2, 5)]
     [InlineData(5, 2)]
@@ -180,7 +244,10 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
     {
         var chat = new FakeChatCompletionService(
             CreateResponse(metricName: "revenue", metricValue: 100m),
-            CreateResponse(metricName: "ebitda", metricValue: 20m));
+            CreateResponse(
+                metricName: "ebitda",
+                metricValue: 20m,
+                sourcePage: 2));
         var agent = CreateAgent(
             chat,
             extractionOptions: new FinancialMetricsExtractionOptions
@@ -190,9 +257,9 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var request = CreateRequest(
             """
 # Page 1
-Revenue 100
+revenue evidence
 # Page 2
-EBITDA 20
+ebitda evidence
 # Page 3
 Net income 10
 """,
@@ -213,7 +280,7 @@ Net income 10
     }
 
     [Fact]
-    public async Task ExtractAsync_Markdown_RespectsConfiguredCharacterMaximum()
+    public async Task ExtractAsync_MarkdownExceedsConfiguredCharacterMaximum_FailsWithoutProviderCall()
     {
         var chat = new FakeChatCompletionService(
             CreateResponse(metricName: "revenue", metricValue: 100m));
@@ -229,10 +296,94 @@ Net income 10
             CreateRequest("# Page 1\nRevenue 100\nSECRET_AFTER_BOUND"),
             CancellationToken.None);
 
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+        chat.Calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownAtConfiguredCharacterMaximum_IsAccepted()
+    {
+        const string markdown = "revenue evidence";
+        var chat = new FakeChatCompletionService(
+            CreateResponse(metricName: "revenue", metricValue: 100m));
+        var agent = CreateAgent(
+            chat,
+            extractionOptions: new FinancialMetricsExtractionOptions
+            {
+                MaxMarkdownCharacters = markdown.Length,
+                MaxMarkdownChunks = 1
+            });
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(markdown, maxMarkdownChunks: 1),
+            CancellationToken.None);
+
         result.Succeeded.Should().BeTrue();
-        GetUserPrompt(chat.ChatHistories.Single())
-            .Should()
-            .NotContain("SECRET_AFTER_BOUND");
+        chat.Calls.Should().Be(1);
+        GetDocumentContent(chat.ChatHistories.Single()).Should().Be(markdown);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_HeadinglessLongMarkdown_SplitsLosslesslyWithoutBreakingSurrogatePairs()
+    {
+        var maxChunkCharacters =
+            SemanticKernelFinancialDocumentExtractionAgent
+                .MaximumMarkdownChunkCharacters;
+        var markdown =
+            new string('a', maxChunkCharacters - 1) +
+            "\U0001F600\nrevenue evidence";
+        var chat = new FakeChatCompletionService(
+            CreateResponse(),
+            CreateResponse(metricName: "revenue", metricValue: 100m));
+        var agent = CreateAgent(
+            chat,
+            extractionOptions: new FinancialMetricsExtractionOptions
+            {
+                MaxMarkdownCharacters = markdown.Length,
+                MaxMarkdownChunks = 2
+            });
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(markdown, maxMarkdownChunks: 2),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        chat.Calls.Should().Be(2);
+
+        var chunks = chat.ChatHistories
+            .Select(GetDocumentContent)
+            .ToArray();
+        chunks.Should().OnlyContain(
+            chunk => chunk.Length <= maxChunkCharacters);
+        string.Concat(chunks).Should().Be(markdown);
+        char.IsHighSurrogate(chunks[0][^1]).Should().BeFalse();
+        char.IsLowSurrogate(chunks[1][0]).Should().BeFalse();
+        chunks[1].Should().Contain("revenue evidence");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownExceedsChunkCapacity_FailsWithoutProviderCall()
+    {
+        var maxChunkCharacters =
+            SemanticKernelFinancialDocumentExtractionAgent
+                .MaximumMarkdownChunkCharacters;
+        var markdown = new string('x', (maxChunkCharacters * 2) + 1);
+        var chat = new FakeChatCompletionService(
+            CreateResponse(metricName: "revenue", metricValue: 100m));
+        var agent = CreateAgent(
+            chat,
+            extractionOptions: new FinancialMetricsExtractionOptions
+            {
+                MaxMarkdownCharacters = markdown.Length,
+                MaxMarkdownChunks = 2
+            });
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(markdown, maxMarkdownChunks: 2),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+        chat.Calls.Should().Be(0);
     }
 
     [Fact]
@@ -248,11 +399,15 @@ Net income 10
                 currency: "USD",
                 unit: "USD_million",
                 metricName: "ebitda",
-                metricValue: 20m));
+                metricValue: 20m,
+                sourcePage: 2));
         var agent = CreateAgent(chat);
 
         var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\nRevenue\n# Page 2\nEBITDA"),
+            CreateRequest(
+                "# Page 1\nFirst Company\nCompany evidence\nrevenue evidence\n" +
+                "# Page 2\nLater Company\nCompany evidence\nCurrency evidence\n" +
+                "Unit evidence\nebitda evidence"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -262,6 +417,116 @@ Net income 10
         result.Result.Metrics.Select(metric => metric.Name)
             .Should()
             .Equal("revenue", "ebitda");
+        result.Result.MetadataCandidates.Should().NotBeNull();
+        result.Result.MetadataCandidates!
+            .Where(candidate => candidate.FieldName == "company")
+            .Select(candidate => candidate.Value)
+            .Should()
+            .Equal("First Company", "Later Company");
+    }
+
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("metric")]
+    public async Task ExtractAsync_ReportedEvidenceNotPresentVerbatim_ReturnsSchemaValidationFailed(
+        string candidateKind)
+    {
+        var response = candidateKind == "metadata"
+            ? CreateResponse(
+                company: "Example Energy",
+                companyEvidence: "hallucinated company evidence")
+            : CreateResponse(
+                metricName: "revenue",
+                metricValue: 100m,
+                metricEvidence: "hallucinated metric evidence");
+        var agent = CreateAgent(new FakeChatCompletionService(response));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest("# Page 1\nActual document evidence"),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_SourcePageMatchesExplicitPageHeading_IsAccepted()
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: "revenue evidence",
+                    sourcePage: 12)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest("## pAgE 12\nrevenue evidence"),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Single().SourcePage.Should().Be(12);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_SourcePageDoesNotMatchExplicitPageHeading_ReturnsSchemaValidationFailed()
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: "revenue evidence",
+                    sourcePage: 2)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest("# Page 1\nrevenue evidence"),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_NoExplicitPageHeading_SanitizesSourcePageToNull()
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    company: "Example Energy",
+                    companyEvidence: "Example Energy",
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: "revenue evidence",
+                    sourcePage: 7)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest("Example Energy\nrevenue evidence"),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company!.SourcePage.Should().BeNull();
+        result.Result.Metrics.Single().SourcePage.Should().BeNull();
+        result.Result.MetadataCandidates.Should().ContainSingle()
+            .Which.SourcePage.Should().BeNull();
+    }
+
+    [Fact]
+    public void ProductionConstructor_RegistersNoKernelPlugins()
+    {
+        var agent = new SemanticKernelFinancialDocumentExtractionAgent(
+            Options.Create(
+                new LlmOptions
+                {
+                    Enabled = true,
+                    Provider = "OpenAI",
+                    Model = "test-model",
+                    ApiKey = "not-used",
+                    ServiceId = "test-service"
+                }),
+            Options.Create(new FinancialMetricsExtractionOptions()),
+            new FinancialDocumentExtractionResponseParser(),
+            NullLogger<SemanticKernelFinancialDocumentExtractionAgent>.Instance);
+
+        agent.RegisteredPluginCount.Should().Be(0);
     }
 
     [Fact]
@@ -301,6 +566,7 @@ Net income 10
     public void AddFinancialDocumentExtraction_EnabledValidConfiguration_ResolvesSemanticAgentAndOptions()
     {
         var services = new ServiceCollection();
+        services.AddLogging();
         var configuration = CreateConfiguration(
             semanticEnrichmentEnabled: true,
             llmEnabled: true);
@@ -357,7 +623,8 @@ Net income 10
 
     private static SemanticKernelFinancialDocumentExtractionAgent CreateAgent(
         FakeChatCompletionService chatCompletionService,
-        FinancialMetricsExtractionOptions? extractionOptions = null)
+        FinancialMetricsExtractionOptions? extractionOptions = null,
+        ILogger<SemanticKernelFinancialDocumentExtractionAgent>? logger = null)
     {
         return new SemanticKernelFinancialDocumentExtractionAgent(
             new LlmOptions
@@ -370,7 +637,8 @@ Net income 10
             },
             extractionOptions ?? new FinancialMetricsExtractionOptions(),
             new FinancialDocumentExtractionResponseParser(),
-            chatCompletionService);
+            chatCompletionService,
+            logger);
     }
 
     private static FinancialDocumentExtractionRequest CreateRequest(
@@ -409,6 +677,25 @@ Net income 10
             .Content!;
     }
 
+    private static string GetDocumentContent(ChatHistory history)
+    {
+        const string startMarker = "<document_content>\n";
+        const string endMarker = "\n</document_content>";
+        var prompt = GetUserPrompt(history);
+        var start = prompt.IndexOf(startMarker, StringComparison.Ordinal);
+        var end = prompt.IndexOf(
+            endMarker,
+            start + startMarker.Length,
+            StringComparison.Ordinal);
+
+        start.Should().BeGreaterThanOrEqualTo(0);
+        end.Should().BeGreaterThanOrEqualTo(start + startMarker.Length);
+
+        return prompt[
+            (start + startMarker.Length)..
+            end];
+    }
+
     private static void AssertFailure(
         FinancialDocumentExtractionParseResult result,
         string expectedReason)
@@ -423,23 +710,35 @@ Net income 10
         string? currency = null,
         string? unit = null,
         string? metricName = null,
-        decimal metricValue = 0m)
+        decimal metricValue = 0m,
+        string companyEvidence = "Company evidence",
+        string metricEvidence = "",
+        int? sourcePage = 1)
     {
         var document = new JsonObject();
 
         if (company is not null)
         {
-            document["company"] = CreateMetadata(company, "Company evidence");
+            document["company"] = CreateMetadata(
+                company,
+                companyEvidence,
+                sourcePage);
         }
 
         if (currency is not null)
         {
-            document["currency"] = CreateMetadata(currency, "Currency evidence");
+            document["currency"] = CreateMetadata(
+                currency,
+                "Currency evidence",
+                sourcePage);
         }
 
         if (unit is not null)
         {
-            document["unit"] = CreateMetadata(unit, "Unit evidence");
+            document["unit"] = CreateMetadata(
+                unit,
+                "Unit evidence",
+                sourcePage);
         }
 
         var metrics = new JsonArray();
@@ -456,8 +755,10 @@ Net income 10
                     ["unit"] = unit,
                     ["sourceKind"] = "reported",
                     ["confidence"] = 0.95m,
-                    ["sourcePage"] = 1,
-                    ["evidence"] = $"{metricName} evidence",
+                    ["sourcePage"] = sourcePage,
+                    ["evidence"] = string.IsNullOrEmpty(metricEvidence)
+                        ? $"{metricName} evidence"
+                        : metricEvidence,
                     ["inferenceExplanation"] = null
                 });
         }
@@ -471,17 +772,53 @@ Net income 10
 
     private static JsonObject CreateMetadata(
         string value,
-        string evidence)
+        string evidence,
+        int? sourcePage)
     {
         return new JsonObject
         {
             ["value"] = value,
             ["sourceKind"] = "reported",
             ["confidence"] = 0.98m,
-            ["sourcePage"] = 1,
+            ["sourcePage"] = sourcePage,
             ["evidence"] = evidence,
             ["inferenceExplanation"] = null
         };
+    }
+
+    private sealed record LogEntry(
+        LogLevel Level,
+        string Message,
+        Exception? Exception);
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add(
+                new LogEntry(
+                    logLevel,
+                    formatter(state, exception),
+                    exception));
+        }
     }
 
     private sealed class FakeChatCompletionService : IChatCompletionService
