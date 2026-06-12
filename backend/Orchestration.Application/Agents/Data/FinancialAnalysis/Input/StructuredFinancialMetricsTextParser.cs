@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
@@ -7,49 +6,6 @@ namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 public sealed class StructuredFinancialMetricsTextParser
     : IStructuredFinancialMetricsTextParser
 {
-    private static readonly IReadOnlyList<(string Alias, string Name)> MetricAliases =
-    [
-        ("Capital Expenditures", "capex"),
-        ("Deuda financiera total", "total_debt"),
-        ("Short Term Investments", "short_term_investments"),
-        ("Current Liabilities", "current_liabilities"),
-        ("Flujo de caja libre", "free_cash_flow"),
-        ("Operating Income", "operating_income"),
-        ("Current Assets", "current_assets"),
-        ("Interest Expense", "interest_expense"),
-        ("Free Cash Flow", "free_cash_flow"),
-        ("Resultado operativo", "operating_income"),
-        ("Pasivo corriente", "current_liabilities"),
-        ("Activo corriente", "current_assets"),
-        ("Ventas netas", "revenue"),
-        ("Ganancia bruta", "gross_profit"),
-        ("Patrimonio neto", "equity"),
-        ("Deuda neta", "net_debt"),
-        ("Margen EBITDA", "ebitda_margin"),
-        ("Margen bruto", "gross_margin"),
-        ("Margen neto", "net_margin"),
-        ("Gross Profit", "gross_profit"),
-        ("Gross Margin", "gross_margin"),
-        ("EBITDA Margin", "ebitda_margin"),
-        ("Net Margin", "net_margin"),
-        ("Total Debt", "total_debt"),
-        ("Net Income", "net_income"),
-        ("Receivables", "receivables"),
-        ("Inventory", "inventory"),
-        ("Ingresos", "revenue"),
-        ("Ventas", "revenue"),
-        ("Revenue", "revenue"),
-        ("Sales", "revenue"),
-        ("EBITDA", "ebitda"),
-        ("EBIT", "ebit"),
-        ("Net Debt", "net_debt"),
-        ("Equity", "equity"),
-        ("Shares", "shares"),
-        ("Cash", "cash"),
-        ("Capex", "capex"),
-        ("FCF", "free_cash_flow")
-    ];
-
     private static readonly Regex PeriodRegex = new(
         @"\b(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?\b",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase
@@ -141,14 +97,15 @@ public sealed class StructuredFinancialMetricsTextParser
                 continue;
             }
 
-            var aliasMatch = MatchAlias(trimmedLine);
-
-            if (aliasMatch is null)
+            if (!FinancialMetricNameCatalog.TryMatchLeadingAlias(
+                    trimmedLine,
+                    out var metricName,
+                    out var aliasLength))
             {
                 continue;
             }
 
-            var valuesText = trimmedLine[aliasMatch.Value.Alias.Length..];
+            var valuesText = trimmedLine[aliasLength..];
             var metricValues = linePeriods.Count > 0
                 ? ExtractInlinePeriodValues(valuesText)
                 : PairPeriodsAndValues(periods, ExtractValues(valuesText));
@@ -156,7 +113,7 @@ public sealed class StructuredFinancialMetricsTextParser
             foreach (var metricValue in metricValues)
             {
                 var metric = new StructuredFinancialMetricInput(
-                    Name: aliasMatch.Value.Name,
+                    Name: metricName,
                     Period: metricValue.Period,
                     Value: metricValue.Value,
                     Unit: request.Unit,
@@ -195,27 +152,7 @@ public sealed class StructuredFinancialMetricsTextParser
         string line)
     {
         return line.Contains("Metric", StringComparison.OrdinalIgnoreCase)
-            || !MetricAliases.Any(alias =>
-                line.StartsWith(alias.Alias, StringComparison.OrdinalIgnoreCase)
-            );
-    }
-
-    private static (string Alias, string Name)? MatchAlias(
-        string line)
-    {
-        var normalizedLine = NormalizeForMatch(line);
-
-        foreach (var alias in MetricAliases.OrderByDescending(alias => alias.Alias.Length))
-        {
-            var normalizedAlias = NormalizeForMatch(alias.Alias);
-
-            if (StartsWithAlias(normalizedLine, normalizedAlias))
-            {
-                return alias;
-            }
-        }
-
-        return null;
+            || !FinancialMetricNameCatalog.HasLeadingAlias(line);
     }
 
     private static IReadOnlyList<decimal> ExtractValues(
@@ -295,38 +232,6 @@ public sealed class StructuredFinancialMetricsTextParser
         }
 
         return null;
-    }
-
-    private static bool StartsWithAlias(
-        string normalizedLine,
-        string normalizedAlias)
-    {
-        if (!normalizedLine.StartsWith(normalizedAlias, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return normalizedLine.Length == normalizedAlias.Length ||
-            !char.IsLetterOrDigit(normalizedLine[normalizedAlias.Length]);
-    }
-
-    private static string NormalizeForMatch(
-        string value)
-    {
-        var normalized = value.TrimStart().Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-
-        foreach (var character in normalized)
-        {
-            var category = CharUnicodeInfo.GetUnicodeCategory(character);
-
-            if (category != UnicodeCategory.NonSpacingMark)
-            {
-                builder.Append(character);
-            }
-        }
-
-        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string NormalizeNumericText(

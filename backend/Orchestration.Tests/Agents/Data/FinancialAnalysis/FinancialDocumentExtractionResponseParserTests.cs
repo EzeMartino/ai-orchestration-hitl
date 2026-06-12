@@ -60,6 +60,7 @@ public sealed class FinancialDocumentExtractionResponseParserTests
 
     [Theory]
     [InlineData("Ventas netas", "revenue")]
+    [InlineData("Véntas nétas", "revenue")]
     [InlineData("Ganancia bruta", "gross_profit")]
     [InlineData("Operating Income", "operating_income")]
     [InlineData("quick_ratio", "quick_ratio")]

@@ -66,8 +66,14 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         systemPrompt.Should().Contain("sourcePage must be null");
         systemPrompt.Should().Contain(
             "reported metric evidence must include its explicit suffixed period and value");
+        systemPrompt.Should().Contain(
+            "reported metric evidence must include a supported metric label or alias");
+        systemPrompt.Should().Contain(
+            "Metric currency and unit must be null unless explicitly present");
         GetUserPrompt(chat.ChatHistories.Single()).Should().Contain(
             "Reported metric evidence must include the explicit suffixed period");
+        GetUserPrompt(chat.ChatHistories.Single()).Should().Contain(
+            "Metric currency and unit must be null unless explicitly present");
 
         var executionSettings = chat.ExecutionSettings.Single()
             .Should()
@@ -531,6 +537,23 @@ Net income 10
         result.Result.Unit!.Value.Should().Be("USD_million");
     }
 
+    [Fact]
+    public async Task ExtractAsync_ReportedDocumentUnitWithSeparatedContradictoryTokens_ReturnsSchemaValidationFailed()
+    {
+        const string evidence = "USD amounts are in thousands, not millions";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    unit: "USD_million",
+                    unitEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
     [Theory]
     [InlineData("100", 100)]
     [InlineData("1,234.50", 1234.50)]
@@ -636,17 +659,18 @@ Net income 10
     }
 
     [Theory]
-    [InlineData("Revenue FY2024A 100", 100)]
-    [InlineData("Revenue fy2024a 100", 100)]
-    [InlineData("Margin 2024A 12.5 %", 0.125)]
+    [InlineData("revenue", "Revenue FY2024A 100", 100)]
+    [InlineData("revenue", "Revenue fy2024a 100", 100)]
+    [InlineData("gross_margin", "Gross margin 2024A 12.5 %", 0.125)]
     public async Task ExtractAsync_ReportedMetricSinglePeriodAndValue_IsAccepted(
+        string metricName,
         string evidence,
         decimal metricValue)
     {
         var agent = CreateAgent(
             new FakeChatCompletionService(
                 CreateResponse(
-                    metricName: "revenue",
+                    metricName: metricName,
                     metricValue: metricValue,
                     metricEvidence: evidence)));
 
@@ -726,6 +750,93 @@ Net income 10
         result.Succeeded.Should().BeTrue();
         result.Result!.Metrics.Should().ContainSingle()
             .Which.Value.Should().Be(metricValue);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricIdentityUnsupportedByEvidence_ReturnsSchemaValidationFailed()
+    {
+        const string evidence = "EBITDA 2024A 100";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
+    [InlineData("Revenue 2024A 100")]
+    [InlineData("vEnTaS netas 2024A 100")]
+    [InlineData("Véntas nétas 2024A 100")]
+    public async Task ExtractAsync_ReportedMetricKnownAliasInEvidence_IsAccepted(
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Name.Should().Be("revenue");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricUnsupportedCurrencyAndUnit_AreSanitizedToNull()
+    {
+        const string evidence = "Revenue 2024A 100";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricCurrency: "EUR",
+                    metricUnit: "JPY_thousand",
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
+        metric.Currency.Should().BeNull();
+        metric.Unit.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricGroundedCurrencyAndUnit_AreRetained()
+    {
+        const string evidence = "Revenue 2024A 100 USD millions";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricCurrency: "USD",
+                    metricUnit: "USD_million",
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
+        metric.Currency.Should().Be("USD");
+        metric.Unit.Should().Be("USD_million");
     }
 
     [Theory]
@@ -971,6 +1082,8 @@ Net income 10
         string? currencyEvidence = null,
         string? unitEvidence = null,
         string metricEvidence = "",
+        string? metricCurrency = null,
+        string? metricUnit = null,
         int? sourcePage = 1)
     {
         var document = new JsonObject();
@@ -1009,8 +1122,8 @@ Net income 10
                     ["name"] = metricName,
                     ["period"] = metricPeriod,
                     ["value"] = metricValue,
-                    ["currency"] = currency,
-                    ["unit"] = unit,
+                    ["currency"] = metricCurrency ?? currency,
+                    ["unit"] = metricUnit ?? unit,
                     ["sourceKind"] = "reported",
                     ["confidence"] = 0.95m,
                     ["sourcePage"] = sourcePage,

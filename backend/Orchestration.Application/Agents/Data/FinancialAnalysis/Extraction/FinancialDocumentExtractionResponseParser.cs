@@ -1,7 +1,7 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 
@@ -22,9 +22,6 @@ public sealed class FinancialDocumentExtractionResponseParser
     private static readonly Regex PeriodRegex = new(
         @"^(?:FY)?(?<year>20\d{2})(?<suffix>[AE])?$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-
-    private static readonly IReadOnlyDictionary<string, string> MetricAliases =
-        CreateMetricAliases();
 
     private static readonly IReadOnlySet<string> RootProperties = Properties(
         "document",
@@ -304,7 +301,9 @@ public sealed class FinancialDocumentExtractionResponseParser
                 properties["name"],
                 MaxMetricNameCharacters,
                 out var suppliedName) ||
-            !TryNormalizeMetricName(suppliedName, out var name) ||
+            !FinancialMetricNameCatalog.TryNormalize(
+                suppliedName,
+                out var name) ||
             !TryReadBoundedNonblankString(
                 properties["period"],
                 MaxPeriodCharacters,
@@ -594,15 +593,6 @@ public sealed class FinancialDocumentExtractionResponseParser
             !string.IsNullOrWhiteSpace(inferenceExplanation);
     }
 
-    private static bool TryNormalizeMetricName(
-        string suppliedName,
-        out string canonicalName)
-    {
-        return MetricAliases.TryGetValue(
-            NormalizeAlias(suppliedName),
-            out canonicalName!);
-    }
-
     private static bool TryNormalizePeriod(
         string suppliedPeriod,
         out string period)
@@ -628,74 +618,6 @@ public sealed class FinancialDocumentExtractionResponseParser
         return sourceKind == FinancialMetricCandidateSourceKinds.Reported
             ? FinancialMetricCandidateReviewStates.Explicit
             : FinancialMetricCandidateReviewStates.Inferred;
-    }
-
-    private static IReadOnlyDictionary<string, string> CreateMetricAliases()
-    {
-        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        AddAliases(aliases, "revenue", "Revenue", "Sales", "Ventas", "Ingresos", "Ventas netas");
-        AddAliases(aliases, "gross_profit", "Gross Profit", "Ganancia bruta");
-        AddAliases(aliases, "ebitda", "EBITDA");
-        AddAliases(aliases, "ebit", "EBIT");
-        AddAliases(aliases, "operating_income", "Operating Income", "Resultado operativo");
-        AddAliases(aliases, "net_income", "Net Income");
-        AddAliases(aliases, "cash", "Cash");
-        AddAliases(aliases, "short_term_investments", "Short Term Investments");
-        AddAliases(aliases, "receivables", "Receivables");
-        AddAliases(aliases, "inventory", "Inventory");
-        AddAliases(aliases, "current_assets", "Current Assets", "Activo corriente");
-        AddAliases(aliases, "current_liabilities", "Current Liabilities", "Pasivo corriente");
-        AddAliases(aliases, "total_debt", "Total Debt", "Deuda financiera total");
-        AddAliases(aliases, "net_debt", "Net Debt", "Deuda neta");
-        AddAliases(aliases, "equity", "Equity", "Patrimonio neto");
-        AddAliases(aliases, "free_cash_flow", "Free Cash Flow", "FCF", "Flujo de caja libre");
-        AddAliases(aliases, "capex", "Capex", "Capital Expenditures");
-        AddAliases(aliases, "interest_expense", "Interest Expense");
-        AddAliases(aliases, "shares", "Shares");
-        AddAliases(aliases, "gross_margin", "Gross Margin", "Margen bruto");
-        AddAliases(aliases, "operating_margin", "Operating Margin", "Margen operativo");
-        AddAliases(aliases, "ebitda_margin", "EBITDA Margin", "Margen EBITDA");
-        AddAliases(aliases, "net_margin", "Net Margin", "Margen neto");
-        AddAliases(aliases, "current_ratio", "Current Ratio");
-        AddAliases(aliases, "quick_ratio", "Quick Ratio");
-        AddAliases(aliases, "debt_to_equity", "Debt to Equity");
-        AddAliases(aliases, "net_debt_to_ebitda", "Net Debt to EBITDA");
-        AddAliases(aliases, "interest_coverage", "Interest Coverage");
-        AddAliases(aliases, "fcf_margin", "FCF Margin");
-        AddAliases(aliases, "capex_to_revenue", "Capex to Revenue");
-
-        return aliases;
-    }
-
-    private static void AddAliases(
-        IDictionary<string, string> aliases,
-        string canonicalName,
-        params string[] supportedAliases)
-    {
-        aliases[NormalizeAlias(canonicalName)] = canonicalName;
-
-        foreach (var alias in supportedAliases)
-        {
-            aliases[NormalizeAlias(alias)] = canonicalName;
-        }
-    }
-
-    private static string NormalizeAlias(string value)
-    {
-        var normalized = value.Trim().Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(normalized.Length);
-
-        foreach (var character in normalized)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(character) !=
-                UnicodeCategory.NonSpacingMark)
-            {
-                builder.Append(character);
-            }
-        }
-
-        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static IReadOnlySet<string> Properties(params string[] names)

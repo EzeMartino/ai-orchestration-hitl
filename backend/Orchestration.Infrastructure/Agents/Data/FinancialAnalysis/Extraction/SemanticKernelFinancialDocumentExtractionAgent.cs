@@ -7,6 +7,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using OpenAI.Chat;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Infrastructure.Agents.Planner.Reasoning;
 
@@ -39,6 +40,8 @@ Use sourceKind "reported" only for values explicitly present in the document.
 An inferred candidate must include a nonblank inferenceExplanation.
 A reported candidate must include a nonblank verbatim evidence excerpt.
 A reported metric evidence must include its explicit suffixed period and value in the same verbatim excerpt.
+A reported metric evidence must include a supported metric label or alias.
+Metric currency and unit must be null unless explicitly present in the same evidence excerpt.
 
 Return exactly this JSON shape:
 {
@@ -545,13 +548,30 @@ Return an empty metrics array when the chunk contains no supported metric.
                 candidate.SourceKind,
                 candidate.Evidence,
                 markdownChunk) ||
-            !HasGroundedMetricValue(candidate))
+            !HasGroundedMetricValue(candidate) ||
+            !HasGroundedMetricIdentity(candidate))
         {
             return false;
         }
 
+        var isReported =
+            candidate.SourceKind == FinancialMetricCandidateSourceKinds.Reported;
         grounded = candidate with
         {
+            Currency = isReported &&
+                !HasGroundedOptionalMetricField(
+                    candidate.Currency,
+                    candidate.Evidence,
+                    allowSimplePlural: false)
+                ? null
+                : candidate.Currency,
+            Unit = isReported &&
+                !HasGroundedOptionalMetricField(
+                    candidate.Unit,
+                    candidate.Evidence,
+                    allowSimplePlural: true)
+                ? null
+                : candidate.Unit,
             SourcePage = null
         };
 
@@ -642,6 +662,31 @@ Return an empty metrics array when the chunk contains no supported metric.
             associatedNumbers[0].Value == candidate.Value;
     }
 
+    private static bool HasGroundedMetricIdentity(
+        FinancialMetricCandidate candidate)
+    {
+        return candidate.SourceKind != FinancialMetricCandidateSourceKinds.Reported ||
+            FinancialMetricNameCatalog.EvidenceSupports(
+                candidate.Name,
+                candidate.Evidence);
+    }
+
+    private static bool HasGroundedOptionalMetricField(
+        string? value,
+        string evidence,
+        bool allowSimplePlural)
+    {
+        if (value is null)
+        {
+            return true;
+        }
+
+        return ContainsContiguousTokens(
+            TokenizeMetadata(evidence),
+            TokenizeMetadata(value),
+            allowSimplePlural);
+    }
+
     private static bool TryGroundMarkdownTableValue(
         string evidence,
         IReadOnlyList<Match> periods,
@@ -699,7 +744,7 @@ Return an empty metrics array when the chunk contains no supported metric.
                 evidenceTokens,
                 valueTokens,
                 allowSimplePlural: false),
-            "unit" => ContainsOrderedTokens(
+            "unit" => ContainsContiguousTokens(
                 evidenceTokens,
                 valueTokens,
                 allowSimplePlural: true),
@@ -745,35 +790,6 @@ Return an empty metrics array when the chunk contains no supported metric.
         }
 
         return false;
-    }
-
-    private static bool ContainsOrderedTokens(
-        IReadOnlyList<string> evidenceTokens,
-        IReadOnlyList<string> valueTokens,
-        bool allowSimplePlural)
-    {
-        var evidenceIndex = 0;
-
-        foreach (var valueToken in valueTokens)
-        {
-            while (evidenceIndex < evidenceTokens.Count &&
-                !TokensEquivalent(
-                    evidenceTokens[evidenceIndex],
-                    valueToken,
-                    allowSimplePlural))
-            {
-                evidenceIndex++;
-            }
-
-            if (evidenceIndex == evidenceTokens.Count)
-            {
-                return false;
-            }
-
-            evidenceIndex++;
-        }
-
-        return true;
     }
 
     private static bool TokensEquivalent(
@@ -923,6 +939,8 @@ Extract supported financial document candidates from chunk {chunkNumber} of {chu
 Evidence excerpts must contain at most {Math.Max(1, request.MaxEvidenceExcerptCharacters)} characters.
 sourcePage must be null because trusted page attribution is unavailable.
 Reported metric evidence must include the explicit suffixed period and value in one verbatim excerpt.
+Reported metric evidence must include a supported metric label or alias.
+Metric currency and unit must be null unless explicitly present in the same evidence excerpt.
 Preserve values exactly as supported by this chunk.
 
 <document_content>
