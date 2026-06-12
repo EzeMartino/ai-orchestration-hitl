@@ -104,7 +104,12 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.Multiline);
 
     private static readonly Regex FinancialNumberRegex = new(
-        @"(?<!\w)\(?[+-]?\d[\d.,]*(?:[ \t]*%)?\)?(?!\w)",
+        @"(?<!\w)\(?[+-]?\d(?:\d|[.,](?=\d))*(?:[ \t]*%)?\)?(?!\w)",
+        RegexOptions.Compiled |
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex EvidenceSegmentBoundaryRegex = new(
+        @"(?:\r\n?|\n|;|[!?](?=\s|$)|\.(?!\d)(?=\s|$))",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
 
@@ -118,6 +123,26 @@ Return an empty metrics array when the chunk contains no supported metric.
         @"[\p{L}\p{Nd}]+",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
+
+    private static readonly IReadOnlyList<IReadOnlyList<string>>
+        ContrastMarkerTokenSequences =
+    [
+        ["not"],
+        ["no"],
+        ["without"],
+        ["except"],
+        ["nor"],
+        ["sin"],
+        ["excepto"],
+        ["rather", "than"],
+        ["instead", "of"],
+        ["as", "opposed", "to"],
+        ["other", "than"],
+        ["en", "lugar", "de"],
+        ["en", "vez", "de"],
+        ["sino"],
+        ["pero", "no"]
+    ];
 
     private static readonly HashSet<string> NegationTokens =
     [
@@ -618,11 +643,7 @@ Return an empty metrics array when the chunk contains no supported metric.
             return HasGroundedMarkdownTableRecord(candidate);
         }
 
-        return candidate.Evidence
-            .Split(
-                ['\r', '\n', ';'],
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries)
+        return SplitEvidenceSegments(candidate.Evidence)
             .Any(segment =>
                 FinancialMetricNameCatalog.EvidenceSupports(
                     candidate.Name,
@@ -698,17 +719,17 @@ Return an empty metrics array when the chunk contains no supported metric.
     private static bool HasGroundedMarkdownTableRecord(
         FinancialMetricCandidate candidate)
     {
-        var rows = candidate.Evidence
-            .Split(
-                ['\r', '\n'],
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries)
-            .Where(line => line.Contains('|'))
-            .Select(ParseMarkdownTableRow)
-            .Where(row => row.Count > 1)
-            .ToArray();
+        return ParseMarkdownTableBlocks(candidate.Evidence)
+            .Any(rows => MarkdownTableBlockSupportsCandidate(
+                rows,
+                candidate));
+    }
 
-        for (var headerIndex = 0; headerIndex < rows.Length; headerIndex++)
+    private static bool MarkdownTableBlockSupportsCandidate(
+        IReadOnlyList<IReadOnlyList<string>> rows,
+        FinancialMetricCandidate candidate)
+    {
+        for (var headerIndex = 0; headerIndex < rows.Count; headerIndex++)
         {
             var header = rows[headerIndex];
 
@@ -724,7 +745,7 @@ Return an empty metrics array when the chunk contains no supported metric.
                 }
 
                 for (var rowIndex = headerIndex + 1;
-                     rowIndex < rows.Length;
+                     rowIndex < rows.Count;
                      rowIndex++)
                 {
                     var row = rows[rowIndex];
@@ -744,6 +765,40 @@ Return an empty metrics array when the chunk contains no supported metric.
         }
 
         return false;
+    }
+
+    private static IEnumerable<IReadOnlyList<IReadOnlyList<string>>>
+        ParseMarkdownTableBlocks(string evidence)
+    {
+        var rows = new List<IReadOnlyList<string>>();
+
+        foreach (var rawLine in evidence.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+
+            if (!line.Contains('|'))
+            {
+                if (rows.Count > 0)
+                {
+                    yield return rows.ToArray();
+                    rows.Clear();
+                }
+
+                continue;
+            }
+
+            var row = ParseMarkdownTableRow(line);
+
+            if (row.Count > 1)
+            {
+                rows.Add(row);
+            }
+        }
+
+        if (rows.Count > 0)
+        {
+            yield return rows.ToArray();
+        }
     }
 
     private static IReadOnlyList<string> ParseMarkdownTableRow(string line)
@@ -791,9 +846,9 @@ Return an empty metrics array when the chunk contains no supported metric.
             return true;
         }
 
-        return ContainsAffirmativeContiguousTokens(
-            TokenizeMetadata(evidence),
-            TokenizeMetadata(value),
+        return HasAffirmativeContiguousOccurrence(
+            evidence,
+            value,
             allowSimplePlural);
     }
 
@@ -805,30 +860,31 @@ Return an empty metrics array when the chunk contains no supported metric.
             return true;
         }
 
-        var valueTokens = TokenizeMetadata(candidate.Value);
-        var evidenceTokens = TokenizeMetadata(candidate.Evidence);
-
-        if (valueTokens.Count == 0 || evidenceTokens.Count == 0)
-        {
-            return false;
-        }
-
         return candidate.FieldName switch
         {
-            "company" => ContainsAffirmativeContiguousTokens(
-                evidenceTokens,
-                valueTokens,
+            "company" => ContainsLocallyAffirmativeContiguousTokens(
+                TokenizeMetadata(candidate.Evidence),
+                TokenizeMetadata(candidate.Value),
                 allowSimplePlural: false),
-            "currency" => ContainsAffirmativeContiguousTokens(
-                evidenceTokens,
-                valueTokens,
+            "currency" => HasAffirmativeContiguousOccurrence(
+                candidate.Evidence,
+                candidate.Value,
                 allowSimplePlural: false),
-            "unit" => ContainsAffirmativeContiguousTokens(
-                evidenceTokens,
-                valueTokens,
+            "unit" => HasAffirmativeContiguousOccurrence(
+                candidate.Evidence,
+                candidate.Value,
                 allowSimplePlural: true),
             _ => false
         };
+    }
+
+    private static IReadOnlyList<string> SplitEvidenceSegments(string evidence)
+    {
+        return EvidenceSegmentBoundaryRegex
+            .Split(evidence)
+            .Where(segment => !string.IsNullOrWhiteSpace(segment))
+            .Select(segment => segment.Trim())
+            .ToArray();
     }
 
     private static IReadOnlyList<string> TokenizeMetadata(string value)
@@ -839,7 +895,84 @@ Return an empty metrics array when the chunk contains no supported metric.
             .ToArray();
     }
 
-    private static bool ContainsAffirmativeContiguousTokens(
+    private static bool HasAffirmativeContiguousOccurrence(
+        string evidence,
+        string value,
+        bool allowSimplePlural)
+    {
+        var valueTokens = TokenizeMetadata(value);
+
+        if (valueTokens.Count == 0)
+        {
+            return false;
+        }
+
+        return SplitEvidenceSegments(evidence)
+            .Select(TokenizeMetadata)
+            .Where(tokens =>
+                tokens.Count > 0 &&
+                !ContainsContrastMarker(tokens))
+            .Any(tokens => ContainsContiguousTokens(
+                tokens,
+                valueTokens,
+                allowSimplePlural));
+    }
+
+    private static bool ContainsContrastMarker(
+        IReadOnlyList<string> evidenceTokens)
+    {
+        return ContrastMarkerTokenSequences.Any(marker =>
+            ContainsContiguousTokens(
+                evidenceTokens,
+                marker,
+                allowSimplePlural: false));
+    }
+
+    private static bool ContainsLocallyAffirmativeContiguousTokens(
+        IReadOnlyList<string> evidenceTokens,
+        IReadOnlyList<string> valueTokens,
+        bool allowSimplePlural)
+    {
+        if (valueTokens.Count == 0 || evidenceTokens.Count == 0)
+        {
+            return false;
+        }
+
+        for (var start = 0;
+             start <= evidenceTokens.Count - valueTokens.Count;
+             start++)
+        {
+            if (!TokensMatchAt(
+                    evidenceTokens,
+                    valueTokens,
+                    start,
+                    allowSimplePlural))
+            {
+                continue;
+            }
+
+            var windowStart = Math.Max(0, start - NegationTokenWindow);
+            var windowEnd = Math.Min(
+                evidenceTokens.Count,
+                start + valueTokens.Count + NegationTokenWindow);
+            var hasLocalNegation = Enumerable
+                .Range(windowStart, windowEnd - windowStart)
+                .Where(index =>
+                    index < start ||
+                    index >= start + valueTokens.Count)
+                .Any(index => NegationTokens.Contains(
+                    evidenceTokens[index]));
+
+            if (!hasLocalNegation)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsContiguousTokens(
         IReadOnlyList<string> evidenceTokens,
         IReadOnlyList<string> valueTokens,
         bool allowSimplePlural)
@@ -848,42 +981,37 @@ Return an empty metrics array when the chunk contains no supported metric.
              start <= evidenceTokens.Count - valueTokens.Count;
              start++)
         {
-            var matches = true;
-
-            for (var index = 0; index < valueTokens.Count; index++)
+            if (TokensMatchAt(
+                    evidenceTokens,
+                    valueTokens,
+                    start,
+                    allowSimplePlural))
             {
-                if (!TokensEquivalent(
-                        evidenceTokens[start + index],
-                        valueTokens[index],
-                        allowSimplePlural))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches)
-            {
-                var windowStart = Math.Max(0, start - NegationTokenWindow);
-                var windowEnd = Math.Min(
-                    evidenceTokens.Count,
-                    start + valueTokens.Count + NegationTokenWindow);
-                var hasLocalNegation = Enumerable
-                    .Range(windowStart, windowEnd - windowStart)
-                    .Where(index =>
-                        index < start ||
-                        index >= start + valueTokens.Count)
-                    .Any(index => NegationTokens.Contains(
-                        evidenceTokens[index]));
-
-                if (!hasLocalNegation)
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
         return false;
+    }
+
+    private static bool TokensMatchAt(
+        IReadOnlyList<string> evidenceTokens,
+        IReadOnlyList<string> valueTokens,
+        int start,
+        bool allowSimplePlural)
+    {
+        for (var index = 0; index < valueTokens.Count; index++)
+        {
+            if (!TokensEquivalent(
+                    evidenceTokens[start + index],
+                    valueTokens[index],
+                    allowSimplePlural))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TokensEquivalent(

@@ -537,6 +537,24 @@ Net income 10
         result.Result.Unit!.Value.Should().Be("USD_million");
     }
 
+    [Fact]
+    public async Task ExtractAsync_ReportedCompanyContainingNegationToken_IsAccepted()
+    {
+        const string evidence = "No Name Holdings";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    company: evidence,
+                    companyEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company!.Value.Should().Be(evidence);
+    }
+
     [Theory]
     [InlineData(
         "currency",
@@ -547,6 +565,56 @@ Net income 10
         "USD_million",
         "Amounts are in thousands, not USD millions")]
     public async Task ExtractAsync_NegatedReportedMetadataValue_ReturnsSchemaValidationFailed(
+        string fieldName,
+        string value,
+        string evidence)
+    {
+        var response = fieldName == "currency"
+            ? CreateResponse(currency: value, currencyEvidence: evidence)
+            : CreateResponse(unit: value, unitEvidence: evidence);
+        var agent = CreateAgent(new FakeChatCompletionService(response));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
+    [InlineData(
+        "currency",
+        "USD",
+        "Amounts are in EUR rather than USD")]
+    [InlineData(
+        "unit",
+        "USD_million",
+        "Amounts are in thousands instead of USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        "Amounts are in EUR as opposed to USD")]
+    [InlineData(
+        "unit",
+        "USD_million",
+        "Amounts are in thousands other than USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        "Amounts are in EUR en lugar de USD")]
+    [InlineData(
+        "unit",
+        "USD_million",
+        "Amounts are in thousands en vez de USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        "Amounts are in EUR, sino USD")]
+    [InlineData(
+        "unit",
+        "USD_million",
+        "Amounts are in thousands, pero no USD millions")]
+    public async Task ExtractAsync_ContrastiveReportedMetadataValue_ReturnsSchemaValidationFailed(
         string fieldName,
         string value,
         string evidence)
@@ -779,6 +847,47 @@ Net income 10
     }
 
     [Fact]
+    public async Task ExtractAsync_MarkdownTableCannotPairHeaderAndRowAcrossBlocks()
+    {
+        const string evidence =
+            "| Metric | 2024A |\n| EBITDA | 100 |\n\n" +
+            "| Metric | 2025E |\n| Revenue | 200 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownTableWithSeparatorRow_IsAccepted()
+    {
+        const string evidence =
+            "| Metric | 2024A |\n| --- | ---: |\n| Revenue | 200 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(200m);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ReportedMetricAliasPeriodAndValueInSeparateRecords_ReturnsSchemaValidationFailed()
     {
         const string evidence =
@@ -795,6 +904,50 @@ Net income 10
             CancellationToken.None);
 
         AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
+    [InlineData("Revenue discussed above. Adjusted operating result 2024A 200")]
+    [InlineData("Revenue discussed above! Adjusted operating result 2024A 200")]
+    [InlineData("Revenue discussed above? Adjusted operating result 2024A 200")]
+    public async Task ExtractAsync_ReportedMetricAliasInPriorSentence_ReturnsSchemaValidationFailed(
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
+    [InlineData("Revenue 2024A 200.", 200)]
+    [InlineData("Revenue 2024A 200.5.", 200.5)]
+    public async Task ExtractAsync_ReportedMetricSentenceTerminatorAfterValue_IsAccepted(
+        string evidence,
+        decimal metricValue)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: metricValue,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(metricValue);
     }
 
     [Fact]
@@ -975,6 +1128,79 @@ Net income 10
         "USD_million",
         "Revenue 2024A 100 thousands, not USD millions")]
     public async Task ExtractAsync_NegatedOptionalMetricField_IsSanitizedToNull(
+        string fieldName,
+        string? metricCurrency,
+        string? metricUnit,
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricCurrency: metricCurrency,
+                    metricUnit: metricUnit,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
+
+        if (fieldName == "currency")
+        {
+            metric.Currency.Should().BeNull();
+        }
+        else
+        {
+            metric.Unit.Should().BeNull();
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR rather than USD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands instead of USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR as opposed to USD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands other than USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR en lugar de USD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands en vez de USD millions")]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR, sino USD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands, pero no USD millions")]
+    public async Task ExtractAsync_ContrastiveOptionalMetricField_IsSanitizedToNull(
         string fieldName,
         string? metricCurrency,
         string? metricUnit,
