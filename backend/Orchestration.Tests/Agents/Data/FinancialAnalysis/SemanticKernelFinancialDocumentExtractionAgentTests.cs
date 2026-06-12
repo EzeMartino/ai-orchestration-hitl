@@ -537,6 +537,32 @@ Net income 10
         result.Result.Unit!.Value.Should().Be("USD_million");
     }
 
+    [Theory]
+    [InlineData(
+        "currency",
+        "USD",
+        "Amounts are in EUR, not USD")]
+    [InlineData(
+        "unit",
+        "USD_million",
+        "Amounts are in thousands, not USD millions")]
+    public async Task ExtractAsync_NegatedReportedMetadataValue_ReturnsSchemaValidationFailed(
+        string fieldName,
+        string value,
+        string evidence)
+    {
+        var response = fieldName == "currency"
+            ? CreateResponse(currency: value, currencyEvidence: evidence)
+            : CreateResponse(unit: value, unitEvidence: evidence);
+        var agent = CreateAgent(new FakeChatCompletionService(response));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
     [Fact]
     public async Task ExtractAsync_ReportedDocumentUnitWithSeparatedContradictoryTokens_ReturnsSchemaValidationFailed()
     {
@@ -753,6 +779,104 @@ Net income 10
     }
 
     [Fact]
+    public async Task ExtractAsync_ReportedMetricAliasPeriodAndValueInSeparateRecords_ReturnsSchemaValidationFailed()
+    {
+        const string evidence =
+            "Revenue was discussed separately; EBITDA 2024A 200";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricCompetingAliasInSameRecord_ReturnsSchemaValidationFailed()
+    {
+        const string evidence =
+            "Revenue was discussed with EBITDA 2024A 200";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricAliasPeriodAndValueInSameRecord_IsAccepted()
+    {
+        const string evidence = "Revenue 2024A 200";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(200m);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownTableHeaderAndCandidateMetricRow_IsAccepted()
+    {
+        const string evidence =
+            "| Metric | 2024A |\n| Revenue | 200 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(200m);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownTableHeaderAndDifferentMetricRow_ReturnsSchemaValidationFailed()
+    {
+        const string evidence =
+            "| Metric | 2024A |\n| EBITDA | 200 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 200m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ReportedMetricIdentityUnsupportedByEvidence_ReturnsSchemaValidationFailed()
     {
         const string evidence = "EBITDA 2024A 100";
@@ -837,6 +961,49 @@ Net income 10
         var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
         metric.Currency.Should().Be("USD");
         metric.Unit.Should().Be("USD_million");
+    }
+
+    [Theory]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR, not USD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands, not USD millions")]
+    public async Task ExtractAsync_NegatedOptionalMetricField_IsSanitizedToNull(
+        string fieldName,
+        string? metricCurrency,
+        string? metricUnit,
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricCurrency: metricCurrency,
+                    metricUnit: metricUnit,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
+
+        if (fieldName == "currency")
+        {
+            metric.Currency.Should().BeNull();
+        }
+        else
+        {
+            metric.Unit.Should().BeNull();
+        }
     }
 
     [Theory]

@@ -36,19 +36,20 @@ public static class FinancialMetricNameCatalog
     {
         var evidenceTokens = Tokenize(evidence);
         var occurrences = FindOccurrences(evidenceTokens);
+        var resolvedCanonicalNames = occurrences
+            .Where(candidate =>
+                !occurrences.Any(other =>
+                    !string.Equals(
+                        other.CanonicalName,
+                        candidate.CanonicalName,
+                        StringComparison.Ordinal) &&
+                    other.TokenLength >= candidate.TokenLength &&
+                    Overlaps(candidate, other)))
+            .Select(candidate => candidate.CanonicalName)
+            .ToHashSet(StringComparer.Ordinal);
 
-        return occurrences.Any(candidate =>
-            string.Equals(
-                candidate.CanonicalName,
-                canonicalName,
-                StringComparison.Ordinal) &&
-            !occurrences.Any(other =>
-                !string.Equals(
-                    other.CanonicalName,
-                    candidate.CanonicalName,
-                    StringComparison.Ordinal) &&
-                other.TokenLength >= candidate.TokenLength &&
-                Overlaps(candidate, other)));
+        return resolvedCanonicalNames.Count == 1 &&
+            resolvedCanonicalNames.Contains(canonicalName);
     }
 
     public static bool HasLeadingAlias(string value)

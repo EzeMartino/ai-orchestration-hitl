@@ -36,4 +36,17 @@ public sealed class FinancialMetricNameCatalogTests
 
         result.Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("revenue")]
+    [InlineData("ebitda")]
+    public void EvidenceSupports_CompetingStandaloneAliases_ReturnsFalse(
+        string canonicalName)
+    {
+        var result = FinancialMetricNameCatalog.EvidenceSupports(
+            canonicalName,
+            "Revenue was discussed with EBITDA 2024A 200");
+
+        result.Should().BeFalse();
+    }
 }

@@ -23,6 +23,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgent :
     private const int DefaultMaxMarkdownChunks = 12;
     private const int DefaultSemanticExtractionTimeoutSeconds = 90;
     private const int MaxSemanticExtractionTimeoutSeconds = 600;
+    private const int NegationTokenWindow = 3;
 
     private const string SystemPrompt = """
 You extract structured financial candidates from Markdown document content.
@@ -117,6 +118,17 @@ Return an empty metrics array when the chunk contains no supported metric.
         @"[\p{L}\p{Nd}]+",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
+
+    private static readonly HashSet<string> NegationTokens =
+    [
+        "not",
+        "no",
+        "without",
+        "except",
+        "nor",
+        "sin",
+        "excepto"
+    ];
 
     private readonly FinancialMetricsExtractionOptions _extractionOptions;
     private readonly FinancialDocumentExtractionResponseParser _parser;
@@ -548,8 +560,7 @@ Return an empty metrics array when the chunk contains no supported metric.
                 candidate.SourceKind,
                 candidate.Evidence,
                 markdownChunk) ||
-            !HasGroundedMetricValue(candidate) ||
-            !HasGroundedMetricIdentity(candidate))
+            !HasGroundedMetricRecord(candidate))
         {
             return false;
         }
@@ -589,7 +600,7 @@ Return an empty metrics array when the chunk contains no supported metric.
                 StringComparison.Ordinal);
     }
 
-    private static bool HasGroundedMetricValue(
+    private static bool HasGroundedMetricRecord(
         FinancialMetricCandidate candidate)
     {
         if (candidate.SourceKind != FinancialMetricCandidateSourceKinds.Reported)
@@ -602,12 +613,37 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
+        if (LooksLikeMarkdownTable(candidate.Evidence))
+        {
+            return HasGroundedMarkdownTableRecord(candidate);
+        }
+
+        return candidate.Evidence
+            .Split(
+                ['\r', '\n', ';'],
+                StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries)
+            .Any(segment =>
+                FinancialMetricNameCatalog.EvidenceSupports(
+                    candidate.Name,
+                    segment) &&
+                HasGroundedPeriodValue(
+                    segment,
+                    candidate.Period,
+                    candidate.Value.Value));
+    }
+
+    private static bool HasGroundedPeriodValue(
+        string evidence,
+        string candidatePeriod,
+        decimal candidateValue)
+    {
         var periodMatches = FinancialPeriodRegex
-            .Matches(candidate.Evidence)
+            .Matches(evidence)
             .Cast<Match>()
             .ToArray();
         var candidatePeriods = periodMatches
-            .Where(match => IsCandidatePeriod(match, candidate.Period))
+            .Where(match => IsCandidatePeriod(match, candidatePeriod))
             .ToArray();
 
         if (candidatePeriods.Length != 1)
@@ -616,7 +652,7 @@ Return an empty metrics array when the chunk contains no supported metric.
         }
 
         var numbers = FinancialNumberRegex
-            .Matches(candidate.Evidence)
+            .Matches(evidence)
             .Cast<Match>()
             .Where(match => !periodMatches.Any(
                 period => SpansOverlap(match, period)))
@@ -635,40 +671,114 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
-        var candidatePeriod = candidatePeriods[0];
-
-        if (TryGroundMarkdownTableValue(
-                candidate.Evidence,
-                periodMatches,
-                numbers,
-                candidatePeriod,
-                candidate.Value.Value))
-        {
-            return true;
-        }
-
+        var candidatePeriodMatch = candidatePeriods[0];
         var nextPeriodIndex = periodMatches
-            .Where(match => match.Index > candidatePeriod.Index)
+            .Where(match => match.Index > candidatePeriodMatch.Index)
             .Select(match => match.Index)
-            .DefaultIfEmpty(candidate.Evidence.Length)
+            .DefaultIfEmpty(evidence.Length)
             .Min();
         var associatedNumbers = numbers
             .Where(number =>
-                number.Index >= candidatePeriod.Index + candidatePeriod.Length &&
+                number.Index >=
+                    candidatePeriodMatch.Index + candidatePeriodMatch.Length &&
                 number.Index < nextPeriodIndex)
             .ToArray();
 
         return associatedNumbers.Length == 1 &&
-            associatedNumbers[0].Value == candidate.Value;
+            associatedNumbers[0].Value == candidateValue;
     }
 
-    private static bool HasGroundedMetricIdentity(
+    private static bool LooksLikeMarkdownTable(string evidence)
+    {
+        return evidence
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.Contains('|')) >= 2;
+    }
+
+    private static bool HasGroundedMarkdownTableRecord(
         FinancialMetricCandidate candidate)
     {
-        return candidate.SourceKind != FinancialMetricCandidateSourceKinds.Reported ||
-            FinancialMetricNameCatalog.EvidenceSupports(
-                candidate.Name,
-                candidate.Evidence);
+        var rows = candidate.Evidence
+            .Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries)
+            .Where(line => line.Contains('|'))
+            .Select(ParseMarkdownTableRow)
+            .Where(row => row.Count > 1)
+            .ToArray();
+
+        for (var headerIndex = 0; headerIndex < rows.Length; headerIndex++)
+        {
+            var header = rows[headerIndex];
+
+            for (var columnIndex = 0;
+                 columnIndex < header.Count;
+                 columnIndex++)
+            {
+                if (!CellSupportsCandidatePeriod(
+                        header[columnIndex],
+                        candidate.Period))
+                {
+                    continue;
+                }
+
+                for (var rowIndex = headerIndex + 1;
+                     rowIndex < rows.Length;
+                     rowIndex++)
+                {
+                    var row = rows[rowIndex];
+
+                    if (row.Count == header.Count &&
+                        FinancialMetricNameCatalog.EvidenceSupports(
+                            candidate.Name,
+                            string.Join(' ', row)) &&
+                        CellSupportsCandidateValue(
+                            row[columnIndex],
+                            candidate.Value!.Value))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<string> ParseMarkdownTableRow(string line)
+    {
+        return line
+            .Trim()
+            .Trim('|')
+            .Split('|', StringSplitOptions.TrimEntries);
+    }
+
+    private static bool CellSupportsCandidatePeriod(
+        string cell,
+        string candidatePeriod)
+    {
+        var match = FinancialPeriodRegex.Match(cell);
+
+        return match.Success &&
+            match.Index == 0 &&
+            match.Length == cell.Length &&
+            IsCandidatePeriod(match, candidatePeriod);
+    }
+
+    private static bool CellSupportsCandidateValue(
+        string cell,
+        decimal candidateValue)
+    {
+        var numbers = FinancialNumberRegex
+            .Matches(cell)
+            .Select(match => ParseFinancialNumber(match.Value))
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .ToArray();
+
+        return numbers.Length == 1 &&
+            numbers[0] == candidateValue;
     }
 
     private static bool HasGroundedOptionalMetricField(
@@ -681,41 +791,10 @@ Return an empty metrics array when the chunk contains no supported metric.
             return true;
         }
 
-        return ContainsContiguousTokens(
+        return ContainsAffirmativeContiguousTokens(
             TokenizeMetadata(evidence),
             TokenizeMetadata(value),
             allowSimplePlural);
-    }
-
-    private static bool TryGroundMarkdownTableValue(
-        string evidence,
-        IReadOnlyList<Match> periods,
-        IReadOnlyList<FinancialNumberOccurrence> numbers,
-        Match candidatePeriod,
-        decimal candidateValue)
-    {
-        if (!evidence.Contains('|') ||
-            !evidence.Contains('\n') ||
-            periods.Count != numbers.Count ||
-            periods.Count == 0 ||
-            periods[^1].Index + periods[^1].Length > numbers[0].Index)
-        {
-            return false;
-        }
-
-        var candidatePeriodIndex = -1;
-
-        for (var index = 0; index < periods.Count; index++)
-        {
-            if (periods[index].Index == candidatePeriod.Index)
-            {
-                candidatePeriodIndex = index;
-                break;
-            }
-        }
-
-        return candidatePeriodIndex >= 0 &&
-            numbers[candidatePeriodIndex].Value == candidateValue;
     }
 
     private static bool HasGroundedMetadataValue(
@@ -736,15 +815,15 @@ Return an empty metrics array when the chunk contains no supported metric.
 
         return candidate.FieldName switch
         {
-            "company" => ContainsContiguousTokens(
+            "company" => ContainsAffirmativeContiguousTokens(
                 evidenceTokens,
                 valueTokens,
                 allowSimplePlural: false),
-            "currency" => ContainsContiguousTokens(
+            "currency" => ContainsAffirmativeContiguousTokens(
                 evidenceTokens,
                 valueTokens,
                 allowSimplePlural: false),
-            "unit" => ContainsContiguousTokens(
+            "unit" => ContainsAffirmativeContiguousTokens(
                 evidenceTokens,
                 valueTokens,
                 allowSimplePlural: true),
@@ -760,7 +839,7 @@ Return an empty metrics array when the chunk contains no supported metric.
             .ToArray();
     }
 
-    private static bool ContainsContiguousTokens(
+    private static bool ContainsAffirmativeContiguousTokens(
         IReadOnlyList<string> evidenceTokens,
         IReadOnlyList<string> valueTokens,
         bool allowSimplePlural)
@@ -785,7 +864,22 @@ Return an empty metrics array when the chunk contains no supported metric.
 
             if (matches)
             {
-                return true;
+                var windowStart = Math.Max(0, start - NegationTokenWindow);
+                var windowEnd = Math.Min(
+                    evidenceTokens.Count,
+                    start + valueTokens.Count + NegationTokenWindow);
+                var hasLocalNegation = Enumerable
+                    .Range(windowStart, windowEnd - windowStart)
+                    .Where(index =>
+                        index < start ||
+                        index >= start + valueTokens.Count)
+                    .Any(index => NegationTokens.Contains(
+                        evidenceTokens[index]));
+
+                if (!hasLocalNegation)
+                {
+                    return true;
+                }
             }
         }
 
