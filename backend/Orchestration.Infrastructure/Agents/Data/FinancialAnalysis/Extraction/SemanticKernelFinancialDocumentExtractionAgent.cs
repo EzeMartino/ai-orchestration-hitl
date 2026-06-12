@@ -99,7 +99,18 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.Multiline);
 
     private static readonly Regex FinancialNumberRegex = new(
-        @"(?<!\w)\(?[+-]?\d[\d.,]*%?\)?(?!\w)",
+        @"(?<!\w)\(?[+-]?\d[\d.,]*(?:[ \t]*%)?\)?(?!\w)",
+        RegexOptions.Compiled |
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex FinancialPeriodRegex = new(
+        @"(?<!\w)(?:FY[ \t]*(?<fyYear>20\d{2})|(?<year>20\d{2})[ \t]*(?<suffix>[AE]))(?!\w)",
+        RegexOptions.Compiled |
+        RegexOptions.CultureInvariant |
+        RegexOptions.IgnoreCase);
+
+    private static readonly Regex MetadataTokenRegex = new(
+        @"[\p{L}\p{Nd}]+",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant);
 
@@ -508,7 +519,8 @@ Return an empty metrics array when the chunk contains no supported metric.
         if (!HasGroundedEvidence(
                 candidate.SourceKind,
                 candidate.Evidence,
-                markdownChunk))
+                markdownChunk) ||
+            !HasGroundedMetadataValue(candidate))
         {
             return false;
         }
@@ -569,10 +581,225 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
-        return FinancialNumberRegex
+        var periodMatches = FinancialPeriodRegex
             .Matches(candidate.Evidence)
-            .Select(match => ParseFinancialNumber(match.Value))
-            .Any(value => value == candidate.Value);
+            .Cast<Match>()
+            .ToArray();
+        var numbers = FinancialNumberRegex
+            .Matches(candidate.Evidence)
+            .Cast<Match>()
+            .Where(match => !periodMatches.Any(
+                period => SpansOverlap(match, period)))
+            .Select(match => new FinancialNumberOccurrence(
+                match.Index,
+                ParseFinancialNumber(match.Value)))
+            .Where(number => number.Value.HasValue)
+            .Select(number => number with
+            {
+                Value = number.Value!.Value
+            })
+            .ToArray();
+
+        if (numbers.Length == 1)
+        {
+            return numbers[0].Value == candidate.Value;
+        }
+
+        if (numbers.Length < 2)
+        {
+            return false;
+        }
+
+        var candidatePeriods = periodMatches
+            .Where(match => IsCandidatePeriod(match, candidate.Period))
+            .ToArray();
+
+        if (candidatePeriods.Length != 1)
+        {
+            return false;
+        }
+
+        var candidatePeriod = candidatePeriods[0];
+        var nextPeriodIndex = periodMatches
+            .Where(match => match.Index > candidatePeriod.Index)
+            .Select(match => match.Index)
+            .DefaultIfEmpty(candidate.Evidence.Length)
+            .Min();
+        var associatedNumbers = numbers
+            .Where(number =>
+                number.Index >= candidatePeriod.Index + candidatePeriod.Length &&
+                number.Index < nextPeriodIndex)
+            .ToArray();
+
+        return associatedNumbers.Length == 1 &&
+            associatedNumbers[0].Value == candidate.Value;
+    }
+
+    private static bool HasGroundedMetadataValue(
+        FinancialDocumentMetadataCandidate candidate)
+    {
+        if (candidate.SourceKind != FinancialMetricCandidateSourceKinds.Reported)
+        {
+            return true;
+        }
+
+        var valueTokens = TokenizeMetadata(candidate.Value);
+        var evidenceTokens = TokenizeMetadata(candidate.Evidence);
+
+        if (valueTokens.Count == 0 || evidenceTokens.Count == 0)
+        {
+            return false;
+        }
+
+        return candidate.FieldName switch
+        {
+            "company" => ContainsContiguousTokens(
+                evidenceTokens,
+                valueTokens,
+                allowSimplePlural: false),
+            "currency" => ContainsContiguousTokens(
+                evidenceTokens,
+                valueTokens,
+                allowSimplePlural: false),
+            "unit" => ContainsOrderedTokens(
+                evidenceTokens,
+                valueTokens,
+                allowSimplePlural: true),
+            _ => false
+        };
+    }
+
+    private static IReadOnlyList<string> TokenizeMetadata(string value)
+    {
+        return MetadataTokenRegex
+            .Matches(value)
+            .Select(match => match.Value.ToLowerInvariant())
+            .ToArray();
+    }
+
+    private static bool ContainsContiguousTokens(
+        IReadOnlyList<string> evidenceTokens,
+        IReadOnlyList<string> valueTokens,
+        bool allowSimplePlural)
+    {
+        for (var start = 0;
+             start <= evidenceTokens.Count - valueTokens.Count;
+             start++)
+        {
+            var matches = true;
+
+            for (var index = 0; index < valueTokens.Count; index++)
+            {
+                if (!TokensEquivalent(
+                        evidenceTokens[start + index],
+                        valueTokens[index],
+                        allowSimplePlural))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsOrderedTokens(
+        IReadOnlyList<string> evidenceTokens,
+        IReadOnlyList<string> valueTokens,
+        bool allowSimplePlural)
+    {
+        var evidenceIndex = 0;
+
+        foreach (var valueToken in valueTokens)
+        {
+            while (evidenceIndex < evidenceTokens.Count &&
+                !TokensEquivalent(
+                    evidenceTokens[evidenceIndex],
+                    valueToken,
+                    allowSimplePlural))
+            {
+                evidenceIndex++;
+            }
+
+            if (evidenceIndex == evidenceTokens.Count)
+            {
+                return false;
+            }
+
+            evidenceIndex++;
+        }
+
+        return true;
+    }
+
+    private static bool TokensEquivalent(
+        string left,
+        string right,
+        bool allowSimplePlural)
+    {
+        if (string.Equals(left, right, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return allowSimplePlural &&
+            string.Equals(
+                NormalizeSimplePlural(left),
+                NormalizeSimplePlural(right),
+                StringComparison.Ordinal);
+    }
+
+    private static string NormalizeSimplePlural(string token)
+    {
+        return token.Length > 3 && token.EndsWith('s')
+            ? token[..^1]
+            : token;
+    }
+
+    private static bool IsCandidatePeriod(
+        Match periodMatch,
+        string candidatePeriod)
+    {
+        if (candidatePeriod.Length != 5 ||
+            !int.TryParse(
+                candidatePeriod.AsSpan(0, 4),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var candidateYear))
+        {
+            return false;
+        }
+
+        var yearGroup = periodMatch.Groups["fyYear"].Success
+            ? periodMatch.Groups["fyYear"]
+            : periodMatch.Groups["year"];
+
+        if (!int.TryParse(
+                yearGroup.Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var evidenceYear) ||
+            evidenceYear != candidateYear)
+        {
+            return false;
+        }
+
+        var suffix = periodMatch.Groups["suffix"];
+        return !suffix.Success ||
+            char.ToUpperInvariant(suffix.Value[0]) ==
+            char.ToUpperInvariant(candidatePeriod[4]);
+    }
+
+    private static bool SpansOverlap(Match left, Match right)
+    {
+        return left.Index < right.Index + right.Length &&
+            right.Index < left.Index + left.Length;
     }
 
     private static decimal? ParseFinancialNumber(string value)
@@ -703,4 +930,8 @@ Preserve values exactly as supported by this chunk.
             Result: null,
             FailureReason: reason);
     }
+
+    private readonly record struct FinancialNumberOccurrence(
+        int Index,
+        decimal? Value);
 }

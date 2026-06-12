@@ -40,8 +40,8 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
 
         var result = await agent.ExtractAsync(
             CreateRequest(
-                "# Page 1\nExample Energy\nCompany evidence\nCurrency evidence\n" +
-                "Unit evidence\nrevenue evidence 100"),
+                "# Page 1\nExample Energy\nCurrency USD\n" +
+                "Amounts in USD millions\nrevenue evidence 100"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -407,8 +407,8 @@ Net income 10
         var result = await agent.ExtractAsync(
             CreateRequest(
                 "# Page 1\nFirst Company\nCompany evidence\nrevenue evidence 100\n" +
-                "# Page 2\nLater Company\nCompany evidence\nCurrency evidence\n" +
-                "Unit evidence\nebitda evidence 20"),
+                "# Page 2\nLater Company\nCurrency USD\n" +
+                "Amounts in USD millions\nebitda evidence 20"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -467,6 +467,67 @@ Net income 10
     }
 
     [Theory]
+    [InlineData("company")]
+    [InlineData("currency")]
+    [InlineData("unit")]
+    public async Task ExtractAsync_ReportedMetadataValueUnsupportedByEvidence_ReturnsSchemaValidationFailed(
+        string fieldName)
+    {
+        var response = fieldName switch
+        {
+            "company" => CreateResponse(
+                company: "Fabricated Corp",
+                companyEvidence: "Annual report"),
+            "currency" => CreateResponse(
+                currency: "USD",
+                currencyEvidence: "Amounts in EUR"),
+            _ => CreateResponse(
+                unit: "USD_million",
+                unitEvidence: "Values are unscaled")
+        };
+        var evidence = fieldName switch
+        {
+            "company" => "Annual report",
+            "currency" => "Amounts in EUR",
+            _ => "Values are unscaled"
+        };
+        var agent = CreateAgent(new FakeChatCompletionService(response));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_ReportedMetadataValuesSupportedByEvidence_AreAccepted()
+    {
+        const string companyEvidence = "example   ENERGY";
+        const string currencyEvidence = "Amounts in USD.";
+        const string unitEvidence = "Amounts in USD millions";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    company: "Example Energy",
+                    currency: "USD",
+                    unit: "USD_million",
+                    companyEvidence: companyEvidence,
+                    currencyEvidence: currencyEvidence,
+                    unitEvidence: unitEvidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(
+                $"{companyEvidence}\n{currencyEvidence}\n{unitEvidence}"),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Company!.Value.Should().Be("Example Energy");
+        result.Result.Currency!.Value.Should().Be("USD");
+        result.Result.Unit!.Value.Should().Be("USD_million");
+    }
+
+    [Theory]
     [InlineData("100", 100)]
     [InlineData("1,234.50", 1234.50)]
     [InlineData("(100)", -100)]
@@ -491,6 +552,86 @@ Net income 10
             .Which.Value.Should().Be(metricValue);
     }
 
+    [Fact]
+    public async Task ExtractAsync_ReportedMetricCannotUseCandidatePeriodYearAsValue()
+    {
+        const string evidence = "Revenue FY2024 100";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 2024m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
+    [InlineData("Revenue FY2024 100", 100)]
+    [InlineData("Margin FY2024 12.5 %", 0.125)]
+    public async Task ExtractAsync_ReportedMetricValueAssociatedWithCandidatePeriod_IsAccepted(
+        string evidence,
+        decimal metricValue)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: metricValue,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(metricValue);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MultipleMetricValuesWithoutPeriod_ReturnsSchemaValidationFailed()
+    {
+        const string evidence = "Revenue 100 200";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PairedPeriodAndMetricValues_AssociatesCandidatePeriodValue()
+    {
+        const string evidence = "Revenue FY2023 90 FY2024 100";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricPeriod: "2024A",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(100m);
+    }
+
     [Theory]
     [InlineData("## pAgE 12", 12)]
     [InlineData("# Page 1", 2)]
@@ -505,6 +646,8 @@ Net income 10
                     currency: "USD",
                     unit: "USD_million",
                     companyEvidence: "Example Energy",
+                    currencyEvidence: "Currency USD",
+                    unitEvidence: "Amounts in USD millions",
                     metricName: "revenue",
                     metricValue: 100m,
                     metricEvidence: "revenue evidence 100",
@@ -512,8 +655,8 @@ Net income 10
 
         var result = await agent.ExtractAsync(
             CreateRequest(
-                $"{heading}\nExample Energy\nCurrency evidence\n" +
-                "Unit evidence\nrevenue evidence 100"),
+                $"{heading}\nExample Energy\nCurrency USD\n" +
+                "Amounts in USD millions\nrevenue evidence 100"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -726,8 +869,11 @@ Net income 10
         string? currency = null,
         string? unit = null,
         string? metricName = null,
+        string metricPeriod = "2024A",
         decimal metricValue = 0m,
-        string companyEvidence = "Company evidence",
+        string? companyEvidence = null,
+        string? currencyEvidence = null,
+        string? unitEvidence = null,
         string metricEvidence = "",
         int? sourcePage = 1)
     {
@@ -737,7 +883,7 @@ Net income 10
         {
             document["company"] = CreateMetadata(
                 company,
-                companyEvidence,
+                companyEvidence ?? company,
                 sourcePage);
         }
 
@@ -745,7 +891,7 @@ Net income 10
         {
             document["currency"] = CreateMetadata(
                 currency,
-                "Currency evidence",
+                currencyEvidence ?? $"Currency {currency}",
                 sourcePage);
         }
 
@@ -753,7 +899,7 @@ Net income 10
         {
             document["unit"] = CreateMetadata(
                 unit,
-                "Unit evidence",
+                unitEvidence ?? "Amounts in USD millions",
                 sourcePage);
         }
 
@@ -765,7 +911,7 @@ Net income 10
                 new JsonObject
                 {
                     ["name"] = metricName,
-                    ["period"] = "2024A",
+                    ["period"] = metricPeriod,
                     ["value"] = metricValue,
                     ["currency"] = currency,
                     ["unit"] = unit,
