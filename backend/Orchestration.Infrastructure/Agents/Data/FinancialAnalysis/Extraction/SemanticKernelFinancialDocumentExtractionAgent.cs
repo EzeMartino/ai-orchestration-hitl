@@ -38,6 +38,7 @@ Use null for unavailable metadata fields.
 Use sourceKind "reported" only for values explicitly present in the document.
 An inferred candidate must include a nonblank inferenceExplanation.
 A reported candidate must include a nonblank verbatim evidence excerpt.
+A reported metric evidence must include its explicit suffixed period and value in the same verbatim excerpt.
 
 Return exactly this JSON shape:
 {
@@ -104,7 +105,7 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.CultureInvariant);
 
     private static readonly Regex FinancialPeriodRegex = new(
-        @"(?<!\w)(?:FY[ \t]*(?<fyYear>20\d{2})|(?<year>20\d{2})[ \t]*(?<suffix>[AE]))(?!\w)",
+        @"(?<!\w)(?:FY)?(?<year>20\d{2})(?<suffix>[AE])(?!\w)",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant |
         RegexOptions.IgnoreCase);
@@ -585,6 +586,15 @@ Return an empty metrics array when the chunk contains no supported metric.
             .Matches(candidate.Evidence)
             .Cast<Match>()
             .ToArray();
+        var candidatePeriods = periodMatches
+            .Where(match => IsCandidatePeriod(match, candidate.Period))
+            .ToArray();
+
+        if (candidatePeriods.Length != 1)
+        {
+            return false;
+        }
+
         var numbers = FinancialNumberRegex
             .Matches(candidate.Evidence)
             .Cast<Match>()
@@ -600,26 +610,23 @@ Return an empty metrics array when the chunk contains no supported metric.
             })
             .ToArray();
 
-        if (numbers.Length == 1)
-        {
-            return numbers[0].Value == candidate.Value;
-        }
-
-        if (numbers.Length < 2)
-        {
-            return false;
-        }
-
-        var candidatePeriods = periodMatches
-            .Where(match => IsCandidatePeriod(match, candidate.Period))
-            .ToArray();
-
-        if (candidatePeriods.Length != 1)
+        if (numbers.Length == 0)
         {
             return false;
         }
 
         var candidatePeriod = candidatePeriods[0];
+
+        if (TryGroundMarkdownTableValue(
+                candidate.Evidence,
+                periodMatches,
+                numbers,
+                candidatePeriod,
+                candidate.Value.Value))
+        {
+            return true;
+        }
+
         var nextPeriodIndex = periodMatches
             .Where(match => match.Index > candidatePeriod.Index)
             .Select(match => match.Index)
@@ -633,6 +640,37 @@ Return an empty metrics array when the chunk contains no supported metric.
 
         return associatedNumbers.Length == 1 &&
             associatedNumbers[0].Value == candidate.Value;
+    }
+
+    private static bool TryGroundMarkdownTableValue(
+        string evidence,
+        IReadOnlyList<Match> periods,
+        IReadOnlyList<FinancialNumberOccurrence> numbers,
+        Match candidatePeriod,
+        decimal candidateValue)
+    {
+        if (!evidence.Contains('|') ||
+            !evidence.Contains('\n') ||
+            periods.Count != numbers.Count ||
+            periods.Count == 0 ||
+            periods[^1].Index + periods[^1].Length > numbers[0].Index)
+        {
+            return false;
+        }
+
+        var candidatePeriodIndex = -1;
+
+        for (var index = 0; index < periods.Count; index++)
+        {
+            if (periods[index].Index == candidatePeriod.Index)
+            {
+                candidatePeriodIndex = index;
+                break;
+            }
+        }
+
+        return candidatePeriodIndex >= 0 &&
+            numbers[candidatePeriodIndex].Value == candidateValue;
     }
 
     private static bool HasGroundedMetadataValue(
@@ -776,12 +814,8 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
-        var yearGroup = periodMatch.Groups["fyYear"].Success
-            ? periodMatch.Groups["fyYear"]
-            : periodMatch.Groups["year"];
-
         if (!int.TryParse(
-                yearGroup.Value,
+                periodMatch.Groups["year"].Value,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
                 out var evidenceYear) ||
@@ -888,6 +922,7 @@ Return an empty metrics array when the chunk contains no supported metric.
 Extract supported financial document candidates from chunk {chunkNumber} of {chunkCount}.
 Evidence excerpts must contain at most {Math.Max(1, request.MaxEvidenceExcerptCharacters)} characters.
 sourcePage must be null because trusted page attribution is unavailable.
+Reported metric evidence must include the explicit suffixed period and value in one verbatim excerpt.
 Preserve values exactly as supported by this chunk.
 
 <document_content>
