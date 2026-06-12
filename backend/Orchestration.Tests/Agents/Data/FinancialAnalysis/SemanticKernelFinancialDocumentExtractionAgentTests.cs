@@ -556,6 +556,26 @@ Net income 10
     }
 
     [Theory]
+    [InlineData("Issuer is Acme rather than Globex")]
+    [InlineData(
+        "Issuer is not confirmed in the preliminary filing and after extensive review is listed as Globex")]
+    public async Task ExtractAsync_NegatedOrContrastiveReportedCompany_ReturnsSchemaValidationFailed(
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    company: "Globex",
+                    companyEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
     [InlineData(
         "currency",
         "USD",
@@ -573,6 +593,23 @@ Net income 10
             ? CreateResponse(currency: value, currencyEvidence: evidence)
             : CreateResponse(unit: value, unitEvidence: evidence);
         var agent = CreateAgent(new FakeChatCompletionService(response));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_LineWrappedNegatedReportedCurrency_ReturnsSchemaValidationFailed()
+    {
+        const string evidence = "Amounts are in EUR, not\nUSD";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    currency: "USD",
+                    currencyEvidence: evidence)));
 
         var result = await agent.ExtractAsync(
             CreateRequest(evidence),
@@ -1128,6 +1165,49 @@ Net income 10
         "USD_million",
         "Revenue 2024A 100 thousands, not USD millions")]
     public async Task ExtractAsync_NegatedOptionalMetricField_IsSanitizedToNull(
+        string fieldName,
+        string? metricCurrency,
+        string? metricUnit,
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: 100m,
+                    metricCurrency: metricCurrency,
+                    metricUnit: metricUnit,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        var metric = result.Result!.Metrics.Should().ContainSingle().Subject;
+
+        if (fieldName == "currency")
+        {
+            metric.Currency.Should().BeNull();
+        }
+        else
+        {
+            metric.Unit.Should().BeNull();
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "currency",
+        "USD",
+        null,
+        "Revenue 2024A 100 EUR, not\nUSD")]
+    [InlineData(
+        "unit",
+        null,
+        "USD_million",
+        "Revenue 2024A 100 thousands, not\nUSD millions")]
+    public async Task ExtractAsync_LineWrappedNegatedOptionalMetricField_IsSanitizedToNull(
         string fieldName,
         string? metricCurrency,
         string? metricUnit,

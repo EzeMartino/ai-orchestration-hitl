@@ -23,7 +23,6 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgent :
     private const int DefaultMaxMarkdownChunks = 12;
     private const int DefaultSemanticExtractionTimeoutSeconds = 90;
     private const int MaxSemanticExtractionTimeoutSeconds = 600;
-    private const int NegationTokenWindow = 3;
 
     private const string SystemPrompt = """
 You extract structured financial candidates from Markdown document content.
@@ -127,13 +126,6 @@ Return an empty metrics array when the chunk contains no supported metric.
     private static readonly IReadOnlyList<IReadOnlyList<string>>
         ContrastMarkerTokenSequences =
     [
-        ["not"],
-        ["no"],
-        ["without"],
-        ["except"],
-        ["nor"],
-        ["sin"],
-        ["excepto"],
         ["rather", "than"],
         ["instead", "of"],
         ["as", "opposed", "to"],
@@ -862,9 +854,9 @@ Return an empty metrics array when the chunk contains no supported metric.
 
         return candidate.FieldName switch
         {
-            "company" => ContainsLocallyAffirmativeContiguousTokens(
-                TokenizeMetadata(candidate.Evidence),
-                TokenizeMetadata(candidate.Value),
+            "company" => HasAffirmativeContiguousOccurrence(
+                candidate.Evidence,
+                candidate.Value,
                 allowSimplePlural: false),
             "currency" => HasAffirmativeContiguousOccurrence(
                 candidate.Evidence,
@@ -907,33 +899,10 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
-        return SplitEvidenceSegments(evidence)
-            .Select(TokenizeMetadata)
-            .Where(tokens =>
-                tokens.Count > 0 &&
-                !ContainsContrastMarker(tokens))
-            .Any(tokens => ContainsContiguousTokens(
-                tokens,
-                valueTokens,
-                allowSimplePlural));
-    }
+        var evidenceTokens = TokenizeMetadata(evidence);
 
-    private static bool ContainsContrastMarker(
-        IReadOnlyList<string> evidenceTokens)
-    {
-        return ContrastMarkerTokenSequences.Any(marker =>
-            ContainsContiguousTokens(
-                evidenceTokens,
-                marker,
-                allowSimplePlural: false));
-    }
-
-    private static bool ContainsLocallyAffirmativeContiguousTokens(
-        IReadOnlyList<string> evidenceTokens,
-        IReadOnlyList<string> valueTokens,
-        bool allowSimplePlural)
-    {
-        if (valueTokens.Count == 0 || evidenceTokens.Count == 0)
+        if (evidenceTokens.Count == 0 ||
+            ContainsContrastMarker(evidenceTokens))
         {
             return false;
         }
@@ -951,25 +920,30 @@ Return an empty metrics array when the chunk contains no supported metric.
                 continue;
             }
 
-            var windowStart = Math.Max(0, start - NegationTokenWindow);
-            var windowEnd = Math.Min(
-                evidenceTokens.Count,
-                start + valueTokens.Count + NegationTokenWindow);
-            var hasLocalNegation = Enumerable
-                .Range(windowStart, windowEnd - windowStart)
-                .Where(index =>
-                    index < start ||
-                    index >= start + valueTokens.Count)
-                .Any(index => NegationTokens.Contains(
-                    evidenceTokens[index]));
+            var hasNegationOutsideCandidate = evidenceTokens
+                .Select((token, index) => (token, index))
+                .Where(item =>
+                    item.index < start ||
+                    item.index >= start + valueTokens.Count)
+                .Any(item => NegationTokens.Contains(item.token));
 
-            if (!hasLocalNegation)
+            if (!hasNegationOutsideCandidate)
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool ContainsContrastMarker(
+        IReadOnlyList<string> evidenceTokens)
+    {
+        return ContrastMarkerTokenSequences.Any(marker =>
+            ContainsContiguousTokens(
+                evidenceTokens,
+                marker,
+                allowSimplePlural: false));
     }
 
     private static bool ContainsContiguousTokens(
