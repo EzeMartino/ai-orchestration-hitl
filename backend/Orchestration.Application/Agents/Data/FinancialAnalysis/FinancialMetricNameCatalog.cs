@@ -35,16 +35,20 @@ public static class FinancialMetricNameCatalog
         string evidence)
     {
         var evidenceTokens = Tokenize(evidence);
+        var occurrences = FindOccurrences(evidenceTokens);
 
-        return evidenceTokens.Count > 0 &&
-            Aliases
-                .Where(alias => string.Equals(
-                    alias.CanonicalName,
-                    canonicalName,
-                    StringComparison.Ordinal))
-                .Any(alias => ContainsContiguousTokens(
-                    evidenceTokens,
-                    alias.Tokens));
+        return occurrences.Any(candidate =>
+            string.Equals(
+                candidate.CanonicalName,
+                canonicalName,
+                StringComparison.Ordinal) &&
+            !occurrences.Any(other =>
+                !string.Equals(
+                    other.CanonicalName,
+                    candidate.CanonicalName,
+                    StringComparison.Ordinal) &&
+                other.TokenLength >= candidate.TokenLength &&
+                Overlaps(candidate, other)));
     }
 
     public static bool HasLeadingAlias(string value)
@@ -156,35 +160,55 @@ public static class FinancialMetricNameCatalog
             .ToArray();
     }
 
-    private static bool ContainsContiguousTokens(
-        IReadOnlyList<string> evidenceTokens,
-        IReadOnlyList<string> aliasTokens)
+    private static IReadOnlyList<AliasOccurrence> FindOccurrences(
+        IReadOnlyList<string> evidenceTokens)
     {
-        for (var start = 0;
-             start <= evidenceTokens.Count - aliasTokens.Count;
-             start++)
+        var occurrences = new List<AliasOccurrence>();
+
+        foreach (var alias in Aliases)
         {
-            var matches = true;
-
-            for (var index = 0; index < aliasTokens.Count; index++)
+            for (var start = 0;
+                 start <= evidenceTokens.Count - alias.Tokens.Count;
+                 start++)
             {
-                if (!string.Equals(
-                        evidenceTokens[start + index],
-                        aliasTokens[index],
-                        StringComparison.Ordinal))
+                if (MatchesAt(evidenceTokens, alias.Tokens, start))
                 {
-                    matches = false;
-                    break;
+                    occurrences.Add(new AliasOccurrence(
+                        start,
+                        alias.Tokens.Count,
+                        alias.CanonicalName));
                 }
-            }
-
-            if (matches)
-            {
-                return true;
             }
         }
 
-        return false;
+        return occurrences;
+    }
+
+    private static bool MatchesAt(
+        IReadOnlyList<string> evidenceTokens,
+        IReadOnlyList<string> aliasTokens,
+        int start)
+    {
+        for (var index = 0; index < aliasTokens.Count; index++)
+        {
+            if (!string.Equals(
+                    evidenceTokens[start + index],
+                    aliasTokens[index],
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool Overlaps(
+        AliasOccurrence first,
+        AliasOccurrence second)
+    {
+        return first.Start < second.Start + second.TokenLength &&
+            second.Start < first.Start + first.TokenLength;
     }
 
     private static string Normalize(string value)
@@ -208,4 +232,9 @@ public static class FinancialMetricNameCatalog
         string Value,
         string CanonicalName,
         IReadOnlyList<string> Tokens);
+
+    private sealed record AliasOccurrence(
+        int Start,
+        int TokenLength,
+        string CanonicalName);
 }
