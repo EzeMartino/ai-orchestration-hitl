@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -45,7 +46,7 @@ Return exactly this JSON shape:
       "value": "string",
       "sourceKind": "reported",
       "confidence": 0.0,
-      "sourcePage": 1,
+      "sourcePage": null,
       "evidence": "string",
       "inferenceExplanation": null
     },
@@ -53,7 +54,7 @@ Return exactly this JSON shape:
       "value": "string",
       "sourceKind": "reported",
       "confidence": 0.0,
-      "sourcePage": 1,
+      "sourcePage": null,
       "evidence": "string",
       "inferenceExplanation": null
     },
@@ -61,7 +62,7 @@ Return exactly this JSON shape:
       "value": "string",
       "sourceKind": "reported",
       "confidence": 0.0,
-      "sourcePage": 1,
+      "sourcePage": null,
       "evidence": "string",
       "inferenceExplanation": null
     }
@@ -75,7 +76,7 @@ Return exactly this JSON shape:
       "unit": null,
       "sourceKind": "reported",
       "confidence": 0.0,
-      "sourcePage": 1,
+      "sourcePage": null,
       "evidence": "string",
       "inferenceExplanation": null
     }
@@ -86,7 +87,7 @@ company, currency, and unit may each be null.
 currency, unit, sourcePage, and inferenceExplanation may be null where the schema permits.
 sourceKind must be exactly "reported" or "inferred".
 period must use the normalized YYYYA or YYYYE form.
-sourcePage may be null when the page is not supported by the document evidence.
+sourcePage must be null because trusted page attribution is unavailable.
 confidence must be a number from 0 through 1.
 Return an empty metrics array when the chunk contains no supported metric.
 """;
@@ -97,12 +98,10 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.CultureInvariant |
         RegexOptions.Multiline);
 
-    private static readonly Regex PageHeadingRegex = new(
-        @"^#{1,6}[ \t]+page[ \t]+(?<page>\d+)(?:[ \t]+[^\r\n]*)?\r?$",
+    private static readonly Regex FinancialNumberRegex = new(
+        @"(?<!\w)\(?[+-]?\d[\d.,]*%?\)?(?!\w)",
         RegexOptions.Compiled |
-        RegexOptions.CultureInvariant |
-        RegexOptions.IgnoreCase |
-        RegexOptions.Multiline);
+        RegexOptions.CultureInvariant);
 
     private readonly FinancialMetricsExtractionOptions _extractionOptions;
     private readonly FinancialDocumentExtractionResponseParser _parser;
@@ -451,7 +450,6 @@ Return an empty metrics array when the chunk contains no supported metric.
         out FinancialDocumentExtractionResult grounded)
     {
         grounded = null!;
-        var explicitPages = ExtractExplicitPages(markdownChunk);
         var metadataCandidates = result.MetadataCandidates ??
             EnumerateRepresentativeMetadata(result).ToArray();
         var groundedMetadata =
@@ -463,7 +461,6 @@ Return an empty metrics array when the chunk contains no supported metric.
             if (!TryGroundMetadataCandidate(
                     candidate,
                     markdownChunk,
-                    explicitPages,
                     out var groundedCandidate))
             {
                 return false;
@@ -480,7 +477,6 @@ Return an empty metrics array when the chunk contains no supported metric.
             if (!TryGroundMetricCandidate(
                     candidate,
                     markdownChunk,
-                    explicitPages,
                     out var groundedCandidate))
             {
                 return false;
@@ -505,7 +501,6 @@ Return an empty metrics array when the chunk contains no supported metric.
     private static bool TryGroundMetadataCandidate(
         FinancialDocumentMetadataCandidate candidate,
         string markdownChunk,
-        IReadOnlySet<int> explicitPages,
         out FinancialDocumentMetadataCandidate grounded)
     {
         grounded = null!;
@@ -513,18 +508,14 @@ Return an empty metrics array when the chunk contains no supported metric.
         if (!HasGroundedEvidence(
                 candidate.SourceKind,
                 candidate.Evidence,
-                markdownChunk) ||
-            !TryGroundSourcePage(
-                candidate.SourcePage,
-                explicitPages,
-                out var sourcePage))
+                markdownChunk))
         {
             return false;
         }
 
         grounded = candidate with
         {
-            SourcePage = sourcePage
+            SourcePage = null
         };
 
         return true;
@@ -533,7 +524,6 @@ Return an empty metrics array when the chunk contains no supported metric.
     private static bool TryGroundMetricCandidate(
         FinancialMetricCandidate candidate,
         string markdownChunk,
-        IReadOnlySet<int> explicitPages,
         out FinancialMetricCandidate grounded)
     {
         grounded = null!;
@@ -542,17 +532,14 @@ Return an empty metrics array when the chunk contains no supported metric.
                 candidate.SourceKind,
                 candidate.Evidence,
                 markdownChunk) ||
-            !TryGroundSourcePage(
-                candidate.SourcePage,
-                explicitPages,
-                out var sourcePage))
+            !HasGroundedMetricValue(candidate))
         {
             return false;
         }
 
         grounded = candidate with
         {
-            SourcePage = sourcePage
+            SourcePage = null
         };
 
         return true;
@@ -569,49 +556,99 @@ Return an empty metrics array when the chunk contains no supported metric.
                 StringComparison.Ordinal);
     }
 
-    private static bool TryGroundSourcePage(
-        int? sourcePage,
-        IReadOnlySet<int> explicitPages,
-        out int? groundedSourcePage)
+    private static bool HasGroundedMetricValue(
+        FinancialMetricCandidate candidate)
     {
-        groundedSourcePage = null;
-
-        if (explicitPages.Count == 0)
+        if (candidate.SourceKind != FinancialMetricCandidateSourceKinds.Reported)
         {
             return true;
         }
 
-        if (sourcePage is null)
-        {
-            return true;
-        }
-
-        if (!explicitPages.Contains(sourcePage.Value))
+        if (candidate.Value is null)
         {
             return false;
         }
 
-        groundedSourcePage = sourcePage;
-        return true;
+        return FinancialNumberRegex
+            .Matches(candidate.Evidence)
+            .Select(match => ParseFinancialNumber(match.Value))
+            .Any(value => value == candidate.Value);
     }
 
-    private static IReadOnlySet<int> ExtractExplicitPages(
-        string markdownChunk)
+    private static decimal? ParseFinancialNumber(string value)
     {
-        var pages = new HashSet<int>();
+        var trimmed = value.Trim();
+        var isParenthesesNegative =
+            trimmed.StartsWith('(') && trimmed.EndsWith(')');
 
-        foreach (Match match in PageHeadingRegex.Matches(markdownChunk))
+        if (isParenthesesNegative)
         {
-            if (int.TryParse(
-                    match.Groups["page"].Value,
-                    out var page) &&
-                page > 0)
-            {
-                pages.Add(page);
-            }
+            trimmed = trimmed[1..^1];
         }
 
-        return pages;
+        var isPercent = trimmed.EndsWith('%');
+
+        if (isPercent)
+        {
+            trimmed = trimmed[..^1];
+        }
+
+        trimmed = NormalizeNumericText(trimmed);
+
+        if (!decimal.TryParse(
+                trimmed,
+                NumberStyles.AllowThousands |
+                NumberStyles.AllowDecimalPoint |
+                NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            return null;
+        }
+
+        var signed = isParenthesesNegative ? -parsed : parsed;
+        return isPercent ? signed / 100m : signed;
+    }
+
+    private static string NormalizeNumericText(string value)
+    {
+        var trimmed = value.Trim();
+        var commaIndex = trimmed.LastIndexOf(',');
+        var dotIndex = trimmed.LastIndexOf('.');
+
+        if (commaIndex >= 0 && dotIndex >= 0)
+        {
+            return commaIndex > dotIndex
+                ? trimmed.Replace(".", string.Empty).Replace(',', '.')
+                : trimmed.Replace(",", string.Empty);
+        }
+
+        if (commaIndex >= 0)
+        {
+            return NormalizeSingleSeparatorNumber(trimmed, commaIndex, ',');
+        }
+
+        if (dotIndex >= 0)
+        {
+            return NormalizeSingleSeparatorNumber(trimmed, dotIndex, '.');
+        }
+
+        return trimmed;
+    }
+
+    private static string NormalizeSingleSeparatorNumber(
+        string value,
+        int separatorIndex,
+        char separator)
+    {
+        var digitsAfterSeparator = value.Length - separatorIndex - 1;
+        var integerPart = value[..separatorIndex].TrimStart('-', '+');
+        var usesThousandsSeparator = digitsAfterSeparator == 3 &&
+            integerPart != "0";
+
+        return usesThousandsSeparator
+            ? value.Replace(separator.ToString(), string.Empty)
+            : value.Replace(separator, '.');
     }
 
     private static string BuildUserPrompt(
@@ -623,7 +660,7 @@ Return an empty metrics array when the chunk contains no supported metric.
         return $"""
 Extract supported financial document candidates from chunk {chunkNumber} of {chunkCount}.
 Evidence excerpts must contain at most {Math.Max(1, request.MaxEvidenceExcerptCharacters)} characters.
-sourcePage must be null or an integer from 1 through {request.MaxSourcePage}.
+sourcePage must be null because trusted page attribution is unavailable.
 Preserve values exactly as supported by this chunk.
 
 <document_content>

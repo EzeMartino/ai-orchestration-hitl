@@ -41,7 +41,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var result = await agent.ExtractAsync(
             CreateRequest(
                 "# Page 1\nExample Energy\nCompany evidence\nCurrency evidence\n" +
-                "Unit evidence\nrevenue evidence"),
+                "Unit evidence\nrevenue evidence 100"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -63,6 +63,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         systemPrompt.Should().Contain("\"document\"");
         systemPrompt.Should().Contain("\"metrics\"");
         systemPrompt.Should().Contain("\"inferenceExplanation\"");
+        systemPrompt.Should().Contain("sourcePage must be null");
 
         var executionSettings = chat.ExecutionSettings.Single()
             .Should()
@@ -120,7 +121,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
 
         var result = await agent.ExtractAsync(
             CreateRequest(
-                "# Page 1\nNo supported values\n# Page 2\nebitda evidence"),
+                "# Page 1\nNo supported values\n# Page 2\nebitda evidence 20"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -139,7 +140,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
 
         var result = await agent.ExtractAsync(
             CreateRequest(
-                "# Page 1\nrevenue evidence\n# Page 2\nEBITDA"),
+                "# Page 1\nrevenue evidence 100\n# Page 2\nEBITDA"),
             CancellationToken.None);
 
         AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
@@ -228,7 +229,7 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var agent = CreateAgent(chat);
 
         Func<Task> act = () => agent.ExtractAsync(
-            CreateRequest("# Page 1\nrevenue evidence"),
+            CreateRequest("# Page 1\nrevenue evidence 100"),
             cancellation.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
@@ -257,9 +258,9 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         var request = CreateRequest(
             """
 # Page 1
-revenue evidence
+revenue evidence 100
 # Page 2
-ebitda evidence
+ebitda evidence 20
 # Page 3
 Net income 10
 """,
@@ -303,7 +304,7 @@ Net income 10
     [Fact]
     public async Task ExtractAsync_MarkdownAtConfiguredCharacterMaximum_IsAccepted()
     {
-        const string markdown = "revenue evidence";
+        const string markdown = "revenue evidence 100";
         var chat = new FakeChatCompletionService(
             CreateResponse(metricName: "revenue", metricValue: 100m));
         var agent = CreateAgent(
@@ -331,7 +332,7 @@ Net income 10
                 .MaximumMarkdownChunkCharacters;
         var markdown =
             new string('a', maxChunkCharacters - 1) +
-            "\U0001F600\nrevenue evidence";
+            "\U0001F600\nrevenue evidence 100";
         var chat = new FakeChatCompletionService(
             CreateResponse(),
             CreateResponse(metricName: "revenue", metricValue: 100m));
@@ -358,7 +359,7 @@ Net income 10
         string.Concat(chunks).Should().Be(markdown);
         char.IsHighSurrogate(chunks[0][^1]).Should().BeFalse();
         char.IsLowSurrogate(chunks[1][0]).Should().BeFalse();
-        chunks[1].Should().Contain("revenue evidence");
+        chunks[1].Should().Contain("revenue evidence 100");
     }
 
     [Fact]
@@ -405,9 +406,9 @@ Net income 10
 
         var result = await agent.ExtractAsync(
             CreateRequest(
-                "# Page 1\nFirst Company\nCompany evidence\nrevenue evidence\n" +
+                "# Page 1\nFirst Company\nCompany evidence\nrevenue evidence 100\n" +
                 "# Page 2\nLater Company\nCompany evidence\nCurrency evidence\n" +
-                "Unit evidence\nebitda evidence"),
+                "Unit evidence\nebitda evidence 20"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
@@ -449,64 +450,79 @@ Net income 10
     }
 
     [Fact]
-    public async Task ExtractAsync_SourcePageMatchesExplicitPageHeading_IsAccepted()
+    public async Task ExtractAsync_ReportedMetricValueAbsentFromEvidence_ReturnsSchemaValidationFailed()
     {
         var agent = CreateAgent(
             new FakeChatCompletionService(
                 CreateResponse(
                     metricName: "revenue",
                     metricValue: 100m,
-                    metricEvidence: "revenue evidence",
-                    sourcePage: 12)));
+                    metricEvidence: "revenue evidence")));
 
         var result = await agent.ExtractAsync(
-            CreateRequest("## pAgE 12\nrevenue evidence"),
-            CancellationToken.None);
-
-        result.Succeeded.Should().BeTrue();
-        result.Result!.Metrics.Single().SourcePage.Should().Be(12);
-    }
-
-    [Fact]
-    public async Task ExtractAsync_SourcePageDoesNotMatchExplicitPageHeading_ReturnsSchemaValidationFailed()
-    {
-        var agent = CreateAgent(
-            new FakeChatCompletionService(
-                CreateResponse(
-                    metricName: "revenue",
-                    metricValue: 100m,
-                    metricEvidence: "revenue evidence",
-                    sourcePage: 2)));
-
-        var result = await agent.ExtractAsync(
-            CreateRequest("# Page 1\nrevenue evidence"),
+            CreateRequest("revenue evidence"),
             CancellationToken.None);
 
         AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
     }
 
-    [Fact]
-    public async Task ExtractAsync_NoExplicitPageHeading_SanitizesSourcePageToNull()
+    [Theory]
+    [InlineData("100", 100)]
+    [InlineData("1,234.50", 1234.50)]
+    [InlineData("(100)", -100)]
+    [InlineData("12.5%", 0.125)]
+    public async Task ExtractAsync_ReportedMetricValuePresentInEvidence_IsAccepted(
+        string evidenceValue,
+        decimal metricValue)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricValue: metricValue,
+                    metricEvidence: $"Revenue {evidenceValue}")));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest($"Revenue {evidenceValue}"),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Value.Should().Be(metricValue);
+    }
+
+    [Theory]
+    [InlineData("## pAgE 12", 12)]
+    [InlineData("# Page 1", 2)]
+    public async Task ExtractAsync_PageHeadingsCannotCreateTrustedAttribution(
+        string heading,
+        int modelSourcePage)
     {
         var agent = CreateAgent(
             new FakeChatCompletionService(
                 CreateResponse(
                     company: "Example Energy",
+                    currency: "USD",
+                    unit: "USD_million",
                     companyEvidence: "Example Energy",
                     metricName: "revenue",
                     metricValue: 100m,
-                    metricEvidence: "revenue evidence",
-                    sourcePage: 7)));
+                    metricEvidence: "revenue evidence 100",
+                    sourcePage: modelSourcePage)));
 
         var result = await agent.ExtractAsync(
-            CreateRequest("Example Energy\nrevenue evidence"),
+            CreateRequest(
+                $"{heading}\nExample Energy\nCurrency evidence\n" +
+                "Unit evidence\nrevenue evidence 100"),
             CancellationToken.None);
 
         result.Succeeded.Should().BeTrue();
         result.Result!.Company!.SourcePage.Should().BeNull();
+        result.Result.Currency!.SourcePage.Should().BeNull();
+        result.Result.Unit!.SourcePage.Should().BeNull();
         result.Result.Metrics.Single().SourcePage.Should().BeNull();
-        result.Result.MetadataCandidates.Should().ContainSingle()
-            .Which.SourcePage.Should().BeNull();
+        result.Result.MetadataCandidates.Should().OnlyContain(
+            candidate => candidate.SourcePage == null);
     }
 
     [Fact]
@@ -757,7 +773,7 @@ Net income 10
                     ["confidence"] = 0.95m,
                     ["sourcePage"] = sourcePage,
                     ["evidence"] = string.IsNullOrEmpty(metricEvidence)
-                        ? $"{metricName} evidence"
+                        ? $"{metricName} evidence {metricValue.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
                         : metricEvidence,
                     ["inferenceExplanation"] = null
                 });
