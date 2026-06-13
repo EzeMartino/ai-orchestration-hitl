@@ -4,6 +4,8 @@ namespace Orchestration.Domain.FinancialMetricsExtraction;
 
 public class FinancialMetricsExtractionDraft
 {
+    private const string InvalidWindowsFileNameCharacters = "<>:\"/\\|?*";
+
     public const int OriginalFileNameMaxLength = 260;
 
     public const int ContentHashMaxLength = 128;
@@ -104,9 +106,6 @@ public class FinancialMetricsExtractionDraft
 
     public void Confirm(Guid reviewerId, DateTimeOffset now)
     {
-        ValidateReviewerId(reviewerId);
-        ValidateLifecycleTimestamp(now);
-
         if (Status == FinancialMetricsExtractionDraftStatus.Confirmed)
         {
             return;
@@ -117,14 +116,14 @@ public class FinancialMetricsExtractionDraft
             throw new InvalidOperationException("A discarded draft cannot be confirmed.");
         }
 
+        ValidateReviewerId(reviewerId);
+        ValidateLifecycleTimestamp(now);
+
         Complete(FinancialMetricsExtractionDraftStatus.Confirmed, reviewerId, now);
     }
 
     public void Discard(Guid reviewerId, DateTimeOffset now)
     {
-        ValidateReviewerId(reviewerId);
-        ValidateLifecycleTimestamp(now);
-
         if (Status == FinancialMetricsExtractionDraftStatus.Discarded)
         {
             return;
@@ -134,6 +133,9 @@ public class FinancialMetricsExtractionDraft
         {
             throw new InvalidOperationException("A confirmed draft cannot be discarded.");
         }
+
+        ValidateReviewerId(reviewerId);
+        ValidateLifecycleTimestamp(now);
 
         Complete(FinancialMetricsExtractionDraftStatus.Discarded, reviewerId, now);
     }
@@ -175,7 +177,7 @@ public class FinancialMetricsExtractionDraft
             throw new ArgumentException("Original file name cannot be blank.", nameof(originalFileName));
         }
 
-        var normalizedFileName = originalFileName.Trim();
+        var normalizedFileName = originalFileName.TrimStart(' ');
 
         if (normalizedFileName.Length > OriginalFileNameMaxLength)
         {
@@ -186,15 +188,51 @@ public class FinancialMetricsExtractionDraft
 
         if (normalizedFileName is "." or ".."
             || Path.IsPathRooted(normalizedFileName)
-            || normalizedFileName.Contains('/')
-            || normalizedFileName.Contains('\\'))
+            || normalizedFileName.EndsWith('.')
+            || normalizedFileName.EndsWith(' ')
+            || ContainsInvalidWindowsFileNameCharacter(normalizedFileName)
+            || IsReservedWindowsDeviceName(normalizedFileName))
         {
             throw new ArgumentException(
-                "Original file name must be a safe base name without path components.",
+                "Original file name must be a Windows-safe base name.",
                 nameof(originalFileName));
         }
 
         return normalizedFileName;
+    }
+
+    private static bool ContainsInvalidWindowsFileNameCharacter(string fileName)
+    {
+        foreach (var character in fileName)
+        {
+            if (character < 32 || InvalidWindowsFileNameCharacters.Contains(character))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsReservedWindowsDeviceName(string fileName)
+    {
+        var extensionSeparatorIndex = fileName.IndexOf('.');
+        var baseName = extensionSeparatorIndex >= 0
+            ? fileName[..extensionSeparatorIndex]
+            : fileName;
+
+        if (baseName.Equals("CON", StringComparison.OrdinalIgnoreCase)
+            || baseName.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+            || baseName.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+            || baseName.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return baseName.Length == 4
+            && baseName[3] is >= '1' and <= '9'
+            && (baseName.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void ValidateContentHash(string contentHash)

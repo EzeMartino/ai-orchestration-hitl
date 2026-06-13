@@ -66,6 +66,26 @@ public class FinancialMetricsExtractionDraftTests
     [InlineData(@"folder\financial-report.pdf")]
     [InlineData("/financial-report.pdf")]
     [InlineData(@"C:\financial-report.pdf")]
+    [InlineData("CON.pdf")]
+    [InlineData("con")]
+    [InlineData("PRN.csv")]
+    [InlineData("AUX.txt")]
+    [InlineData("NUL")]
+    [InlineData("COM1.pdf")]
+    [InlineData("COM9")]
+    [InlineData("LPT1.pdf")]
+    [InlineData("LPT9.txt")]
+    [InlineData("report<.pdf")]
+    [InlineData("report>.pdf")]
+    [InlineData("report?.pdf")]
+    [InlineData("report*.pdf")]
+    [InlineData("report|.pdf")]
+    [InlineData("report\".pdf")]
+    [InlineData("report.pdf:stream")]
+    [InlineData("report.")]
+    [InlineData("report.pdf ")]
+    [InlineData("report\u0001.pdf")]
+    [InlineData("\treport.pdf")]
     public void Create_UnsafeOriginalFileName_ThrowsArgumentException(string? originalFileName)
     {
         var action = () => CreateDraft(originalFileName: originalFileName!);
@@ -82,11 +102,21 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Fact]
-    public void Create_OriginalFileNameHasOuterWhitespace_TrimsFileName()
+    public void Create_OriginalFileNameHasLeadingWhitespace_TrimsFileName()
     {
-        var draft = CreateDraft(originalFileName: "  financial-report.pdf  ");
+        var draft = CreateDraft(originalFileName: "  financial-report.pdf");
 
         Assert.Equal("financial-report.pdf", draft.OriginalFileName);
+    }
+
+    [Theory]
+    [InlineData("consolidated-report.pdf")]
+    [InlineData("company.com1.pdf")]
+    public void Create_WindowsSafeOriginalFileName_PreservesFileName(string originalFileName)
+    {
+        var draft = CreateDraft(originalFileName: originalFileName);
+
+        Assert.Equal(originalFileName, draft.OriginalFileName);
     }
 
     [Fact]
@@ -273,12 +303,55 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Fact]
+    public void Confirm_ConfirmedDraftWithEmptyReviewerAndEarlierTimestamp_IsNoOp()
+    {
+        var draft = CreateDraft();
+        var originalReviewerId = Guid.NewGuid();
+        var originalCompletedAt = CreatedAt.AddMinutes(1);
+        draft.Confirm(originalReviewerId, originalCompletedAt);
+
+        draft.Confirm(Guid.Empty, CreatedAt);
+
+        Assert.Equal(FinancialMetricsExtractionDraftStatus.Confirmed, draft.Status);
+        Assert.Equal(originalReviewerId, draft.ReviewedByUserId);
+        Assert.Equal(originalCompletedAt, draft.UpdatedAt);
+        Assert.Equal(originalCompletedAt, draft.CompletedAt);
+    }
+
+    [Fact]
+    public void Confirm_ConfirmedDraftWithEmptyReviewerAndDefaultTimestamp_IsNoOp()
+    {
+        var draft = CreateDraft();
+        var originalReviewerId = Guid.NewGuid();
+        var originalCompletedAt = CreatedAt.AddMinutes(1);
+        draft.Confirm(originalReviewerId, originalCompletedAt);
+
+        draft.Confirm(Guid.Empty, default);
+
+        Assert.Equal(FinancialMetricsExtractionDraftStatus.Confirmed, draft.Status);
+        Assert.Equal(originalReviewerId, draft.ReviewedByUserId);
+        Assert.Equal(originalCompletedAt, draft.UpdatedAt);
+        Assert.Equal(originalCompletedAt, draft.CompletedAt);
+    }
+
+    [Fact]
     public void Confirm_DiscardedDraft_ThrowsInvalidOperationException()
     {
         var draft = CreateDraft();
         draft.Discard(Guid.NewGuid(), CreatedAt.AddMinutes(1));
 
         var action = () => draft.Confirm(Guid.NewGuid(), CreatedAt.AddMinutes(2));
+
+        Assert.Throws<InvalidOperationException>(action);
+    }
+
+    [Fact]
+    public void Confirm_DiscardedDraftWithInvalidArguments_ThrowsInvalidOperationException()
+    {
+        var draft = CreateDraft();
+        draft.Discard(Guid.NewGuid(), CreatedAt.AddMinutes(1));
+
+        var action = () => draft.Confirm(Guid.Empty, default);
 
         Assert.Throws<InvalidOperationException>(action);
     }
@@ -336,12 +409,55 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Fact]
+    public void Discard_DiscardedDraftWithEmptyReviewerAndEarlierTimestamp_IsNoOp()
+    {
+        var draft = CreateDraft();
+        var originalReviewerId = Guid.NewGuid();
+        var originalCompletedAt = CreatedAt.AddMinutes(1);
+        draft.Discard(originalReviewerId, originalCompletedAt);
+
+        draft.Discard(Guid.Empty, CreatedAt);
+
+        Assert.Equal(FinancialMetricsExtractionDraftStatus.Discarded, draft.Status);
+        Assert.Equal(originalReviewerId, draft.ReviewedByUserId);
+        Assert.Equal(originalCompletedAt, draft.UpdatedAt);
+        Assert.Equal(originalCompletedAt, draft.CompletedAt);
+    }
+
+    [Fact]
+    public void Discard_DiscardedDraftWithEmptyReviewerAndDefaultTimestamp_IsNoOp()
+    {
+        var draft = CreateDraft();
+        var originalReviewerId = Guid.NewGuid();
+        var originalCompletedAt = CreatedAt.AddMinutes(1);
+        draft.Discard(originalReviewerId, originalCompletedAt);
+
+        draft.Discard(Guid.Empty, default);
+
+        Assert.Equal(FinancialMetricsExtractionDraftStatus.Discarded, draft.Status);
+        Assert.Equal(originalReviewerId, draft.ReviewedByUserId);
+        Assert.Equal(originalCompletedAt, draft.UpdatedAt);
+        Assert.Equal(originalCompletedAt, draft.CompletedAt);
+    }
+
+    [Fact]
     public void Discard_ConfirmedDraft_ThrowsInvalidOperationException()
     {
         var draft = CreateDraft();
         draft.Confirm(Guid.NewGuid(), CreatedAt.AddMinutes(1));
 
         var action = () => draft.Discard(Guid.NewGuid(), CreatedAt.AddMinutes(2));
+
+        Assert.Throws<InvalidOperationException>(action);
+    }
+
+    [Fact]
+    public void Discard_ConfirmedDraftWithInvalidArguments_ThrowsInvalidOperationException()
+    {
+        var draft = CreateDraft();
+        draft.Confirm(Guid.NewGuid(), CreatedAt.AddMinutes(1));
+
+        var action = () => draft.Discard(Guid.Empty, default);
 
         Assert.Throws<InvalidOperationException>(action);
     }
