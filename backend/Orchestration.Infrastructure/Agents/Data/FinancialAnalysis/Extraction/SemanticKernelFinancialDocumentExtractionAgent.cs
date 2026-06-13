@@ -115,7 +115,7 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.CultureInvariant);
 
     private static readonly Regex FinancialPeriodRegex = new(
-        @"(?<!\w)(?:(?:FY)?(?<year>20\d{2})(?<suffix>[AE])|(?<actualYear>20\d{2})(?![ \t]+[AE](?!\w)))(?!\w)",
+        @"(?<!\w)(?:(?:FY)?(?<year>20\d{2})(?<suffix>[AE])|(?<actualYear>20\d{2})(?![\s\p{P}]*[AE](?!\w)))(?!\w)",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant |
         RegexOptions.IgnoreCase);

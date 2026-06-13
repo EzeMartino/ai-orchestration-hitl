@@ -793,6 +793,28 @@ Net income 10
     }
 
     [Theory]
+    [InlineData("Revenue 2024-E 100")]
+    [InlineData("Revenue 2024/E 100")]
+    [InlineData("Revenue 2024 (E) 100")]
+    public async Task ExtractAsync_EstimateShapedPeriod_CannotGroundActualPeriod(
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricPeriod: "2024A",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
+    }
+
+    [Theory]
     [InlineData("revenue", "Revenue FY2024A 100", 100)]
     [InlineData("revenue", "Revenue fy2024a 100", 100)]
     [InlineData("gross_margin", "Gross margin 2024A 12.5 %", 0.125)]
@@ -815,6 +837,29 @@ Net income 10
         result.Succeeded.Should().BeTrue();
         result.Result!.Metrics.Should().ContainSingle()
             .Which.Value.Should().Be(metricValue);
+    }
+
+    [Theory]
+    [InlineData("Revenue 2024E 100")]
+    [InlineData("Revenue FY2024E 100")]
+    public async Task ExtractAsync_CohesiveEstimatePeriod_IsAccepted(
+        string evidence)
+    {
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricPeriod: "2024E",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Period.Should().Be("2024E");
     }
 
     [Fact]
