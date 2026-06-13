@@ -7,6 +7,20 @@ namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 public sealed class FinancialMetricCandidateReconcilerTests
 {
     [Fact]
+    public void FinancialMetricReconciliationResult_Should_default_metadata_candidates_to_empty()
+    {
+        var result = new FinancialMetricReconciliationResult(
+            ProposedInput: Input(),
+            Candidates: [],
+            Conflicts: [],
+            MissingFields: [],
+            RequiresReview: false,
+            CanAutoAccept: true);
+
+        result.MetadataCandidates.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Reconcile_Should_merge_identical_values_and_retain_both_candidates()
     {
         var reconciler = CreateReconciler();
@@ -101,8 +115,13 @@ public sealed class FinancialMetricCandidateReconcilerTests
         var reconciler = CreateReconciler();
         var deterministic = Input(
             metrics: [Metric("revenue", "2024A", 100m)]);
+        var semanticCandidate = Candidate(
+            "revenue",
+            "2024A",
+            110m,
+            evidence: "Revenue was reported as 110.");
         var semantic = Extraction(
-            metrics: [Candidate("revenue", "2024A", 110m)]);
+            metrics: [semanticCandidate]);
 
         var result = reconciler.Reconcile(
             deterministic,
@@ -122,6 +141,21 @@ public sealed class FinancialMetricCandidateReconcilerTests
             },
             options => options.ExcludingMissingMembers());
         result.Conflicts.Single().MetricCandidates.Should().HaveCount(2);
+        result.Candidates.Should().OnlyContain(candidate =>
+            candidate.ReviewState ==
+            FinancialMetricCandidateReviewStates.Conflict);
+        result.Conflicts.Single().MetricCandidates.Should().OnlyContain(candidate =>
+            candidate.ReviewState ==
+            FinancialMetricCandidateReviewStates.Conflict);
+        result.Conflicts.Single().MetricCandidates.Select(candidate => candidate.Id)
+            .Should()
+            .Equal(result.Candidates.Select(candidate => candidate.Id));
+        result.Candidates.Single(candidate =>
+            candidate.Id == semanticCandidate.Id).Should().Be(
+            semanticCandidate with
+            {
+                ReviewState = FinancialMetricCandidateReviewStates.Conflict
+            });
         result.RequiresReview.Should().BeTrue();
         result.CanAutoAccept.Should().BeFalse();
     }
@@ -215,8 +249,26 @@ public sealed class FinancialMetricCandidateReconcilerTests
         var conflict = result.Conflicts.Single();
         conflict.MetadataCandidates.Select(candidate => candidate.Value)
             .Should()
-            .Equal("USD", "EUR", "GBP");
-        conflict.MetadataCandidates.Should().NotContain(representative);
+            .Equal("USD", "EUR", "EUR", "GBP");
+        conflict.MetadataCandidates.Should().Contain(candidate =>
+            candidate.Id == representative.Id);
+        conflict.MetadataCandidates.Should().OnlyContain(candidate =>
+            candidate.ReviewState ==
+            FinancialMetricCandidateReviewStates.Conflict);
+        result.MetadataCandidates
+            .Where(candidate => candidate.FieldName == "currency")
+            .Should()
+            .OnlyContain(candidate =>
+                candidate.ReviewState ==
+                FinancialMetricCandidateReviewStates.Conflict);
+        result.MetadataCandidates.Single(candidate =>
+            candidate.Id == representative.Id).Should().Be(
+            representative with
+            {
+                ReviewState = FinancialMetricCandidateReviewStates.Conflict
+            });
+        result.MetadataCandidates.Single(candidate =>
+            candidate.Id == alternatives[2].Id).Should().Be(alternatives[2]);
         result.RequiresReview.Should().BeTrue();
         result.CanAutoAccept.Should().BeFalse();
     }
@@ -407,7 +459,7 @@ public sealed class FinancialMetricCandidateReconcilerTests
         result.Conflicts.Single().MetadataCandidates
             .Select(candidate => candidate.Value)
             .Should()
-            .Equal("USD", "EUR");
+            .Equal("USD", "USD", "EUR");
         result.CanAutoAccept.Should().BeFalse();
     }
 
@@ -439,6 +491,91 @@ public sealed class FinancialMetricCandidateReconcilerTests
     }
 
     [Fact]
+    public void Reconcile_Should_preserve_all_metadata_candidates_in_stable_order()
+    {
+        var reconciler = CreateReconciler();
+        var agreeingCompany = Metadata("company", "Acme", 0.98m);
+        var inferredCompany = Metadata(
+            "company",
+            "Acme Holdings",
+            0.99m,
+            FinancialMetricCandidateSourceKinds.Inferred,
+            FinancialMetricCandidateReviewStates.Inferred,
+            "Expanded from the report title.");
+        var conflictingCurrency = Metadata("currency", "EUR", 0.97m);
+        var inferredCurrency = Metadata(
+            "currency",
+            "GBP",
+            0.99m,
+            FinancialMetricCandidateSourceKinds.Inferred,
+            FinancialMetricCandidateReviewStates.Inferred,
+            "Inferred from a regional note.");
+        var agreeingUnit = Metadata("unit", "USD_million", 0.96m);
+        var semantic = new FinancialDocumentExtractionResult(
+            Company: agreeingCompany,
+            Currency: conflictingCurrency,
+            Unit: agreeingUnit,
+            Metrics: [],
+            MetadataCandidates:
+            [
+                inferredCurrency,
+                agreeingUnit,
+                agreeingCompany,
+                conflictingCurrency,
+                agreeingCompany,
+                inferredCompany
+            ]);
+
+        var first = reconciler.Reconcile(
+            Input(),
+            semantic,
+            AutoAcceptOptions());
+        var second = reconciler.Reconcile(
+            Input(),
+            semantic with
+            {
+                MetadataCandidates = semantic.MetadataCandidates!.Reverse().ToArray()
+            },
+            AutoAcceptOptions());
+
+        first.MetadataCandidates
+            .Select(candidate =>
+                $"{candidate.FieldName}:{candidate.ExtractionStrategy}:{candidate.SourceKind}:{candidate.Value}")
+            .Should()
+            .Equal(
+                "company:deterministic_pdf_parser:reported:Acme",
+                "company:semantic_markdown_agent:reported:Acme",
+                "company:semantic_markdown_agent:inferred:Acme Holdings",
+                "currency:deterministic_pdf_parser:reported:USD",
+                "currency:semantic_markdown_agent:reported:EUR",
+                "currency:semantic_markdown_agent:inferred:GBP",
+                "unit:deterministic_pdf_parser:reported:USD_million",
+                "unit:semantic_markdown_agent:reported:USD_million");
+        first.MetadataCandidates.Select(candidate => candidate.Id)
+            .Should()
+            .Equal(second.MetadataCandidates.Select(candidate => candidate.Id));
+        first.MetadataCandidates.Count(candidate =>
+            candidate.Id == agreeingCompany.Id).Should().Be(1);
+        first.MetadataCandidates.Single(candidate =>
+            candidate.Id == agreeingCompany.Id).Should().Be(agreeingCompany);
+        first.MetadataCandidates.Single(candidate =>
+            candidate.Id == inferredCompany.Id).Should().Be(inferredCompany);
+        first.MetadataCandidates.Single(candidate =>
+            candidate.Id == inferredCurrency.Id).Should().Be(inferredCurrency);
+        first.MetadataCandidates.Single(candidate =>
+            candidate.Id == conflictingCurrency.Id).Should().BeEquivalentTo(
+            new
+            {
+                conflictingCurrency.Id,
+                conflictingCurrency.Evidence,
+                conflictingCurrency.ExtractionStrategy,
+                conflictingCurrency.SourceKind,
+                conflictingCurrency.SourcePage,
+                conflictingCurrency.InferenceExplanation
+            });
+    }
+
+    [Fact]
     public void Reconcile_Should_force_review_for_inferred_metadata_without_overriding_upload()
     {
         var reconciler = CreateReconciler();
@@ -456,6 +593,57 @@ public sealed class FinancialMetricCandidateReconcilerTests
             AutoAcceptOptions());
 
         result.ProposedInput.Company.Should().Be("Acme");
+        result.Conflicts.Should().BeEmpty();
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_prefer_explicit_metadata_without_conflicting_with_inferred_alternative()
+    {
+        var reconciler = CreateReconciler();
+        var explicitCandidate = Metadata("currency", "USD", 0.95m);
+        var inferredCandidate = Metadata(
+            "currency",
+            "EUR",
+            0.99m,
+            FinancialMetricCandidateSourceKinds.Inferred,
+            FinancialMetricCandidateReviewStates.Inferred,
+            "Inferred from surrounding narrative.");
+
+        var result = reconciler.Reconcile(
+            Input(currency: null),
+            Extraction(metadata: [inferredCandidate, explicitCandidate]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Currency.Should().Be("USD");
+        result.Conflicts.Should().BeEmpty();
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_force_review_for_unsupported_metadata_without_creating_conflict()
+    {
+        var reconciler = CreateReconciler();
+        var unsupported = Metadata(
+            "currency",
+            "EUR",
+            0.99m,
+            FinancialMetricCandidateSourceKinds.Computed,
+            FinancialMetricCandidateReviewStates.Explicit);
+
+        var result = reconciler.Reconcile(
+            Input(currency: "USD"),
+            Extraction(metadata: [unsupported]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Currency.Should().Be("USD");
+        result.Conflicts.Should().BeEmpty();
+        result.MetadataCandidates.Should().Contain(candidate =>
+            candidate.Id == unsupported.Id &&
+            candidate.SourceKind == FinancialMetricCandidateSourceKinds.Computed &&
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Explicit);
         result.RequiresReview.Should().BeTrue();
         result.CanAutoAccept.Should().BeFalse();
     }

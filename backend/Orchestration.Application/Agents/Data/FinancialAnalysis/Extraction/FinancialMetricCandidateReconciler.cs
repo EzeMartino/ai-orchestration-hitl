@@ -38,12 +38,15 @@ public sealed class FinancialMetricCandidateReconciler(
             conflicts,
             acceptedMetricCandidates);
 
-        var metadataCandidates = GetMetadataCandidates(semanticResult);
+        var semanticMetadataCandidates = GetMetadataCandidates(semanticResult);
+        var metadataCandidates = BuildResultMetadataCandidates(
+            deterministicInput,
+            semanticMetadataCandidates);
         var acceptedMetadataCandidates =
             new List<FinancialDocumentMetadataCandidate>();
         var proposedMetadata = ReconcileMetadata(
             deterministicInput,
-            metadataCandidates,
+            semanticMetadataCandidates,
             conflicts,
             acceptedMetadataCandidates);
 
@@ -78,6 +81,29 @@ public sealed class FinancialMetricCandidateReconciler(
             conflicts.Count == 0 &&
             missingFields.Count == 0 &&
             !hasReviewRequiredCandidate;
+        var metricConflictIds = conflicts
+            .SelectMany(conflict => conflict.MetricCandidates)
+            .Select(candidate => candidate.Id)
+            .ToHashSet();
+        var metadataConflictIds = conflicts
+            .SelectMany(conflict => conflict.MetadataCandidates)
+            .Select(candidate => candidate.Id)
+            .ToHashSet();
+        var markedConflicts = conflicts
+            .Select(conflict => conflict with
+            {
+                MetricCandidates = conflict.MetricCandidates
+                    .Select(candidate => MarkConflict(
+                        candidate,
+                        metricConflictIds))
+                    .ToArray(),
+                MetadataCandidates = conflict.MetadataCandidates
+                    .Select(candidate => MarkConflict(
+                        candidate,
+                        metadataConflictIds))
+                    .ToArray()
+            })
+            .ToArray();
 
         return new FinancialMetricReconciliationResult(
             ProposedInput: proposedInput,
@@ -90,9 +116,11 @@ public sealed class FinancialMetricCandidateReconciler(
                     StringComparer.Ordinal)
                 .ThenByDescending(entry => entry.Candidate.Confidence)
                 .ThenBy(entry => entry.Candidate.Id)
-                .Select(entry => entry.Candidate)
+                .Select(entry => MarkConflict(
+                    entry.Candidate,
+                    metricConflictIds))
                 .ToArray(),
-            Conflicts: conflicts
+            Conflicts: markedConflicts
                 .OrderBy(conflict => conflict.Kind, StringComparer.Ordinal)
                 .ThenBy(
                     conflict => conflict.FieldName,
@@ -104,7 +132,14 @@ public sealed class FinancialMetricCandidateReconciler(
                 .ToArray(),
             MissingFields: missingFields,
             RequiresReview: !canAutoAccept,
-            CanAutoAccept: canAutoAccept);
+            CanAutoAccept: canAutoAccept)
+        {
+            MetadataCandidates = metadataCandidates
+                .Select(candidate => MarkConflict(
+                    candidate,
+                    metadataConflictIds))
+                .ToArray()
+        };
     }
 
     private static IReadOnlyList<MetricEntry> BuildMetricEntries(
@@ -289,9 +324,16 @@ public sealed class FinancialMetricCandidateReconciler(
             return [];
         }
 
-        var candidates = semanticResult.MetadataCandidates is { Count: > 0 }
-            ? semanticResult.MetadataCandidates
-            :
+        var candidates = new List<FinancialDocumentMetadataCandidate>();
+
+        if (semanticResult.MetadataCandidates is not null)
+        {
+            candidates.AddRange(
+                semanticResult.MetadataCandidates.Where(candidate =>
+                    candidate is not null));
+        }
+
+        candidates.AddRange(
             new[]
             {
                 semanticResult.Company,
@@ -300,10 +342,55 @@ public sealed class FinancialMetricCandidateReconciler(
             }
             .Where(candidate => candidate is not null)
             .Cast<FinancialDocumentMetadataCandidate>()
-            .ToArray();
+            .ToArray());
 
         return candidates
             .Where(candidate => candidate is not null)
+            .GroupBy(candidate => candidate.Id)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FinancialDocumentMetadataCandidate>
+        BuildResultMetadataCandidates(
+            StructuredFinancialMetricsInput input,
+            IReadOnlyList<FinancialDocumentMetadataCandidate>
+                semanticCandidates)
+    {
+        var uploadCandidates =
+            new List<FinancialDocumentMetadataCandidate>();
+        AddUploadMetadataCandidate(
+            uploadCandidates,
+            input.DocumentId,
+            "company",
+            Clean(input.Company));
+        AddUploadMetadataCandidate(
+            uploadCandidates,
+            input.DocumentId,
+            "currency",
+            Clean(input.Currency));
+        AddUploadMetadataCandidate(
+            uploadCandidates,
+            input.DocumentId,
+            "unit",
+            Clean(input.Unit));
+
+        return uploadCandidates
+            .Concat(semanticCandidates)
+            .GroupBy(candidate => candidate.Id)
+            .Select(group => group.First())
+            .OrderBy(candidate => MetadataFieldRank(candidate.FieldName))
+            .ThenBy(candidate =>
+                string.Equals(
+                    candidate.ExtractionStrategy,
+                    DeterministicExtractionStrategy,
+                    StringComparison.Ordinal)
+                    ? 0
+                    : 1)
+            .ThenBy(candidate => ExplicitRank(candidate))
+            .ThenByDescending(candidate => candidate.Confidence)
+            .ThenBy(candidate => NormalizeValue(candidate.Value))
+            .ThenBy(candidate => candidate.Id)
             .ToArray();
     }
 
@@ -341,14 +428,17 @@ public sealed class FinancialMetricCandidateReconciler(
                     fieldName,
                     uploadValue);
                 acceptedCandidates.Add(uploadCandidate);
+                var uploadExplicitCandidates = fieldCandidates
+                    .Where(IsExplicit)
+                    .ToArray();
 
-                if (fieldCandidates.Any(candidate =>
+                if (uploadExplicitCandidates.Any(candidate =>
                     !ValuesEqual(candidate.Value, uploadValue)))
                 {
                     conflicts.Add(MetadataConflict(
                         fieldName,
                         uploadValue,
-                        [uploadCandidate, .. fieldCandidates]));
+                        [uploadCandidate, .. uploadExplicitCandidates]));
                 }
 
                 continue;
@@ -362,8 +452,11 @@ public sealed class FinancialMetricCandidateReconciler(
             var selected = fieldCandidates[0];
             values[fieldName] = Clean(selected.Value);
             acceptedCandidates.Add(selected);
+            var explicitFieldCandidates = fieldCandidates
+                .Where(IsExplicit)
+                .ToArray();
 
-            if (DistinctValues(fieldCandidates.Select(candidate =>
+            if (DistinctValues(explicitFieldCandidates.Select(candidate =>
                     candidate.Value)).Count > 1)
             {
                 conflicts.Add(MetadataConflict(
@@ -371,7 +464,7 @@ public sealed class FinancialMetricCandidateReconciler(
                     values[fieldName],
                     [
                         selected,
-                        .. fieldCandidates.Where(candidate =>
+                        .. explicitFieldCandidates.Where(candidate =>
                             candidate.Id != selected.Id)
                     ]));
             }
@@ -444,6 +537,56 @@ public sealed class FinancialMetricCandidateReconciler(
             ExtractionStrategy: DeterministicExtractionStrategy,
             ReviewState: FinancialMetricCandidateReviewStates.Explicit,
             InferenceExplanation: null);
+    }
+
+    private static void AddUploadMetadataCandidate(
+        ICollection<FinancialDocumentMetadataCandidate> candidates,
+        string documentId,
+        string fieldName,
+        string? value)
+    {
+        if (value is not null)
+        {
+            candidates.Add(CreateUploadMetadataCandidate(
+                documentId,
+                fieldName,
+                value));
+        }
+    }
+
+    private static int MetadataFieldRank(string? fieldName)
+    {
+        return (Clean(fieldName) ?? string.Empty).ToLowerInvariant() switch
+        {
+            "company" => 0,
+            "currency" => 1,
+            "unit" => 2,
+            _ => 3
+        };
+    }
+
+    private static FinancialMetricCandidate MarkConflict(
+        FinancialMetricCandidate candidate,
+        IReadOnlySet<Guid> conflictIds)
+    {
+        return conflictIds.Contains(candidate.Id)
+            ? candidate with
+            {
+                ReviewState = FinancialMetricCandidateReviewStates.Conflict
+            }
+            : candidate;
+    }
+
+    private static FinancialDocumentMetadataCandidate MarkConflict(
+        FinancialDocumentMetadataCandidate candidate,
+        IReadOnlySet<Guid> conflictIds)
+    {
+        return conflictIds.Contains(candidate.Id)
+            ? candidate with
+            {
+                ReviewState = FinancialMetricCandidateReviewStates.Conflict
+            }
+            : candidate;
     }
 
     private static IReadOnlyList<string> GetMissingFields(
@@ -569,11 +712,7 @@ public sealed class FinancialMetricCandidateReconciler(
     private static bool RequiresCandidateReview(
         FinancialDocumentMetadataCandidate candidate)
     {
-        return string.Equals(
-                candidate.SourceKind,
-                FinancialMetricCandidateSourceKinds.Inferred,
-                StringComparison.OrdinalIgnoreCase) ||
-            IsUnresolvedReviewState(candidate.ReviewState);
+        return !IsExplicit(candidate);
     }
 
     private static bool IsUnresolvedReviewState(string reviewState)

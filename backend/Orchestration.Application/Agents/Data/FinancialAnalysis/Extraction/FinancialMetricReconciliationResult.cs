@@ -8,7 +8,11 @@ public sealed record FinancialMetricReconciliationResult(
     IReadOnlyList<FinancialMetricCandidateConflict> Conflicts,
     IReadOnlyList<string> MissingFields,
     bool RequiresReview,
-    bool CanAutoAccept);
+    bool CanAutoAccept)
+{
+    public IReadOnlyList<FinancialDocumentMetadataCandidate>
+        MetadataCandidates { get; init; } = [];
+}
 
 public sealed record FinancialMetricCandidateConflict(
     string Kind,
