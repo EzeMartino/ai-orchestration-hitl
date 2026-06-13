@@ -581,6 +581,7 @@ public sealed class FinancialMetricCandidateReconcilerTests
             "2024A",
             100m,
             currency: "EUR",
+            unit: " usd_MILLION ",
             confidence: 0.95m,
             evidence: "Revenue reported in EUR");
 
@@ -601,6 +602,134 @@ public sealed class FinancialMetricCandidateReconcilerTests
         result.ProposedInput.Metrics.Single().Currency.Should().Be("EUR");
         result.CanAutoAccept.Should().BeTrue();
         result.RequiresReview.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_require_matching_unit_when_borrowing_currency()
+    {
+        var reconciler = CreateReconciler();
+        var incompatibleSupporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "USD",
+            unit: "USD_million",
+            confidence: 0.99m,
+            evidence: "Revenue reported in USD millions");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        unit: "shares",
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [incompatibleSupporter]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Should().Match(
+            (StructuredFinancialMetricInput metric) =>
+                metric.Unit == "shares" &&
+                metric.Currency == null);
+        result.Candidates.Should().Contain(candidate =>
+            candidate.Id == incompatibleSupporter.Id);
+        result.Conflicts.Should().ContainSingle(conflict =>
+            conflict.Kind == "metric" &&
+            conflict.FieldName == "unit" &&
+            conflict.MetricCandidates.Any(candidate =>
+                candidate.Id == incompatibleSupporter.Id));
+    }
+
+    [Fact]
+    public void Reconcile_Should_require_matching_currency_when_borrowing_unit()
+    {
+        var reconciler = CreateReconciler();
+        var incompatibleSupporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "USD",
+            unit: "USD_million",
+            confidence: 0.99m,
+            evidence: "Revenue reported in USD millions");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        unit: null,
+                        currency: "EUR",
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [incompatibleSupporter]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Should().Match(
+            (StructuredFinancialMetricInput metric) =>
+                metric.Currency == "EUR" &&
+                metric.Unit == null);
+        result.Candidates.Should().Contain(candidate =>
+            candidate.Id == incompatibleSupporter.Id);
+        result.Conflicts.Should().ContainSingle(conflict =>
+            conflict.Kind == "metric" &&
+            conflict.FieldName == "currency" &&
+            conflict.MetricCandidates.Any(candidate =>
+                candidate.Id == incompatibleSupporter.Id));
+    }
+
+    [Fact]
+    public void Reconcile_Should_not_combine_fields_from_incompatible_partial_supporters()
+    {
+        var reconciler = CreateReconciler();
+        var currencySupporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "USD",
+            unit: null,
+            confidence: 0.95m,
+            evidence: "Revenue reported in USD");
+        var unitSupporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: null,
+            unit: "shares",
+            confidence: 0.94m,
+            evidence: "Revenue reported in shares");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        unit: null,
+                        currency: null,
+                        confidence: 0.99m)
+                ]),
+            Extraction(metrics: [currencySupporter, unitSupporter]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Should().Match(
+            (StructuredFinancialMetricInput metric) =>
+                metric.Currency == "USD" &&
+                metric.Unit == null);
+        result.Candidates.Should().Contain(candidate =>
+            candidate.Id == currencySupporter.Id);
+        result.Candidates.Should().Contain(candidate =>
+            candidate.Id == unitSupporter.Id);
     }
 
     [Fact]

@@ -315,24 +315,37 @@ public sealed class FinancialMetricCandidateReconciler(
                 acceptedCandidates,
                 selected.Candidate);
 
+            var proposedCurrency =
+                Clean(selected.ProposedMetric.Currency) ??
+                (currencies.Count <= 1
+                    ? SupportedMetricField(
+                        selected,
+                        alternatives,
+                        entry => entry.ProposedMetric.Currency,
+                        entry => entry.ProposedMetric.Unit,
+                        acceptedCandidates)
+                    : null);
+            var selectedWithProposedCurrency = selected with
+            {
+                ProposedMetric = selected.ProposedMetric with
+                {
+                    Currency = proposedCurrency
+                }
+            };
+            var proposedUnit =
+                Clean(selected.ProposedMetric.Unit) ??
+                (units.Count <= 1
+                    ? SupportedMetricField(
+                        selectedWithProposedCurrency,
+                        alternatives,
+                        entry => entry.ProposedMetric.Unit,
+                        entry => entry.ProposedMetric.Currency,
+                        acceptedCandidates)
+                    : null);
             var proposed = selected.ProposedMetric with
             {
-                Currency = Clean(selected.ProposedMetric.Currency) ??
-                    (currencies.Count <= 1
-                        ? SupportedMetricField(
-                            selected,
-                            alternatives,
-                            entry => entry.ProposedMetric.Currency,
-                            acceptedCandidates)
-                        : null),
-                Unit = Clean(selected.ProposedMetric.Unit) ??
-                    (units.Count <= 1
-                        ? SupportedMetricField(
-                            selected,
-                            alternatives,
-                            entry => entry.ProposedMetric.Unit,
-                            acceptedCandidates)
-                        : null)
+                Currency = proposedCurrency,
+                Unit = proposedUnit
             };
 
             proposedMetrics.Add(proposed);
@@ -672,12 +685,20 @@ public sealed class FinancialMetricCandidateReconciler(
         MetricEntry selected,
         IEnumerable<MetricEntry> alternatives,
         Func<MetricEntry, string?> fieldSelector,
+        Func<MetricEntry, string?> compatibilitySelector,
         ICollection<FinancialMetricCandidate> acceptedCandidates)
     {
+        var selectedCompatibilityValue =
+            Clean(compatibilitySelector(selected));
         var supporter = alternatives
             .Where(entry => IsExplicit(entry.Candidate))
             .Where(entry =>
                 entry.Candidate.Value == selected.Candidate.Value)
+            .Where(entry =>
+                selectedCompatibilityValue is null ||
+                ValuesEqual(
+                    compatibilitySelector(entry),
+                    selectedCompatibilityValue))
             .Where(entry => Clean(fieldSelector(entry)) is not null)
             .OrderByDescending(entry => entry.Candidate.Confidence)
             .ThenByDescending(entry =>
