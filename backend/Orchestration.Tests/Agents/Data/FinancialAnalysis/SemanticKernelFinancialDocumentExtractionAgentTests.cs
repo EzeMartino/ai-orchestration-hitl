@@ -65,13 +65,17 @@ public sealed class SemanticKernelFinancialDocumentExtractionAgentTests
         systemPrompt.Should().Contain("\"inferenceExplanation\"");
         systemPrompt.Should().Contain("sourcePage must be null");
         systemPrompt.Should().Contain(
-            "reported metric evidence must include its explicit suffixed period and value");
+            "A bare YYYY period may support only a normalized YYYYA actual candidate");
+        systemPrompt.Should().Contain(
+            "A YYYYE estimate candidate requires an explicit E suffix");
         systemPrompt.Should().Contain(
             "reported metric evidence must include a supported metric label or alias");
         systemPrompt.Should().Contain(
             "Metric currency and unit must be null unless explicitly present");
         GetUserPrompt(chat.ChatHistories.Single()).Should().Contain(
-            "Reported metric evidence must include the explicit suffixed period");
+            "A bare YYYY period may support only a normalized YYYYA actual candidate");
+        GetUserPrompt(chat.ChatHistories.Single()).Should().Contain(
+            "A YYYYE estimate candidate requires an explicit E suffix");
         GetUserPrompt(chat.ChatHistories.Single()).Should().Contain(
             "Metric currency and unit must be null unless explicitly present");
 
@@ -769,7 +773,6 @@ Net income 10
 
     [Theory]
     [InlineData("Revenue FY2024 100")]
-    [InlineData("Revenue 2024 100")]
     [InlineData("Revenue 2024 A 100")]
     public async Task ExtractAsync_ReportedMetricWithoutExactSuffixedPeriod_ReturnsSchemaValidationFailed(
         string evidence)
@@ -881,6 +884,48 @@ Net income 10
         result.Succeeded.Should().BeTrue();
         result.Result!.Metrics.Should().ContainSingle()
             .Which.Value.Should().Be(metricValue);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownTableBareYearHeader_GroundsActualPeriod()
+    {
+        const string evidence =
+            "| Metric | 2024 |\n| Revenue | 100 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricPeriod: "2024A",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        result.Result!.Metrics.Should().ContainSingle()
+            .Which.Period.Should().Be("2024A");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_MarkdownTableBareYearHeader_CannotGroundEstimatePeriod()
+    {
+        const string evidence =
+            "| Metric | 2024 |\n| Revenue | 100 |";
+        var agent = CreateAgent(
+            new FakeChatCompletionService(
+                CreateResponse(
+                    metricName: "revenue",
+                    metricPeriod: "2024E",
+                    metricValue: 100m,
+                    metricEvidence: evidence)));
+
+        var result = await agent.ExtractAsync(
+            CreateRequest(evidence),
+            CancellationToken.None);
+
+        AssertFailure(result, FinancialDocumentExtractionResponseParser.SchemaValidationFailed);
     }
 
     [Fact]

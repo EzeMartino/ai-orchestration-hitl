@@ -39,7 +39,9 @@ Use null for unavailable metadata fields.
 Use sourceKind "reported" only for values explicitly present in the document.
 An inferred candidate must include a nonblank inferenceExplanation.
 A reported candidate must include a nonblank verbatim evidence excerpt.
-A reported metric evidence must include its explicit suffixed period and value in the same verbatim excerpt.
+A reported metric evidence must include its period and value in the same verbatim excerpt.
+A bare YYYY period may support only a normalized YYYYA actual candidate.
+A YYYYE estimate candidate requires an explicit E suffix in the evidence.
 A reported metric evidence must include a supported metric label or alias.
 Metric currency and unit must be null unless explicitly present in the same evidence excerpt.
 
@@ -113,7 +115,7 @@ Return an empty metrics array when the chunk contains no supported metric.
         RegexOptions.CultureInvariant);
 
     private static readonly Regex FinancialPeriodRegex = new(
-        @"(?<!\w)(?:FY)?(?<year>20\d{2})(?<suffix>[AE])(?!\w)",
+        @"(?<!\w)(?:(?:FY)?(?<year>20\d{2})(?<suffix>[AE])|(?<actualYear>20\d{2})(?![ \t]+[AE](?!\w)))(?!\w)",
         RegexOptions.Compiled |
         RegexOptions.CultureInvariant |
         RegexOptions.IgnoreCase);
@@ -1026,8 +1028,12 @@ Return an empty metrics array when the chunk contains no supported metric.
             return false;
         }
 
+        var evidenceYearGroup = periodMatch.Groups["year"].Success
+            ? periodMatch.Groups["year"]
+            : periodMatch.Groups["actualYear"];
+
         if (!int.TryParse(
-                periodMatch.Groups["year"].Value,
+                evidenceYearGroup.Value,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
                 out var evidenceYear) ||
@@ -1037,9 +1043,10 @@ Return an empty metrics array when the chunk contains no supported metric.
         }
 
         var suffix = periodMatch.Groups["suffix"];
-        return !suffix.Success ||
-            char.ToUpperInvariant(suffix.Value[0]) ==
-            char.ToUpperInvariant(candidatePeriod[4]);
+        return suffix.Success
+            ? char.ToUpperInvariant(suffix.Value[0]) ==
+                char.ToUpperInvariant(candidatePeriod[4])
+            : char.ToUpperInvariant(candidatePeriod[4]) == 'A';
     }
 
     private static bool SpansOverlap(Match left, Match right)
@@ -1134,7 +1141,9 @@ Return an empty metrics array when the chunk contains no supported metric.
 Extract supported financial document candidates from chunk {chunkNumber} of {chunkCount}.
 Evidence excerpts must contain at most {Math.Max(1, request.MaxEvidenceExcerptCharacters)} characters.
 sourcePage must be null because trusted page attribution is unavailable.
-Reported metric evidence must include the explicit suffixed period and value in one verbatim excerpt.
+Reported metric evidence must include its period and value in one verbatim excerpt.
+A bare YYYY period may support only a normalized YYYYA actual candidate.
+A YYYYE estimate candidate requires an explicit E suffix in the evidence.
 Reported metric evidence must include a supported metric label or alias.
 Metric currency and unit must be null unless explicitly present in the same evidence excerpt.
 Preserve values exactly as supported by this chunk.
