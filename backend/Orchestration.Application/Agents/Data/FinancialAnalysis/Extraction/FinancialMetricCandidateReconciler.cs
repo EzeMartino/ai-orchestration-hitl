@@ -150,11 +150,10 @@ public sealed class FinancialMetricCandidateReconciler(
         var deterministicMetrics =
             deterministicInput.Metrics ??
             Array.Empty<StructuredFinancialMetricInput>();
+        var deterministicCandidateIds = new HashSet<Guid>();
 
-        for (var index = 0; index < deterministicMetrics.Count; index++)
+        foreach (var metric in deterministicMetrics)
         {
-            var metric = deterministicMetrics[index];
-
             if (metric is null)
             {
                 continue;
@@ -163,18 +162,25 @@ public sealed class FinancialMetricCandidateReconciler(
             var key = MetricKeyFor(metric.Name, metric.Period);
             var confidence =
                 metric.Confidence ?? DefaultDeterministicConfidence;
+            var candidateId = CreateStableId(
+                "metric",
+                deterministicInput.DocumentId,
+                key.Name,
+                key.Period,
+                DecimalText(metric.Value),
+                Clean(metric.Currency),
+                Clean(metric.Unit),
+                Clean(metric.Source),
+                metric.SourcePage?.ToString(CultureInfo.InvariantCulture),
+                DecimalText(confidence));
+
+            if (!deterministicCandidateIds.Add(candidateId))
+            {
+                continue;
+            }
+
             var candidate = new FinancialMetricCandidate(
-                Id: CreateStableId(
-                    "metric",
-                    deterministicInput.DocumentId,
-                    index.ToString(CultureInfo.InvariantCulture),
-                    key.Name,
-                    key.Period,
-                    DecimalText(metric.Value),
-                    metric.Currency,
-                    metric.Unit,
-                    metric.Source,
-                    metric.SourcePage?.ToString(CultureInfo.InvariantCulture)),
+                Id: candidateId,
                 Name: key.Name,
                 Period: key.Period,
                 Value: metric.Value,
@@ -245,27 +251,34 @@ public sealed class FinancialMetricCandidateReconciler(
                      .ThenBy(group => group.Key.Period, StringComparer.Ordinal))
         {
             var alternatives = OrderMetricAlternatives(group).ToArray();
-            var preferred = alternatives
+            var explicitAlternatives = alternatives
+                .Where(entry => IsExplicit(entry.Candidate))
+                .ToArray();
+            var selectableAlternatives = explicitAlternatives.Length > 0
+                ? explicitAlternatives
+                : alternatives;
+            var preferred = selectableAlternatives
                 .OrderBy(entry => entry.IsDeterministic ? 0 : 1)
-                .ThenBy(entry => ExplicitRank(entry.Candidate))
                 .ThenByDescending(entry => entry.Candidate.Confidence)
                 .ThenBy(entry => entry.Candidate.Id)
                 .First();
-            var valueCount = alternatives
+            var valueCount = explicitAlternatives
                 .Select(entry => entry.Candidate.Value)
                 .Distinct()
                 .Count();
             var currencies = DistinctValues(
-                alternatives.Select(entry => entry.Candidate.Currency));
+                explicitAlternatives.Select(entry =>
+                    entry.Candidate.Currency));
             var units = DistinctValues(
-                alternatives.Select(entry => entry.Candidate.Unit));
+                explicitAlternatives.Select(entry =>
+                    entry.Candidate.Unit));
 
             if (valueCount > 1)
             {
                 conflicts.Add(MetricConflict(
                     "value",
                     preferred,
-                    alternatives));
+                    explicitAlternatives));
             }
 
             if (currencies.Count > 1)
@@ -273,7 +286,7 @@ public sealed class FinancialMetricCandidateReconciler(
                 conflicts.Add(MetricConflict(
                     "currency",
                     preferred,
-                    alternatives));
+                    explicitAlternatives));
             }
 
             if (units.Count > 1)
@@ -281,7 +294,7 @@ public sealed class FinancialMetricCandidateReconciler(
                 conflicts.Add(MetricConflict(
                     "unit",
                     preferred,
-                    alternatives));
+                    explicitAlternatives));
             }
 
             var hasConflict =
@@ -290,26 +303,39 @@ public sealed class FinancialMetricCandidateReconciler(
                 units.Count > 1;
             var selected = hasConflict
                 ? preferred
-                : alternatives
-                    .OrderBy(entry => ExplicitRank(entry.Candidate))
-                    .ThenByDescending(entry => entry.Candidate.Confidence)
+                : selectableAlternatives
+                    .OrderByDescending(entry =>
+                        entry.Candidate.Confidence)
                     .ThenByDescending(entry =>
                         !string.IsNullOrWhiteSpace(entry.Candidate.Evidence))
                     .ThenBy(entry => entry.IsDeterministic ? 0 : 1)
                     .ThenBy(entry => entry.Candidate.Id)
                     .First();
+            AddAcceptedCandidate(
+                acceptedCandidates,
+                selected.Candidate);
+
             var proposed = selected.ProposedMetric with
             {
                 Currency = Clean(selected.ProposedMetric.Currency) ??
-                    FirstValue(alternatives.Select(entry =>
-                        entry.ProposedMetric.Currency)),
+                    (currencies.Count <= 1
+                        ? SupportedMetricField(
+                            selected,
+                            alternatives,
+                            entry => entry.ProposedMetric.Currency,
+                            acceptedCandidates)
+                        : null),
                 Unit = Clean(selected.ProposedMetric.Unit) ??
-                    FirstValue(alternatives.Select(entry =>
-                        entry.ProposedMetric.Unit))
+                    (units.Count <= 1
+                        ? SupportedMetricField(
+                            selected,
+                            alternatives,
+                            entry => entry.ProposedMetric.Unit,
+                            acceptedCandidates)
+                        : null)
             };
 
             proposedMetrics.Add(proposed);
-            acceptedCandidates.Add(selected.Candidate);
         }
 
         return proposedMetrics;
@@ -642,11 +668,44 @@ public sealed class FinancialMetricCandidateReconciler(
             .ToArray();
     }
 
-    private static string? FirstValue(IEnumerable<string?> values)
+    private static string? SupportedMetricField(
+        MetricEntry selected,
+        IEnumerable<MetricEntry> alternatives,
+        Func<MetricEntry, string?> fieldSelector,
+        ICollection<FinancialMetricCandidate> acceptedCandidates)
     {
-        return values
-            .Select(Clean)
-            .FirstOrDefault(value => value is not null);
+        var supporter = alternatives
+            .Where(entry => IsExplicit(entry.Candidate))
+            .Where(entry =>
+                entry.Candidate.Value == selected.Candidate.Value)
+            .Where(entry => Clean(fieldSelector(entry)) is not null)
+            .OrderByDescending(entry => entry.Candidate.Confidence)
+            .ThenByDescending(entry =>
+                !string.IsNullOrWhiteSpace(entry.Candidate.Evidence))
+            .ThenBy(entry => entry.IsDeterministic ? 0 : 1)
+            .ThenBy(entry => entry.Candidate.Id)
+            .FirstOrDefault();
+
+        if (supporter is null)
+        {
+            return null;
+        }
+
+        AddAcceptedCandidate(
+            acceptedCandidates,
+            supporter.Candidate);
+
+        return Clean(fieldSelector(supporter));
+    }
+
+    private static void AddAcceptedCandidate(
+        ICollection<FinancialMetricCandidate> acceptedCandidates,
+        FinancialMetricCandidate candidate)
+    {
+        if (acceptedCandidates.All(existing => existing.Id != candidate.Id))
+        {
+            acceptedCandidates.Add(candidate);
+        }
     }
 
     private static MetricKey MetricKeyFor(string? name, string? period)
@@ -702,11 +761,7 @@ public sealed class FinancialMetricCandidateReconciler(
     private static bool RequiresCandidateReview(
         FinancialMetricCandidate candidate)
     {
-        return string.Equals(
-                candidate.SourceKind,
-                FinancialMetricCandidateSourceKinds.Inferred,
-                StringComparison.OrdinalIgnoreCase) ||
-            IsUnresolvedReviewState(candidate.ReviewState);
+        return !IsExplicit(candidate);
     }
 
     private static bool RequiresCandidateReview(

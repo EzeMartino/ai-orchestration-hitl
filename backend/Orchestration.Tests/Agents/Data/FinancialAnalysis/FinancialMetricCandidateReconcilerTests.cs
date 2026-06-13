@@ -43,7 +43,26 @@ public sealed class FinancialMetricCandidateReconcilerTests
                     100m,
                     confidence: 0.98m,
                     sourcePage: 7,
-                    evidence: "Revenue 100")
+                    evidence: "Revenue 100"),
+                Candidate(
+                    "revenue",
+                    "2024A",
+                    100m,
+                    sourceKind: FinancialMetricCandidateSourceKinds.Inferred,
+                    confidence: 0.999m,
+                    sourcePage: 8,
+                    evidence: "",
+                    reviewState: FinancialMetricCandidateReviewStates.Inferred,
+                    inferenceExplanation: "Inferred from a summary chart."),
+                Candidate(
+                    "revenue",
+                    "2024A",
+                    100m,
+                    sourceKind: FinancialMetricCandidateSourceKinds.Computed,
+                    confidence: 1m,
+                    sourcePage: 9,
+                    evidence: "Computed revenue",
+                    reviewState: FinancialMetricCandidateReviewStates.Explicit)
             ]);
 
         var result = reconciler.Reconcile(
@@ -63,7 +82,7 @@ public sealed class FinancialMetricCandidateReconcilerTests
                 Confidence = 0.98m
             },
             options => options.ExcludingMissingMembers());
-        result.Candidates.Should().HaveCount(2);
+        result.Candidates.Should().HaveCount(4);
         result.Candidates.Should().Contain(candidate =>
             candidate.ExtractionStrategy == "deterministic_pdf_parser" &&
             candidate.SourceKind == FinancialMetricCandidateSourceKinds.Reported &&
@@ -73,7 +92,118 @@ public sealed class FinancialMetricCandidateReconcilerTests
         result.Candidates.Should().Contain(candidate =>
             candidate.ExtractionStrategy == "semantic_markdown_agent" &&
             candidate.Evidence == "Revenue 100");
+        result.Candidates.Should().Contain(candidate =>
+            candidate.SourceKind == FinancialMetricCandidateSourceKinds.Inferred &&
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Inferred);
+        result.Candidates.Should().Contain(candidate =>
+            candidate.SourceKind == FinancialMetricCandidateSourceKinds.Computed &&
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Explicit);
         result.Conflicts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Reconcile_Should_force_review_for_unsupported_metric_source()
+    {
+        var reconciler = CreateReconciler();
+        var unsupported = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            sourceKind: FinancialMetricCandidateSourceKinds.Computed,
+            confidence: 0.999m,
+            sourcePage: 9,
+            evidence: "Computed revenue",
+            reviewState: FinancialMetricCandidateReviewStates.Explicit);
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [unsupported]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Source.Should()
+            .Be("pdf_extraction");
+        result.Conflicts.Should().BeEmpty();
+        result.Candidates.Single(candidate =>
+            candidate.Id == unsupported.Id).Should().Be(unsupported);
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_not_create_conflict_from_inferred_unequal_metric()
+    {
+        var reconciler = CreateReconciler();
+        var inferred = Candidate(
+            "revenue",
+            "2024A",
+            110m,
+            sourceKind: FinancialMetricCandidateSourceKinds.Inferred,
+            confidence: 0.999m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred,
+            inferenceExplanation: "Inferred from a chart.");
+
+        var result = reconciler.Reconcile(
+            Input(metrics: [Metric("revenue", "2024A", 100m)]),
+            Extraction(metrics: [inferred]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Value.Should().Be(100m);
+        result.Conflicts.Should().BeEmpty();
+        result.Candidates.Single(candidate =>
+            candidate.ExtractionStrategy == "deterministic_pdf_parser")
+            .ReviewState.Should().Be(FinancialMetricCandidateReviewStates.Explicit);
+        result.Candidates.Single(candidate => candidate.Id == inferred.Id)
+            .Should().Be(inferred);
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_choose_stable_proposal_without_conflicting_inferred_only_alternatives()
+    {
+        var reconciler = CreateReconciler();
+        var lowerConfidence = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            sourceKind: FinancialMetricCandidateSourceKinds.Inferred,
+            confidence: 0.8m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred,
+            inferenceExplanation: "First inference.");
+        var higherConfidence = Candidate(
+            "revenue",
+            "2024A",
+            110m,
+            sourceKind: FinancialMetricCandidateSourceKinds.Inferred,
+            confidence: 0.9m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred,
+            inferenceExplanation: "Second inference.");
+
+        var first = reconciler.Reconcile(
+            Input(metrics: []),
+            Extraction(metrics: [lowerConfidence, higherConfidence]),
+            AutoAcceptOptions());
+        var second = reconciler.Reconcile(
+            Input(metrics: []),
+            Extraction(metrics: [higherConfidence, lowerConfidence]),
+            AutoAcceptOptions());
+
+        first.Conflicts.Should().BeEmpty();
+        second.Conflicts.Should().BeEmpty();
+        first.ProposedInput.Metrics.Should()
+            .Equal(second.ProposedInput.Metrics);
+        first.Candidates.Should().OnlyContain(candidate =>
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Inferred);
+        first.RequiresReview.Should().BeTrue();
+        first.CanAutoAccept.Should().BeFalse();
     }
 
     [Fact]
@@ -351,6 +481,159 @@ public sealed class FinancialMetricCandidateReconcilerTests
         defaulted.RequiresReview.Should().BeTrue();
         lowConfidence.CanAutoAccept.Should().BeFalse();
         lowConfidence.RequiresReview.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Reconcile_Should_gate_borrowed_explicit_metric_field_by_supporter_confidence()
+    {
+        var reconciler = CreateReconciler();
+        var lowConfidenceSupporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "EUR",
+            confidence: 0.1m,
+            evidence: "Revenue reported in EUR");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [lowConfidenceSupporter]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Currency.Should().Be("EUR");
+        result.Conflicts.Should().BeEmpty();
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_not_borrow_metric_fields_from_non_explicit_candidates()
+    {
+        var reconciler = CreateReconciler();
+        var inferred = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "EUR",
+            sourceKind: FinancialMetricCandidateSourceKinds.Inferred,
+            confidence: 0.999m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred,
+            inferenceExplanation: "Inferred currency.");
+        var unsupported = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "GBP",
+            sourceKind: FinancialMetricCandidateSourceKinds.Computed,
+            confidence: 1m,
+            reviewState: FinancialMetricCandidateReviewStates.Explicit);
+
+        var inferredResult = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [inferred]),
+            AutoAcceptOptions());
+        var unsupportedResult = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [unsupported]),
+            AutoAcceptOptions());
+
+        inferredResult.ProposedInput.Metrics.Single().Currency.Should().BeNull();
+        unsupportedResult.ProposedInput.Metrics.Single().Currency.Should().BeNull();
+        inferredResult.Conflicts.Should().BeEmpty();
+        unsupportedResult.Conflicts.Should().BeEmpty();
+        inferredResult.CanAutoAccept.Should().BeFalse();
+        unsupportedResult.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_auto_accept_field_supported_by_high_confidence_explicit_candidate()
+    {
+        var reconciler = CreateReconciler();
+        var supporter = Candidate(
+            "revenue",
+            "2024A",
+            100m,
+            currency: "EUR",
+            confidence: 0.95m,
+            evidence: "Revenue reported in EUR");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [supporter]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Currency.Should().Be("EUR");
+        result.CanAutoAccept.Should().BeTrue();
+        result.RequiresReview.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_not_borrow_metric_fields_across_explicit_value_conflict()
+    {
+        var reconciler = CreateReconciler();
+        var conflicting = Candidate(
+            "revenue",
+            "2024A",
+            110m,
+            currency: "EUR",
+            confidence: 0.99m,
+            evidence: "Conflicting revenue in EUR");
+
+        var result = reconciler.Reconcile(
+            Input(
+                metrics:
+                [
+                    Metric(
+                        "revenue",
+                        "2024A",
+                        100m,
+                        currency: null,
+                        confidence: 0.95m)
+                ]),
+            Extraction(metrics: [conflicting]),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Metrics.Single().Currency.Should().BeNull();
+        result.Conflicts.Should().ContainSingle(conflict =>
+            conflict.Kind == "metric" &&
+            conflict.FieldName == "value");
+        result.CanAutoAccept.Should().BeFalse();
     }
 
     [Fact]
@@ -670,6 +953,63 @@ public sealed class FinancialMetricCandidateReconcilerTests
         result.Conflicts.Should().BeEmpty();
         result.RequiresReview.Should().BeTrue();
         result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_assign_order_independent_deterministic_candidate_ids()
+    {
+        var reconciler = CreateReconciler();
+        var metrics = new[]
+        {
+            Metric(
+                "revenue",
+                "2024A",
+                100m,
+                sourcePage: 4,
+                confidence: 0.94m),
+            Metric(
+                "ebitda",
+                "2024A",
+                30m,
+                sourcePage: 7,
+                confidence: 0.97m)
+        };
+
+        var first = reconciler.Reconcile(
+            Input(metrics: metrics),
+            semanticResult: null,
+            AutoAcceptOptions());
+        var second = reconciler.Reconcile(
+            Input(metrics: metrics.Reverse().ToArray()),
+            semanticResult: null,
+            AutoAcceptOptions());
+
+        first.Candidates
+            .Select(candidate =>
+                $"{candidate.Name}:{candidate.Period}:{candidate.Value}:{candidate.Id}")
+            .Should()
+            .Equal(second.Candidates.Select(candidate =>
+                $"{candidate.Name}:{candidate.Period}:{candidate.Value}:{candidate.Id}"));
+    }
+
+    [Fact]
+    public void Reconcile_Should_deduplicate_exact_deterministic_metric_candidates()
+    {
+        var reconciler = CreateReconciler();
+        var duplicate = Metric(
+            "revenue",
+            "2024A",
+            100m,
+            sourcePage: 4,
+            confidence: 0.94m);
+
+        var result = reconciler.Reconcile(
+            Input(metrics: [duplicate, duplicate]),
+            semanticResult: null,
+            AutoAcceptOptions());
+
+        result.Candidates.Should().ContainSingle();
+        result.ProposedInput.Metrics.Should().ContainSingle();
     }
 
     [Fact]
