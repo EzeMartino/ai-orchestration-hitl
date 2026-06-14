@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Domain.AnalysisSessions;
@@ -215,6 +216,160 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     }
 
     [Fact]
+    public async Task UpdateAsync_Should_reject_metric_value_conflict_when_accepted_value_differs_from_proposal()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var accepted = CreateMetricCandidate(
+            value: 100m,
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var rejected = CreateMetricCandidate(
+            value: 120m,
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var payload = CreatePayload(
+            candidates: [accepted, rejected],
+            conflicts: [CreateMetricConflict(accepted, rejected)]);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(accepted.Id, FinancialMetricCandidateReviewStates.Accepted),
+                    Decision(rejected.Id, FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: CreateInput(metricValue: 999m)),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_metric_currency_conflict_when_accepted_currency_differs_from_proposal()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var accepted = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Conflict) with
+        {
+            Currency = "USD"
+        };
+        var rejected = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Conflict) with
+        {
+            Currency = "EUR"
+        };
+        var conflict = new FinancialMetricCandidateConflict(
+            Kind: "metric_currency",
+            FieldName: "currency",
+            MetricName: "revenue",
+            Period: "2025A",
+            ProposedValue: "USD",
+            MetricCandidates: [accepted, rejected],
+            MetadataCandidates: []);
+        var payload = CreatePayload(
+            candidates: [accepted, rejected],
+            conflicts: [conflict]);
+        var proposal = CreateInput(metrics:
+        [
+            CreateInput().Metrics.Single() with
+            {
+                Currency = "EUR"
+            }
+        ]);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(accepted.Id, FinancialMetricCandidateReviewStates.Accepted),
+                    Decision(rejected.Id, FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: proposal),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_metadata_conflict_when_accepted_value_differs_from_proposal()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var accepted = CreateMetadataCandidate(
+            value: "Acme",
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var rejected = CreateMetadataCandidate(
+            value: "Other",
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var conflict = new FinancialMetricCandidateConflict(
+            Kind: "metadata_value",
+            FieldName: "company",
+            MetricName: null,
+            Period: null,
+            ProposedValue: "Acme",
+            MetricCandidates: [],
+            MetadataCandidates: [accepted, rejected]);
+        var payload = CreatePayload(conflicts: [conflict]) with
+        {
+            MetadataCandidates = [accepted, rejected]
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(accepted.Id, FinancialMetricCandidateReviewStates.Accepted),
+                    Decision(rejected.Id, FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: CreateInput(company: "Other")),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
     public async Task UpdateAsync_Should_retain_original_and_append_human_corrected_metric()
     {
         await using var dbContext = CreateDbContext();
@@ -325,6 +480,131 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         result.Draft.Payload.ProposedInput.Company.Should().Be("Corrected Co");
     }
 
+    [Fact]
+    public async Task UpdateAsync_Should_reject_two_human_corrections_for_same_metric_key_with_different_values()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var first = CreateMetricCandidate(
+            value: 100m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var second = CreateMetricCandidate(
+            value: 110m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreatePayload(candidates: [first, second]));
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    HumanMetricCorrection(first.Id, 125m),
+                    HumanMetricCorrection(second.Id, 130m)
+                ],
+                ProposedInput: CreateInput(
+                    metricValue: 130m,
+                    metricSource: FinancialMetricCandidateSourceKinds.HumanCorrected)),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_two_human_corrections_for_same_metric_key_with_same_value()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var first = CreateMetricCandidate(
+            value: 100m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var second = CreateMetricCandidate(
+            value: 110m,
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreatePayload(candidates: [first, second]));
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    HumanMetricCorrection(first.Id, 125m),
+                    HumanMetricCorrection(second.Id, 125m)
+                ],
+                ProposedInput: CreateInput(
+                    metricValue: 125m,
+                    metricSource: FinancialMetricCandidateSourceKinds.HumanCorrected)),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_duplicate_human_corrections_for_same_metadata_field()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var first = CreateMetadataCandidate(
+            value: "Acme One",
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var second = CreateMetadataCandidate(
+            value: "Acme Two",
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var payload = CreatePayload() with
+        {
+            MetadataCandidates = [first, second]
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    HumanMetadataCorrection(first.Id, "Corrected Co"),
+                    HumanMetadataCorrection(second.Id, "Corrected Co")
+                ],
+                ProposedInput: CreateInput(company: "Corrected Co")),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
     [Theory]
     [InlineData("candidate")]
     [InlineData("conflict")]
@@ -350,7 +630,12 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             "conflict" => CreatePayload(
                 candidates: [metric],
                 conflicts: [CreateMetricConflict(metric)]),
-            "missing" => CreatePayload(missingFields: ["currency"]),
+            "missing" => CreatePayload(
+                proposedInput: CreateInput() with
+                {
+                    Currency = null
+                },
+                missingFields: []),
             "metadata" => CreatePayload() with
             {
                 MetadataCandidates =
@@ -381,6 +666,47 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         publisher.PublishedEvents.Should().BeEmpty();
         (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
             .Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
+    [Theory]
+    [InlineData("company")]
+    [InlineData("metrics")]
+    public async Task ConfirmAsync_Should_recompute_missing_fields_before_staging(
+        string missingField)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var proposedInput = missingField == "company"
+            ? CreateInput(company: null)
+            : CreateInput(metrics: []);
+        var payload = CreatePayload(
+            proposedInput: proposedInput,
+            missingFields: []);
+        var sessionService = new StubStructuredFinancialMetricsSessionService();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(
+            dbContext,
+            sessionService,
+            publisher,
+            new AlwaysValidValidator());
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        dbContext.ResetSaveChangesCount();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        dbContext.SaveChangesCount.Should().Be(0);
+        sessionService.StageRequests.Should().BeEmpty();
+        publisher.PublishedEvents.Should().BeEmpty();
     }
 
     [Fact]
@@ -426,8 +752,9 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
         result.Draft!.Status.Should().Be("confirmed");
         idempotent.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
-        sessionService.SaveRequests.Should().ContainSingle();
-        var saveRequest = sessionService.SaveRequests.Single();
+        sessionService.StageRequests.Should().ContainSingle();
+        sessionService.SaveRequests.Should().BeEmpty();
+        var saveRequest = sessionService.StageRequests.Single();
         saveRequest.SessionId.Should().Be(session.Id);
         saveRequest.Input.Metrics.Single().Source
             .Should().Be(FinancialMetricCandidateSourceKinds.HumanCorrected);
@@ -440,6 +767,39 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         publisher.PublishedEvents.Should().ContainSingle(x =>
             x.SessionId == session.Id &&
             x.Type == "financial_metrics_extraction_review_confirmed");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_stage_and_save_session_and_draft_once_atomically()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var attachedPublisher = new FakeActivityEventPublisher();
+        var sessionService = new StructuredFinancialMetricsSessionService(
+            dbContext,
+            new StructuredFinancialMetricsValidator(),
+            new FinancialMetricInputMapper(),
+            attachedPublisher);
+        var reviewPublisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, reviewPublisher);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        dbContext.ResetSaveChangesCount();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        dbContext.SaveChangesCount.Should().Be(1);
+        attachedPublisher.PublishedEvents.Should().BeEmpty();
+        reviewPublisher.PublishedEvents.Should().ContainSingle(x =>
+            x.Type == "financial_metrics_extraction_review_confirmed");
+        session.ContextJson.Should().Contain("pdf_file_reviewed");
+        (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
+            .Status.Should().Be(FinancialMetricsExtractionDraftStatus.Confirmed);
     }
 
     [Fact]
@@ -461,6 +821,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             session.Id,
             userId,
             payload: payload);
+        dbContext.ResetSaveChangesCount();
 
         var result = await service.ConfirmAsync(
             draft.Id,
@@ -470,6 +831,8 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
 
         result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
         result.ValidationIssues.Should().Contain(x => x.Code == "METRICS_REQUIRED");
+        dbContext.SaveChangesCount.Should().Be(0);
+        sessionService.StageRequests.Should().BeEmpty();
         sessionService.SaveRequests.Should().BeEmpty();
         publisher.PublishedEvents.Should().BeEmpty();
         (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
@@ -494,6 +857,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         var publisher = new FakeActivityEventPublisher();
         var service = CreateService(dbContext, sessionService, publisher);
         var draft = await CreateDraftAsync(service, session.Id, userId);
+        dbContext.ResetSaveChangesCount();
 
         var result = await service.ConfirmAsync(
             draft.Id,
@@ -502,9 +866,56 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken.None);
 
         result.Kind.Should().Be(expectedKind);
+        dbContext.SaveChangesCount.Should().Be(0);
+        sessionService.StageRequests.Should().ContainSingle();
+        sessionService.SaveRequests.Should().BeEmpty();
         publisher.PublishedEvents.Should().BeEmpty();
         (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
             .Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_not_commit_staged_context_when_atomic_save_conflicts()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        await using var dbContext = new CountingOrchestrationDbContext(options);
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        session.SetContext("{\"planner\":{\"summary\":\"before\"}}");
+        await dbContext.SaveChangesAsync();
+        var originalContext = session.ContextJson;
+        var sessionService = new StagingSessionService(dbContext);
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, publisher);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        dbContext.ResetSaveChangesCount();
+        dbContext.NextSaveException = new DbUpdateConcurrencyException(
+            "Injected concurrency conflict.");
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        sessionService.StageRequests.Should().ContainSingle();
+        sessionService.SaveRequests.Should().BeEmpty();
+        dbContext.SaveChangesCount.Should().Be(1);
+        publisher.PublishedEvents.Should().BeEmpty();
+
+        await using var freshContext = new OrchestrationDbContext(options);
+        var persistedSession = await freshContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        var persistedDraft = await freshContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        persistedSession.ContextJson.Should().Be(originalContext);
+        persistedDraft.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.PendingReview);
     }
 
     [Fact]
@@ -728,12 +1139,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
 
     private static FinancialMetricsExtractionDraftService CreateService(
         OrchestrationDbContext dbContext,
-        StubStructuredFinancialMetricsSessionService? sessionService = null,
-        FakeActivityEventPublisher? publisher = null)
+        IStructuredFinancialMetricsSessionService? sessionService = null,
+        FakeActivityEventPublisher? publisher = null,
+        IStructuredFinancialMetricsValidator? validator = null)
     {
         return new FinancialMetricsExtractionDraftService(
             dbContext,
-            new StructuredFinancialMetricsValidator(),
+            validator ?? new StructuredFinancialMetricsValidator(),
             sessionService ?? new StubStructuredFinancialMetricsSessionService(),
             publisher ?? new FakeActivityEventPublisher());
     }
@@ -887,16 +1299,52 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             MetadataValue: null);
     }
 
+    private static FinancialMetricCandidateReviewUpdate HumanMetricCorrection(
+        Guid candidateId,
+        decimal value)
+    {
+        return new FinancialMetricCandidateReviewUpdate(
+            CandidateId: candidateId,
+            Decision: FinancialMetricCandidateReviewStates.HumanCorrected,
+            Value: value,
+            Currency: "USD",
+            Unit: "USD_million",
+            MetadataValue: null);
+    }
+
+    private static FinancialMetricCandidateReviewUpdate HumanMetadataCorrection(
+        Guid candidateId,
+        string value)
+    {
+        return new FinancialMetricCandidateReviewUpdate(
+            CandidateId: candidateId,
+            Decision: FinancialMetricCandidateReviewStates.HumanCorrected,
+            Value: null,
+            Currency: null,
+            Unit: null,
+            MetadataValue: value);
+    }
+
     private sealed class CountingOrchestrationDbContext(
         DbContextOptions<OrchestrationDbContext> options)
         : OrchestrationDbContext(options)
     {
         public int SaveChangesCount { get; private set; }
 
+        public Exception? NextSaveException { get; set; }
+
         public override Task<int> SaveChangesAsync(
             CancellationToken cancellationToken = default)
         {
             SaveChangesCount++;
+
+            if (NextSaveException is not null)
+            {
+                var exception = NextSaveException;
+                NextSaveException = null;
+                return Task.FromException<int>(exception);
+            }
+
             return base.SaveChangesAsync(cancellationToken);
         }
 
@@ -909,9 +1357,19 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     private sealed class StubStructuredFinancialMetricsSessionService
         : IStructuredFinancialMetricsSessionService
     {
+        public List<SaveStructuredFinancialMetricsRequest> StageRequests { get; } = [];
+
         public List<SaveStructuredFinancialMetricsRequest> SaveRequests { get; } = [];
 
         public string? FailureMode { get; init; }
+
+        public Task<FinancialMetricsSessionSaveResult?> StageAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken)
+        {
+            StageRequests.Add(request);
+            return BuildResult(request);
+        }
 
         public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
             Guid sessionId,
@@ -928,7 +1386,12 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken cancellationToken)
         {
             SaveRequests.Add(request);
+            return BuildResult(request);
+        }
 
+        private Task<FinancialMetricsSessionSaveResult?> BuildResult(
+            SaveStructuredFinancialMetricsRequest request)
+        {
             if (FailureMode == "throws")
             {
                 throw new InvalidOperationException("Session save failed.");
@@ -978,6 +1441,92 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken cancellationToken)
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
+        }
+    }
+
+    private sealed class StagingSessionService(
+        OrchestrationDbContext dbContext)
+        : IStructuredFinancialMetricsSessionService
+    {
+        public List<SaveStructuredFinancialMetricsRequest> StageRequests { get; } = [];
+
+        public List<SaveStructuredFinancialMetricsRequest> SaveRequests { get; } = [];
+
+        public async Task<FinancialMetricsSessionSaveResult?> StageAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken)
+        {
+            StageRequests.Add(request);
+            var session = await dbContext.AnalysisSessions
+                .SingleOrDefaultAsync(x => x.Id == request.SessionId, cancellationToken);
+
+            if (session is null)
+            {
+                return null;
+            }
+
+            var context = new StructuredFinancialMetricsContext(
+                request.Input.DocumentId,
+                request.Input.Company,
+                request.Input.Currency,
+                request.Input.Unit,
+                [],
+                [],
+                DateTimeOffset.UtcNow,
+                new StructuredFinancialMetricsProvenance(
+                    "pdf_file_reviewed",
+                    "report.pdf",
+                    4096,
+                    "content-hash",
+                    1,
+                    0));
+            session.SetContext(JsonSerializer.Serialize(new
+            {
+                structuredFinancialMetrics = context
+            }));
+
+            return new FinancialMetricsSessionSaveResult(
+                request.SessionId,
+                true,
+                context,
+                [],
+                []);
+        }
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            Guid sessionId,
+            StructuredFinancialMetricsInput input,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Confirm must not call SaveAsync.");
+        }
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken)
+        {
+            SaveRequests.Add(request);
+            throw new InvalidOperationException("Confirm must not call SaveAsync.");
+        }
+
+        public Task<StructuredFinancialMetricsContext?> GetAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<StructuredFinancialMetricsContext?>(null);
+        }
+    }
+
+    private sealed class AlwaysValidValidator : IStructuredFinancialMetricsValidator
+    {
+        public FinancialMetricsValidationResult Validate(
+            StructuredFinancialMetricsInput input)
+        {
+            return new FinancialMetricsValidationResult(
+                true,
+                [],
+                [],
+                []);
         }
     }
 }

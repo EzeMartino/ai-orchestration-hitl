@@ -2,6 +2,10 @@ namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public interface IStructuredFinancialMetricsSessionService
 {
+    Task<FinancialMetricsSessionSaveResult?> StageAsync(
+        SaveStructuredFinancialMetricsRequest request,
+        CancellationToken cancellationToken);
+
     Task<FinancialMetricsSessionSaveResult?> SaveAsync(
         Guid sessionId,
         StructuredFinancialMetricsInput input,
