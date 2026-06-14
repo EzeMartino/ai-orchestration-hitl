@@ -274,13 +274,7 @@ public class FinancialMetricsExtractionDraft
         try
         {
             using var document = JsonDocument.Parse(payloadJson);
-
-            if (ContainsDecodedNul(document.RootElement))
-            {
-                throw new ArgumentException(
-                    "Payload JSON cannot contain decoded NUL characters.",
-                    nameof(payloadJson));
-            }
+            ValidatePayloadElement(document.RootElement, nameof(payloadJson));
         }
         catch (JsonException exception)
         {
@@ -288,37 +282,52 @@ public class FinancialMetricsExtractionDraft
         }
     }
 
-    private static bool ContainsDecodedNul(JsonElement element)
+    private static void ValidatePayloadElement(JsonElement element, string parameterName)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (var property in element.EnumerateObject())
                 {
-                    if (property.Name.Contains('\0') || ContainsDecodedNul(property.Value))
+                    if (property.Name.Contains('\0'))
                     {
-                        return true;
+                        throw new ArgumentException(
+                            "Payload JSON cannot contain decoded NUL characters.",
+                            parameterName);
                     }
+
+                    ValidatePayloadElement(property.Value, parameterName);
                 }
 
-                return false;
+                break;
 
             case JsonValueKind.Array:
                 foreach (var item in element.EnumerateArray())
                 {
-                    if (ContainsDecodedNul(item))
-                    {
-                        return true;
-                    }
+                    ValidatePayloadElement(item, parameterName);
                 }
 
-                return false;
+                break;
 
             case JsonValueKind.String:
-                return element.GetString()?.Contains('\0') == true;
+                if (element.GetString()?.Contains('\0') == true)
+                {
+                    throw new ArgumentException(
+                        "Payload JSON cannot contain decoded NUL characters.",
+                        parameterName);
+                }
 
-            default:
-                return false;
+                break;
+
+            case JsonValueKind.Number:
+                if (!element.TryGetDecimal(out _))
+                {
+                    throw new ArgumentException(
+                        "Payload JSON numbers must fit within the decimal range.",
+                        parameterName);
+                }
+
+                break;
         }
     }
 }

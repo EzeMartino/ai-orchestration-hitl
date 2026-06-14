@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Orchestration.Domain.FinancialMetricsExtraction;
+using Orchestration.Infrastructure.Persistence;
 
 namespace Orchestration.Tests.Domain;
 
@@ -170,6 +172,28 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Theory]
+    [InlineData("""{"outer":[{"value":1e200000}]}""")]
+    [InlineData("""{"outer":[{"value":-1e200000}]}""")]
+    public void Create_PayloadJsonContainsNumberOutsideDecimalRange_ThrowsArgumentException(
+        string payloadJson)
+    {
+        var action = () => CreateDraft(payloadJson: payloadJson);
+
+        Assert.Throws<ArgumentException>(action);
+    }
+
+    [Theory]
+    [InlineData("""{"value":1234567890.123456789}""")]
+    [InlineData("""{"values":[1.25e2,-9.5e-3]}""")]
+    public void Create_PayloadJsonContainsDecimalCompatibleNumbers_PreservesOriginalText(
+        string payloadJson)
+    {
+        var draft = CreateDraft(payloadJson: payloadJson);
+
+        Assert.Equal(payloadJson, draft.PayloadJson);
+    }
+
+    [Theory]
     [InlineData("""{"outer":[{"value":"before\u0000after"}]}""")]
     [InlineData("""{"outer":[{"bad\u0000name":"value"}]}""")]
     public void Create_PayloadJsonContainsDecodedNul_ThrowsArgumentException(string payloadJson)
@@ -250,6 +274,32 @@ public class FinancialMetricsExtractionDraftTests
         var action = () => draft.UpdatePayload(payloadJson, CreatedAt.AddMinutes(1));
 
         Assert.Throws<ArgumentException>(action);
+    }
+
+    [Theory]
+    [InlineData("""{"outer":[{"value":1e200000}]}""")]
+    [InlineData("""{"outer":[{"value":-1e200000}]}""")]
+    public void UpdatePayload_PayloadJsonContainsNumberOutsideDecimalRange_ThrowsArgumentException(
+        string payloadJson)
+    {
+        var draft = CreateDraft();
+
+        var action = () => draft.UpdatePayload(payloadJson, CreatedAt.AddMinutes(1));
+
+        Assert.Throws<ArgumentException>(action);
+    }
+
+    [Theory]
+    [InlineData("""{"value":1234567890.123456789}""")]
+    [InlineData("""{"values":[1.25e2,-9.5e-3]}""")]
+    public void UpdatePayload_PayloadJsonContainsDecimalCompatibleNumbers_PreservesOriginalText(
+        string payloadJson)
+    {
+        var draft = CreateDraft();
+
+        draft.UpdatePayload(payloadJson, CreatedAt.AddMinutes(1));
+
+        Assert.Equal(payloadJson, draft.PayloadJson);
     }
 
     [Fact]
@@ -592,6 +642,22 @@ public class FinancialMetricsExtractionDraftTests
         var action = () => draft.Discard(Guid.Empty, default);
 
         Assert.Throws<InvalidOperationException>(action);
+    }
+
+    [Fact]
+    public void DbContext_StatusProperty_IsConcurrencyToken()
+    {
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase($"draft-model-{Guid.NewGuid()}")
+            .Options;
+        using var dbContext = new OrchestrationDbContext(options);
+
+        var statusProperty = dbContext.Model
+            .FindEntityType(typeof(FinancialMetricsExtractionDraft))!
+            .FindProperty(nameof(FinancialMetricsExtractionDraft.Status));
+
+        Assert.NotNull(statusProperty);
+        Assert.True(statusProperty.IsConcurrencyToken);
     }
 
     private static FinancialMetricsExtractionDraft CreateDraft(

@@ -12,7 +12,7 @@ using Orchestration.Infrastructure.Persistence;
 namespace Orchestration.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(OrchestrationDbContext))]
-    [Migration("20260613234140_AddFinancialMetricsExtractionDrafts")]
+    [Migration("20260614180306_AddFinancialMetricsExtractionDrafts")]
     partial class AddFinancialMetricsExtractionDrafts
     {
         /// <inheritdoc />
@@ -334,6 +334,7 @@ namespace Orchestration.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<string>("Status")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("text");
 
