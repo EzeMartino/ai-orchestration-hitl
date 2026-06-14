@@ -170,6 +170,36 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         result.Context.Provenance.ContentHash.Should().Be("abc123");
     }
 
+    [Theory]
+    [InlineData("pdf_file_reviewed")]
+    [InlineData("pdf_file_semantic")]
+    public async Task SaveAsync_Should_preserve_supported_pdf_ingestion_methods(
+        string ingestionMethod)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: ingestionMethod,
+                    OriginalFileName: "report.pdf",
+                    FileSizeBytes: 2048,
+                    ContentHash: "abc123"
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.Context!.Provenance!.IngestionMethod.Should().Be(ingestionMethod);
+    }
+
     [Fact]
     public async Task SaveAsync_Should_not_emit_event_when_input_is_invalid()
     {

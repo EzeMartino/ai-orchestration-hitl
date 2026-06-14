@@ -203,7 +203,9 @@ public sealed class StructuredFinancialMetricsSessionService
             "csv_paste" or
             "json_file" or
             "csv_file" or
-            "pdf_file"
+            "pdf_file" or
+            "pdf_file_reviewed" or
+            "pdf_file_semantic"
             ? ingestionMethod
             : "unknown";
     }
