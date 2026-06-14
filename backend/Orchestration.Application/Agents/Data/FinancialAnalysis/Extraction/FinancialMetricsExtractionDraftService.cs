@@ -226,7 +226,7 @@ public sealed class FinancialMetricsExtractionDraftService(
             Metrics = request.ProposedInput.Metrics?.ToArray()!
         };
 
-        if (!TryValidateHumanCorrectionCoherence(
+        if (!TryValidateSelectedCandidateCoherence(
                 proposedInput,
                 updatedCandidates,
                 updatedMetadataCandidates,
@@ -338,6 +338,15 @@ public sealed class FinancialMetricsExtractionDraftService(
         {
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "A discarded draft cannot be confirmed.");
+        }
+
+        if (!TryValidateSelectedCandidateCoherence(
+                payload.ProposedInput,
+                payload.Candidates,
+                payload.MetadataCandidates,
+                out var coherenceError))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(coherenceError);
         }
 
         var blockingCandidates = payload.Candidates
@@ -674,7 +683,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         return true;
     }
 
-    private static bool TryValidateHumanCorrectionCoherence(
+    private static bool TryValidateSelectedCandidateCoherence(
         StructuredFinancialMetricsInput proposedInput,
         IReadOnlyList<FinancialMetricCandidate> candidates,
         IReadOnlyList<FinancialDocumentMetadataCandidate> metadataCandidates,

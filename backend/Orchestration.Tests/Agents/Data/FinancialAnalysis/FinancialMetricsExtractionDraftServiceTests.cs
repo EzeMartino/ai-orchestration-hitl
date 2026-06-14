@@ -668,6 +668,71 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             .Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
     }
 
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_accepted_metric_that_differs_from_proposal()
+    {
+        var payload = CreatePayload(
+            proposedInput: CreateInput(metricValue: 999m),
+            candidates: [CreateMetricCandidate(value: 100m)]);
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each selected metric resolution must match the proposed input.");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_duplicate_selected_metric_candidates()
+    {
+        var accepted = CreateMetricCandidate(value: 100m);
+        var corrected = CreateMetricCandidate(
+            value: 100m,
+            sourceKind: FinancialMetricCandidateSourceKinds.HumanCorrected,
+            reviewState: FinancialMetricCandidateReviewStates.HumanCorrected);
+        var payload = CreatePayload(
+            proposedInput: CreateInput(
+                metricValue: 100m,
+                metricSource: FinancialMetricCandidateSourceKinds.HumanCorrected),
+            candidates: [accepted, corrected]);
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each metric name and period can have only one accepted or human-corrected resolution.");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_accepted_metadata_that_differs_from_proposal()
+    {
+        var payload = CreatePayload(
+            proposedInput: CreateInput(company: "Other")) with
+        {
+            MetadataCandidates = [CreateMetadataCandidate(value: "Acme")]
+        };
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each selected metadata resolution must match the proposed input.");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_duplicate_selected_metadata_candidates()
+    {
+        var accepted = CreateMetadataCandidate(value: "Acme");
+        var corrected = CreateMetadataCandidate(
+            value: "Acme",
+            reviewState: FinancialMetricCandidateReviewStates.HumanCorrected) with
+        {
+            SourceKind = FinancialMetricCandidateSourceKinds.HumanCorrected
+        };
+        var payload = CreatePayload() with
+        {
+            MetadataCandidates = [accepted, corrected]
+        };
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each metadata field can have only one accepted or human-corrected resolution.");
+    }
+
     [Theory]
     [InlineData("company")]
     [InlineData("metrics")]
@@ -1170,6 +1235,39 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
 
         result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
         return result.Draft!;
+    }
+
+    private static async Task AssertConfirmCoherenceBlockedAsync(
+        FinancialMetricsExtractionDraftPayload payload,
+        string expectedError)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var sessionService = new StubStructuredFinancialMetricsSessionService();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, publisher);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        dbContext.ResetSaveChangesCount();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(expectedError);
+        dbContext.SaveChangesCount.Should().Be(0);
+        sessionService.StageRequests.Should().BeEmpty();
+        sessionService.SaveRequests.Should().BeEmpty();
+        publisher.PublishedEvents.Should().BeEmpty();
+        (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
+            .Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
     }
 
     private static CreateFinancialMetricsExtractionDraftRequest CreateRequest()
