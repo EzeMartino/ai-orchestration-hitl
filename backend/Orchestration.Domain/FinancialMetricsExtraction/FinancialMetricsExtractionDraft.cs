@@ -70,10 +70,7 @@ public class FinancialMetricsExtractionDraft
         ValidateContentHash(contentHash);
         ValidatePayloadJson(payloadJson);
 
-        if (now == default)
-        {
-            throw new ArgumentOutOfRangeException(nameof(now), "Timestamp cannot be the default value.");
-        }
+        var normalizedNow = NormalizeTimestamp(now, nameof(now));
 
         return new FinancialMetricsExtractionDraft
         {
@@ -85,8 +82,8 @@ public class FinancialMetricsExtractionDraft
             FileSizeBytes = fileSizeBytes,
             ContentHash = contentHash,
             PayloadJson = payloadJson,
-            CreatedAt = now,
-            UpdatedAt = now
+            CreatedAt = normalizedNow,
+            UpdatedAt = normalizedNow
         };
     }
 
@@ -98,10 +95,10 @@ public class FinancialMetricsExtractionDraft
         }
 
         ValidatePayloadJson(payloadJson);
-        ValidateLifecycleTimestamp(now);
+        var normalizedNow = NormalizeLifecycleTimestamp(now);
 
         PayloadJson = payloadJson;
-        UpdatedAt = now;
+        UpdatedAt = normalizedNow;
     }
 
     public void Confirm(Guid reviewerId, DateTimeOffset now)
@@ -117,9 +114,9 @@ public class FinancialMetricsExtractionDraft
         }
 
         ValidateReviewerId(reviewerId);
-        ValidateLifecycleTimestamp(now);
+        var normalizedNow = NormalizeLifecycleTimestamp(now);
 
-        Complete(FinancialMetricsExtractionDraftStatus.Confirmed, reviewerId, now);
+        Complete(FinancialMetricsExtractionDraftStatus.Confirmed, reviewerId, normalizedNow);
     }
 
     public void Discard(Guid reviewerId, DateTimeOffset now)
@@ -135,9 +132,9 @@ public class FinancialMetricsExtractionDraft
         }
 
         ValidateReviewerId(reviewerId);
-        ValidateLifecycleTimestamp(now);
+        var normalizedNow = NormalizeLifecycleTimestamp(now);
 
-        Complete(FinancialMetricsExtractionDraftStatus.Discarded, reviewerId, now);
+        Complete(FinancialMetricsExtractionDraftStatus.Discarded, reviewerId, normalizedNow);
     }
 
     private void Complete(
@@ -159,15 +156,32 @@ public class FinancialMetricsExtractionDraft
         }
     }
 
-    private void ValidateLifecycleTimestamp(DateTimeOffset now)
+    private DateTimeOffset NormalizeLifecycleTimestamp(DateTimeOffset now)
     {
-        if (now == default || now < CreatedAt || now < UpdatedAt)
+        var normalizedNow = NormalizeTimestamp(now, nameof(now));
+
+        if (normalizedNow < CreatedAt || normalizedNow < UpdatedAt)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(now),
                 now,
                 "Timestamp cannot be earlier than the draft lifecycle.");
         }
+
+        return normalizedNow;
+    }
+
+    private static DateTimeOffset NormalizeTimestamp(DateTimeOffset timestamp, string parameterName)
+    {
+        if (timestamp == default)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                timestamp,
+                "Timestamp cannot be the default value.");
+        }
+
+        return timestamp.ToUniversalTime();
     }
 
     private static string ValidateAndNormalizeFileName(string originalFileName)
@@ -259,11 +273,52 @@ public class FinancialMetricsExtractionDraft
 
         try
         {
-            using var _ = JsonDocument.Parse(payloadJson);
+            using var document = JsonDocument.Parse(payloadJson);
+
+            if (ContainsDecodedNul(document.RootElement))
+            {
+                throw new ArgumentException(
+                    "Payload JSON cannot contain decoded NUL characters.",
+                    nameof(payloadJson));
+            }
         }
         catch (JsonException exception)
         {
             throw new ArgumentException("Payload must contain valid JSON.", nameof(payloadJson), exception);
+        }
+    }
+
+    private static bool ContainsDecodedNul(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.Name.Contains('\0') || ContainsDecodedNul(property.Value))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    if (ContainsDecodedNul(item))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+
+            case JsonValueKind.String:
+                return element.GetString()?.Contains('\0') == true;
+
+            default:
+                return false;
         }
     }
 }

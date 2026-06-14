@@ -169,12 +169,46 @@ public class FinancialMetricsExtractionDraftTests
         Assert.Equal(payloadJson, draft.PayloadJson);
     }
 
+    [Theory]
+    [InlineData("""{"outer":[{"value":"before\u0000after"}]}""")]
+    [InlineData("""{"outer":[{"bad\u0000name":"value"}]}""")]
+    public void Create_PayloadJsonContainsDecodedNul_ThrowsArgumentException(string payloadJson)
+    {
+        var action = () => CreateDraft(payloadJson: payloadJson);
+
+        Assert.Throws<ArgumentException>(action);
+    }
+
+    [Fact]
+    public void Create_PayloadJsonContainsOrdinaryUnicode_PreservesOriginalText()
+    {
+        const string payloadJson = """{"caf\u00e9":"\u6f22\u5b57"}""";
+
+        var draft = CreateDraft(payloadJson: payloadJson);
+
+        Assert.Equal(payloadJson, draft.PayloadJson);
+    }
+
     [Fact]
     public void Create_DefaultTimestamp_ThrowsArgumentOutOfRangeException()
     {
         var action = () => CreateDraft(now: DateTimeOffset.MinValue);
 
         Assert.Throws<ArgumentOutOfRangeException>(action);
+    }
+
+    [Fact]
+    public void Create_NonUtcTimestamp_NormalizesCreatedAndUpdatedAtToUtc()
+    {
+        var localTimestamp = new DateTimeOffset(
+            2026, 6, 13, 9, 30, 0, TimeSpan.FromHours(-3));
+
+        var draft = CreateDraft(now: localTimestamp);
+
+        Assert.Equal(CreatedAt, draft.CreatedAt);
+        Assert.Equal(TimeSpan.Zero, draft.CreatedAt.Offset);
+        Assert.Equal(CreatedAt, draft.UpdatedAt);
+        Assert.Equal(TimeSpan.Zero, draft.UpdatedAt.Offset);
     }
 
     [Fact]
@@ -206,6 +240,29 @@ public class FinancialMetricsExtractionDraftTests
         Assert.Throws<ArgumentException>(action);
     }
 
+    [Theory]
+    [InlineData("""{"outer":[{"value":"before\u0000after"}]}""")]
+    [InlineData("""{"outer":[{"bad\u0000name":"value"}]}""")]
+    public void UpdatePayload_PayloadJsonContainsDecodedNul_ThrowsArgumentException(string payloadJson)
+    {
+        var draft = CreateDraft();
+
+        var action = () => draft.UpdatePayload(payloadJson, CreatedAt.AddMinutes(1));
+
+        Assert.Throws<ArgumentException>(action);
+    }
+
+    [Fact]
+    public void UpdatePayload_PayloadJsonContainsOrdinaryUnicode_PreservesOriginalText()
+    {
+        var draft = CreateDraft();
+        const string payloadJson = """{"caf\u00e9":"\u6f22\u5b57"}""";
+
+        draft.UpdatePayload(payloadJson, CreatedAt.AddMinutes(1));
+
+        Assert.Equal(payloadJson, draft.PayloadJson);
+    }
+
     [Fact]
     public void UpdatePayload_TimestampBeforeUpdatedAt_ThrowsArgumentOutOfRangeException()
     {
@@ -223,6 +280,31 @@ public class FinancialMetricsExtractionDraftTests
         var draft = CreateDraft();
 
         var action = () => draft.UpdatePayload("""{"version":2}""", DateTimeOffset.MinValue);
+
+        Assert.Throws<ArgumentOutOfRangeException>(action);
+    }
+
+    [Fact]
+    public void UpdatePayload_EqualInstantWithNonUtcOffset_NormalizesAndUpdates()
+    {
+        var draft = CreateDraft();
+        var equalInstant = new DateTimeOffset(
+            2026, 6, 13, 18, 0, 0, TimeSpan.FromMinutes(330));
+
+        draft.UpdatePayload("""{"version":2}""", equalInstant);
+
+        Assert.Equal(CreatedAt, draft.UpdatedAt);
+        Assert.Equal(TimeSpan.Zero, draft.UpdatedAt.Offset);
+    }
+
+    [Fact]
+    public void UpdatePayload_NonUtcTimestampRepresentsEarlierInstant_ThrowsArgumentOutOfRangeException()
+    {
+        var draft = CreateDraft();
+        var earlierInstant = new DateTimeOffset(
+            2026, 6, 13, 17, 59, 0, TimeSpan.FromMinutes(330));
+
+        var action = () => draft.UpdatePayload("""{"version":2}""", earlierInstant);
 
         Assert.Throws<ArgumentOutOfRangeException>(action);
     }
@@ -266,6 +348,21 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Fact]
+    public void Confirm_NonUtcTimestamp_NormalizesAuditTimestampsToUtc()
+    {
+        var draft = CreateDraft();
+        var completedAt = new DateTimeOffset(
+            2026, 6, 13, 9, 40, 0, TimeSpan.FromHours(-3));
+
+        draft.Confirm(Guid.NewGuid(), completedAt);
+
+        Assert.Equal(CreatedAt.AddMinutes(10), draft.UpdatedAt);
+        Assert.Equal(TimeSpan.Zero, draft.UpdatedAt.Offset);
+        Assert.Equal(CreatedAt.AddMinutes(10), draft.CompletedAt);
+        Assert.Equal(TimeSpan.Zero, draft.CompletedAt!.Value.Offset);
+    }
+
+    [Fact]
     public void Confirm_EmptyReviewerId_ThrowsArgumentException()
     {
         var draft = CreateDraft();
@@ -282,6 +379,16 @@ public class FinancialMetricsExtractionDraftTests
         draft.UpdatePayload("""{"version":2}""", CreatedAt.AddMinutes(2));
 
         var action = () => draft.Confirm(Guid.NewGuid(), CreatedAt.AddMinutes(1));
+
+        Assert.Throws<ArgumentOutOfRangeException>(action);
+    }
+
+    [Fact]
+    public void Confirm_DefaultTimestampOnPendingDraft_ThrowsArgumentOutOfRangeException()
+    {
+        var draft = CreateDraft();
+
+        var action = () => draft.Confirm(Guid.NewGuid(), default);
 
         Assert.Throws<ArgumentOutOfRangeException>(action);
     }
@@ -372,6 +479,21 @@ public class FinancialMetricsExtractionDraftTests
     }
 
     [Fact]
+    public void Discard_NonUtcTimestamp_NormalizesAuditTimestampsToUtc()
+    {
+        var draft = CreateDraft();
+        var completedAt = new DateTimeOffset(
+            2026, 6, 13, 18, 10, 0, TimeSpan.FromMinutes(330));
+
+        draft.Discard(Guid.NewGuid(), completedAt);
+
+        Assert.Equal(CreatedAt.AddMinutes(10), draft.UpdatedAt);
+        Assert.Equal(TimeSpan.Zero, draft.UpdatedAt.Offset);
+        Assert.Equal(CreatedAt.AddMinutes(10), draft.CompletedAt);
+        Assert.Equal(TimeSpan.Zero, draft.CompletedAt!.Value.Offset);
+    }
+
+    [Fact]
     public void Discard_EmptyReviewerId_ThrowsArgumentException()
     {
         var draft = CreateDraft();
@@ -388,6 +510,16 @@ public class FinancialMetricsExtractionDraftTests
         draft.UpdatePayload("""{"version":2}""", CreatedAt.AddMinutes(2));
 
         var action = () => draft.Discard(Guid.NewGuid(), CreatedAt.AddMinutes(1));
+
+        Assert.Throws<ArgumentOutOfRangeException>(action);
+    }
+
+    [Fact]
+    public void Discard_DefaultTimestampOnPendingDraft_ThrowsArgumentOutOfRangeException()
+    {
+        var draft = CreateDraft();
+
+        var action = () => draft.Discard(Guid.NewGuid(), default);
 
         Assert.Throws<ArgumentOutOfRangeException>(action);
     }
