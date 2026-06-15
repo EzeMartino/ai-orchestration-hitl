@@ -169,6 +169,87 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     }
 
     [Fact]
+    public async Task UpdateAsync_Should_reject_changed_metric_without_selected_candidate()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var candidate = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreatePayload(candidates: [candidate]));
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(
+                        candidate.Id,
+                        FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: CreateInput(metricValue: 125m)),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Each proposed metric must have exactly one accepted or human-corrected resolution.");
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_changed_metadata_without_selected_candidate()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var metadata = CreateMetadataCandidate(
+            value: "Acme",
+            reviewState: FinancialMetricCandidateReviewStates.Inferred);
+        var payload = CreatePayload() with
+        {
+            MetadataCandidates = [metadata]
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(
+                        metadata.Id,
+                        FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: CreateInput(company: "Other")),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Each proposed metadata value must have exactly one accepted or human-corrected resolution.");
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Fact]
     public async Task UpdateAsync_Should_apply_accepted_and_rejected_decisions_and_resolve_conflict()
     {
         await using var dbContext = CreateDbContext();
@@ -733,6 +814,84 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             "Each metadata field can have only one accepted or human-corrected resolution.");
     }
 
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_proposed_metric_without_selected_candidate()
+    {
+        var payload = CreatePayload(
+            proposedInput: CreateInput(metricValue: 125m),
+            candidates:
+            [
+                CreateMetricCandidate(
+                    value: 100m,
+                    reviewState: FinancialMetricCandidateReviewStates.Rejected)
+            ]);
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each proposed metric must have exactly one accepted or human-corrected resolution.");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_reject_proposed_metadata_without_selected_candidate()
+    {
+        var payload = CreatePayload(
+            proposedInput: CreateInput(company: "Other")) with
+        {
+            MetadataCandidates =
+            [
+                CreateMetadataCandidate(
+                    value: "Acme",
+                    reviewState: FinancialMetricCandidateReviewStates.Rejected)
+            ]
+        };
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each proposed metadata value must have exactly one accepted or human-corrected resolution.");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_ignore_rejected_candidates_not_in_proposed_input()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var payload = CreatePayload(
+            candidates:
+            [
+                CreateMetricCandidate(),
+                CreateMetricCandidate(
+                    value: 50m,
+                    reviewState: FinancialMetricCandidateReviewStates.Rejected) with
+                {
+                    Name = "expenses"
+                }
+            ]) with
+        {
+            MetadataCandidates =
+            [
+                CreateMetadataCandidate(
+                    fieldName: "industry",
+                    value: "Technology",
+                    reviewState: FinancialMetricCandidateReviewStates.Rejected)
+            ]
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+    }
+
     [Theory]
     [InlineData("company")]
     [InlineData("metrics")]
@@ -1180,6 +1339,52 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken.None);
 
         result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        entity.Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public async Task UpdateAsync_Should_reject_malformed_conflict_field_name(
+        string? fieldName)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var candidate = CreateMetricCandidate();
+        var conflict = CreateMetricConflict(candidate) with
+        {
+            FieldName = fieldName!
+        };
+        var payload = CreatePayload(
+            candidates: [candidate],
+            conflicts: [conflict]);
+        var entity = FinancialMetricsExtractionDraft.Create(
+            session.Id,
+            userId,
+            "malformed-conflict.pdf",
+            100,
+            "malformed-conflict-hash",
+            JsonSerializer.Serialize(
+                payload,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            DateTimeOffset.UtcNow);
+        dbContext.FinancialMetricsExtractionDrafts.Add(entity);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.UpdateAsync(
+            entity.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: [],
+                ProposedInput: payload.ProposedInput),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Draft payload contains a malformed conflict.");
         entity.Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
     }
 

@@ -741,6 +741,29 @@ public sealed class FinancialMetricsExtractionDraftService(
             }
         }
 
+        foreach (var metric in proposedInput.Metrics)
+        {
+            var selected = candidates
+                .Where(candidate =>
+                    IsSelectedReviewState(candidate.ReviewState) &&
+                    string.Equals(
+                        metric.Name?.Trim(),
+                        candidate.Name.Trim(),
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        metric.Period?.Trim(),
+                        candidate.Period.Trim(),
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            if (selected.Length != 1)
+            {
+                error =
+                    "Each proposed metric must have exactly one accepted or human-corrected resolution.";
+                return false;
+            }
+        }
+
         var selectedMetadataGroups = metadataCandidates
             .Where(candidate => IsSelectedReviewState(candidate.ReviewState))
             .GroupBy(candidate => candidate.FieldName.Trim().ToUpperInvariant());
@@ -760,6 +783,37 @@ public sealed class FinancialMetricsExtractionDraftService(
             {
                 error =
                     "Each selected metadata resolution must match the proposed input.";
+                return false;
+            }
+        }
+
+        var proposedMetadata = new[]
+        {
+            (FieldName: "company", Value: proposedInput.Company),
+            (FieldName: "currency", Value: proposedInput.Currency),
+            (FieldName: "unit", Value: proposedInput.Unit)
+        };
+
+        foreach (var field in proposedMetadata.Where(field =>
+                     field.Value is not null &&
+                     metadataCandidates.Any(candidate => string.Equals(
+                         candidate.FieldName.Trim(),
+                         field.FieldName,
+                         StringComparison.OrdinalIgnoreCase))))
+        {
+            var selected = metadataCandidates
+                .Where(candidate =>
+                    IsSelectedReviewState(candidate.ReviewState) &&
+                    string.Equals(
+                        candidate.FieldName.Trim(),
+                        field.FieldName,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            if (selected.Length != 1)
+            {
+                error =
+                    "Each proposed metadata value must have exactly one accepted or human-corrected resolution.";
                 return false;
             }
         }
@@ -1097,6 +1151,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         foreach (var conflict in payload.Conflicts)
         {
             if (conflict is null ||
+                string.IsNullOrWhiteSpace(conflict.FieldName) ||
                 conflict.MetricCandidates is null ||
                 conflict.MetadataCandidates is null ||
                 conflict.MetricCandidates.Any(x => x is null) ||
@@ -1123,6 +1178,7 @@ public sealed class FinancialMetricsExtractionDraftService(
 
             normalizedConflicts.Add(conflict with
             {
+                FieldName = conflict.FieldName.Trim(),
                 MetricCandidates = conflict.MetricCandidates.ToArray(),
                 MetadataCandidates = conflict.MetadataCandidates.ToArray()
             });
