@@ -201,9 +201,18 @@ public sealed class FinancialMetricsExtractionDraftService(
             return FinancialMetricsExtractionDraftServiceResult.Invalid(payloadError);
         }
 
+        if (!TryNormalizeProposedInput(
+                request.ProposedInput,
+                out var proposedInput,
+                out var proposedInputError))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                proposedInputError);
+        }
+
         if (!string.Equals(
                 payload.ProposedInput.DocumentId,
-                request.ProposedInput.DocumentId,
+                proposedInput.DocumentId,
                 StringComparison.Ordinal))
         {
             return FinancialMetricsExtractionDraftServiceResult.Invalid(
@@ -220,11 +229,6 @@ public sealed class FinancialMetricsExtractionDraftService(
         {
             return FinancialMetricsExtractionDraftServiceResult.Invalid(updateError);
         }
-
-        var proposedInput = request.ProposedInput with
-        {
-            Metrics = request.ProposedInput.Metrics?.ToArray()!
-        };
 
         if (!TryValidateSelectedCandidateCoherence(
                 proposedInput,
@@ -569,6 +573,138 @@ public sealed class FinancialMetricsExtractionDraftService(
             }
         }
 
+        if (request.MetricAdditions is null ||
+            request.MetadataAdditions is null)
+        {
+            return FailUpdates(
+                "Candidate addition collections cannot be null.",
+                out updatedCandidates,
+                out updatedMetadataCandidates,
+                out decisions,
+                out error);
+        }
+
+        var metricAdditions = new List<FinancialMetricCandidateAddition>();
+        var metricAdditionKeys = new HashSet<(string Name, string Period)>();
+
+        foreach (var addition in request.MetricAdditions)
+        {
+            if (addition is null ||
+                string.IsNullOrWhiteSpace(addition.Name) ||
+                string.IsNullOrWhiteSpace(addition.Period) ||
+                addition.Value is null)
+            {
+                return FailUpdates(
+                    "Metric candidate additions contain a malformed entry.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            var normalizedAddition = addition with
+            {
+                Name = addition.Name.Trim(),
+                Period = addition.Period.Trim(),
+                Currency = NormalizeOptional(addition.Currency),
+                Unit = NormalizeOptional(addition.Unit)
+            };
+            var key = (
+                normalizedAddition.Name.ToUpperInvariant(),
+                normalizedAddition.Period.ToUpperInvariant());
+
+            if (!metricAdditionKeys.Add(key))
+            {
+                return FailUpdates(
+                    "Metric candidate additions cannot contain duplicate keys.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            if (payload.Candidates.Any(candidate =>
+                    string.Equals(
+                        candidate.Name.Trim(),
+                        normalizedAddition.Name,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(
+                        candidate.Period.Trim(),
+                        normalizedAddition.Period,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return FailUpdates(
+                    "Metric candidate addition collides with an existing candidate.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            metricAdditions.Add(normalizedAddition);
+        }
+
+        var metadataAdditions =
+            new List<FinancialDocumentMetadataCandidateAddition>();
+        var metadataAdditionFields = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var addition in request.MetadataAdditions)
+        {
+            if (addition is null ||
+                string.IsNullOrWhiteSpace(addition.FieldName) ||
+                string.IsNullOrWhiteSpace(addition.Value))
+            {
+                return FailUpdates(
+                    "Metadata candidate additions contain a malformed entry.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            var normalizedAddition = addition with
+            {
+                FieldName = addition.FieldName.Trim().ToLowerInvariant(),
+                Value = addition.Value.Trim()
+            };
+
+            if (!IsSupportedMetadataField(normalizedAddition.FieldName))
+            {
+                return FailUpdates(
+                    "Metadata candidate additions contain a malformed entry.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            if (!metadataAdditionFields.Add(normalizedAddition.FieldName))
+            {
+                return FailUpdates(
+                    "Metadata candidate additions cannot contain duplicate fields.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            if (payload.MetadataCandidates.Any(candidate => string.Equals(
+                    candidate.FieldName.Trim(),
+                    normalizedAddition.FieldName,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                return FailUpdates(
+                    "Metadata candidate addition collides with an existing candidate.",
+                    out updatedCandidates,
+                    out updatedMetadataCandidates,
+                    out decisions,
+                    out error);
+            }
+
+            metadataAdditions.Add(normalizedAddition);
+        }
+
         var metricIds = payload.Candidates.Select(x => x.Id).ToHashSet();
         var metadataIds = payload.MetadataCandidates.Select(x => x.Id).ToHashSet();
 
@@ -676,6 +812,34 @@ public sealed class FinancialMetricsExtractionDraftService(
             }
         }
 
+        metrics.AddRange(metricAdditions.Select(addition =>
+            new FinancialMetricCandidate(
+                Id: Guid.NewGuid(),
+                Name: addition.Name,
+                Period: addition.Period,
+                Value: addition.Value,
+                Currency: addition.Currency,
+                Unit: addition.Unit,
+                SourceKind: FinancialMetricCandidateSourceKinds.HumanCorrected,
+                Confidence: 1m,
+                SourcePage: null,
+                Evidence: "",
+                ExtractionStrategy: HumanReviewExtractionStrategy,
+                ReviewState: FinancialMetricCandidateReviewStates.HumanCorrected,
+                InferenceExplanation: null)));
+        metadata.AddRange(metadataAdditions.Select(addition =>
+            new FinancialDocumentMetadataCandidate(
+                Id: Guid.NewGuid(),
+                FieldName: addition.FieldName,
+                Value: addition.Value,
+                SourceKind: FinancialMetricCandidateSourceKinds.HumanCorrected,
+                Confidence: 1m,
+                SourcePage: null,
+                Evidence: "",
+                ExtractionStrategy: HumanReviewExtractionStrategy,
+                ReviewState: FinancialMetricCandidateReviewStates.HumanCorrected,
+                InferenceExplanation: null)));
+
         updatedCandidates = metrics.ToArray();
         updatedMetadataCandidates = metadata.ToArray();
         decisions = decisionMap;
@@ -728,12 +892,12 @@ public sealed class FinancialMetricsExtractionDraftService(
                 proposedMetrics[0].Value != selected[0].Value ||
                 !SameOptional(proposedMetrics[0].Currency, selected[0].Currency) ||
                 !SameOptional(proposedMetrics[0].Unit, selected[0].Unit) ||
-                selected[0].ReviewState ==
-                    FinancialMetricCandidateReviewStates.HumanCorrected &&
                 !string.Equals(
                     proposedMetrics[0].Source,
-                    FinancialMetricCandidateSourceKinds.HumanCorrected,
-                    StringComparison.Ordinal))
+                    selected[0].SourceKind,
+                    StringComparison.Ordinal) ||
+                proposedMetrics[0].SourcePage != selected[0].SourcePage ||
+                proposedMetrics[0].Confidence != selected[0].Confidence)
             {
                 error =
                     "Each selected metric resolution must match the proposed input.";
@@ -795,11 +959,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         };
 
         foreach (var field in proposedMetadata.Where(field =>
-                     field.Value is not null &&
-                     metadataCandidates.Any(candidate => string.Equals(
-                         candidate.FieldName.Trim(),
-                         field.FieldName,
-                         StringComparison.OrdinalIgnoreCase))))
+                     !string.IsNullOrWhiteSpace(field.Value)))
         {
             var selected = metadataCandidates
                 .Where(candidate =>
@@ -1111,6 +1271,17 @@ public sealed class FinancialMetricsExtractionDraftService(
                 out error);
         }
 
+        if (!TryNormalizeProposedInput(
+                payload.ProposedInput,
+                out var normalizedProposedInput,
+                out var proposedInputError))
+        {
+            return FailPayload(
+                proposedInputError,
+                out normalized,
+                out error);
+        }
+
         if (payload.Candidates.Any(x =>
                 x is null ||
                 x.Id == Guid.Empty ||
@@ -1207,10 +1378,7 @@ public sealed class FinancialMetricsExtractionDraftService(
 
         normalized = payload with
         {
-            ProposedInput = payload.ProposedInput with
-            {
-                Metrics = payload.ProposedInput.Metrics.ToArray()
-            },
+            ProposedInput = normalizedProposedInput,
             Candidates = payload.Candidates.ToArray(),
             Conflicts = normalizedConflicts.ToArray(),
             MissingFields = payload.MissingFields.ToArray(),
@@ -1221,6 +1389,36 @@ public sealed class FinancialMetricsExtractionDraftService(
                 ReasonCodes = reasonCodes
             },
             MetadataCandidates = payload.MetadataCandidates.ToArray()
+        };
+        error = "";
+        return true;
+    }
+
+    private static bool TryNormalizeProposedInput(
+        StructuredFinancialMetricsInput? proposedInput,
+        out StructuredFinancialMetricsInput normalized,
+        out string error)
+    {
+        if (proposedInput?.Metrics is null ||
+            proposedInput.Metrics.Any(metric =>
+                metric is null ||
+                string.IsNullOrWhiteSpace(metric.Name) ||
+                string.IsNullOrWhiteSpace(metric.Period)))
+        {
+            normalized = null!;
+            error = "Proposed input contains a malformed metric.";
+            return false;
+        }
+
+        normalized = proposedInput with
+        {
+            Metrics = proposedInput.Metrics
+                .Select(metric => metric with
+                {
+                    Name = metric.Name.Trim(),
+                    Period = metric.Period.Trim()
+                })
+                .ToArray()
         };
         error = "";
         return true;
@@ -1256,6 +1454,11 @@ public sealed class FinancialMetricsExtractionDraftService(
             FinancialMetricCandidateReviewStates.Accepted or
             FinancialMetricCandidateReviewStates.Rejected or
             FinancialMetricCandidateReviewStates.HumanCorrected;
+    }
+
+    private static bool IsSupportedMetadataField(string fieldName)
+    {
+        return fieldName is "company" or "currency" or "unit";
     }
 
     private static bool IsResolvedReviewState(string? reviewState)

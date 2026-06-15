@@ -74,6 +74,17 @@ public sealed record FinancialMetricCandidateReviewUpdate(
     string? Unit,
     string? MetadataValue);
 
+public sealed record FinancialMetricCandidateAddition(
+    string Name,
+    string Period,
+    decimal? Value,
+    string? Currency,
+    string? Unit);
+
+public sealed record FinancialDocumentMetadataCandidateAddition(
+    string FieldName,
+    string Value);
+
 public sealed record CreateFinancialMetricsExtractionDraftRequest(
     string OriginalFileName,
     long FileSizeBytes,
@@ -82,7 +93,21 @@ public sealed record CreateFinancialMetricsExtractionDraftRequest(
 
 public sealed record UpdateFinancialMetricsExtractionDraftRequest(
     IReadOnlyList<FinancialMetricCandidateReviewUpdate> Candidates,
-    StructuredFinancialMetricsInput ProposedInput);
+    StructuredFinancialMetricsInput ProposedInput)
+{
+    public IReadOnlyList<FinancialMetricCandidateAddition> MetricAdditions
+    {
+        get;
+        init;
+    } = [];
+
+    public IReadOnlyList<FinancialDocumentMetadataCandidateAddition>
+        MetadataAdditions
+    {
+        get;
+        init;
+    } = [];
+}
 
 public sealed record FinancialMetricsExtractionDraftDto(
     Guid Id,
