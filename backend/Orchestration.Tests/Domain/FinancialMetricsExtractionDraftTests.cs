@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Domain.FinancialMetricsExtraction;
 using Orchestration.Infrastructure.Persistence;
 
@@ -658,6 +659,38 @@ public class FinancialMetricsExtractionDraftTests
 
         Assert.NotNull(statusProperty);
         Assert.True(statusProperty.IsConcurrencyToken);
+    }
+
+    [Fact]
+    public void DbContext_DraftUpdatedAtProperty_IsConcurrencyToken()
+    {
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase($"draft-model-{Guid.NewGuid()}")
+            .Options;
+        using var dbContext = new OrchestrationDbContext(options);
+
+        var updatedAtProperty = dbContext.Model
+            .FindEntityType(typeof(FinancialMetricsExtractionDraft))!
+            .FindProperty(nameof(FinancialMetricsExtractionDraft.UpdatedAt));
+
+        Assert.NotNull(updatedAtProperty);
+        Assert.True(updatedAtProperty.IsConcurrencyToken);
+    }
+
+    [Fact]
+    public void DbContext_SessionContextJsonProperty_IsConcurrencyToken()
+    {
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase($"session-model-{Guid.NewGuid()}")
+            .Options;
+        using var dbContext = new OrchestrationDbContext(options);
+
+        var contextJsonProperty = dbContext.Model
+            .FindEntityType(typeof(AnalysisSession))!
+            .FindProperty(nameof(AnalysisSession.ContextJson));
+
+        Assert.NotNull(contextJsonProperty);
+        Assert.True(contextJsonProperty.IsConcurrencyToken);
     }
 
     private static FinancialMetricsExtractionDraft CreateDraft(

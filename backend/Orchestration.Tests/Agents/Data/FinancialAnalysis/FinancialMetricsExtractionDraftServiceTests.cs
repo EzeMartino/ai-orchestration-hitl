@@ -72,6 +72,51 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             x.OriginalFileName == "confirmed.pdf");
     }
 
+    [Theory]
+    [InlineData("concurrency")]
+    [InlineData("update")]
+    public async Task CreateOrReplaceAsync_Should_retry_in_same_context_after_save_failure(
+        string exceptionKind)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var service = CreateService(dbContext);
+        await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            fileName: "old.pdf",
+            contentHash: "old-hash");
+        var request = new CreateFinancialMetricsExtractionDraftRequest(
+            OriginalFileName: "replacement.pdf",
+            FileSizeBytes: 8192,
+            ContentHash: "replacement-hash",
+            Payload: CreatePayload());
+        dbContext.NextSaveException = CreateSaveException(exceptionKind);
+
+        var failed = await service.CreateOrReplaceAsync(
+            session.Id,
+            userId,
+            request,
+            CancellationToken.None);
+        var retry = await service.CreateOrReplaceAsync(
+            session.Id,
+            userId,
+            request,
+            CancellationToken.None);
+
+        failed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        var persisted = await dbContext.FinancialMetricsExtractionDrafts
+            .Where(x =>
+                x.SessionId == session.Id &&
+                x.Status == FinancialMetricsExtractionDraftStatus.PendingReview)
+            .ToArrayAsync();
+        persisted.Should().ContainSingle();
+        persisted.Single().ContentHash.Should().Be("replacement-hash");
+    }
+
     [Fact]
     public async Task GetPendingAsync_Should_enforce_user_and_session_ownership()
     {
@@ -95,10 +140,12 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             userId,
             CancellationToken.None);
 
-        own.Should().NotBeNull();
-        own!.Id.Should().Be(created.Id);
-        otherUser.Should().BeNull();
-        otherSessionResult.Should().BeNull();
+        own.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        own.Draft!.Id.Should().Be(created.Id);
+        otherUser.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.NotFound);
+        otherSessionResult.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.NotFound);
     }
 
     [Fact]
@@ -133,6 +180,42 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
 
         result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
         entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Theory]
+    [InlineData("concurrency")]
+    [InlineData("update")]
+    public async Task UpdateAsync_Should_retry_in_same_context_after_save_failure(
+        string exceptionKind)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        var request = CreateMetricAdditionUpdate(draft, 225m);
+        dbContext.NextSaveException = CreateSaveException(exceptionKind);
+
+        var failed = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            request,
+            CancellationToken.None);
+        var retry = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            request,
+            CancellationToken.None);
+
+        failed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        retry.Draft!.Payload.Candidates.Should().ContainSingle(x =>
+            x.Name == "ebitda" &&
+            x.Value == 225m &&
+            x.ReviewState ==
+                FinancialMetricCandidateReviewStates.HumanCorrected);
     }
 
     [Fact]
@@ -1890,6 +1973,362 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             FinancialMetricsExtractionDraftStatus.PendingReview);
     }
 
+    [Theory]
+    [InlineData("concurrency")]
+    [InlineData("update")]
+    public async Task ConfirmAsync_Should_retry_in_same_context_after_save_failure(
+        string exceptionKind)
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        await using var dbContext = new CountingOrchestrationDbContext(options);
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var sessionService = new StructuredFinancialMetricsSessionService(
+            dbContext,
+            new StructuredFinancialMetricsValidator(),
+            new FinancialMetricInputMapper(),
+            new FakeActivityEventPublisher());
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, publisher);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        dbContext.NextSaveException = CreateSaveException(exceptionKind);
+
+        var failed = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+        var retry = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        failed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        publisher.PublishedEvents.Should().ContainSingle(x =>
+            x.Type == "financial_metrics_extraction_review_confirmed");
+
+        await using var verificationContext = new OrchestrationDbContext(options);
+        var persistedSession = await verificationContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        var persistedDraft = await verificationContext
+            .FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        persistedSession.ContextJson.Should().Contain("structuredFinancialMetrics");
+        persistedDraft.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.Confirmed);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_retry_after_stage_exception_dirties_context()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        await using var dbContext = new CountingOrchestrationDbContext(options);
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        session.SetContext("""{"planner":{"summary":"keep"}}""");
+        await dbContext.SaveChangesAsync();
+        var draft = await CreateDraftAsync(
+            CreateService(dbContext),
+            session.Id,
+            userId);
+        var sessionService = new DirtyThenThrowSessionService(
+            dbContext,
+            new InvalidOperationException("Injected stage failure."));
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, publisher);
+
+        var failed = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+        var retry = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        failed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        publisher.PublishedEvents.Should().ContainSingle();
+
+        await using var verificationContext = new OrchestrationDbContext(options);
+        var persistedSession = await verificationContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        persistedSession.ContextJson.Should().Contain("\"planner\"");
+        persistedSession.ContextJson.Should().Contain(
+            "\"structuredFinancialMetrics\"");
+        persistedSession.ContextJson.Should().NotContain("\"dirty\"");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_propagate_stage_cancellation_and_recover_context()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        await using var dbContext = new CountingOrchestrationDbContext(options);
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        session.SetContext("""{"planner":{"summary":"keep"}}""");
+        await dbContext.SaveChangesAsync();
+        var draft = await CreateDraftAsync(
+            CreateService(dbContext),
+            session.Id,
+            userId);
+        using var cancellationSource = new CancellationTokenSource();
+        var sessionService = new DirtyThenThrowSessionService(
+            dbContext,
+            new OperationCanceledException(cancellationSource.Token),
+            cancellationSource);
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, sessionService, publisher);
+
+        var action = () => service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            cancellationSource.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+
+        var retry = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        publisher.PublishedEvents.Should().ContainSingle();
+
+        await using var verificationContext = new OrchestrationDbContext(options);
+        var persistedSession = await verificationContext.AnalysisSessions
+            .SingleAsync(x => x.Id == session.Id);
+        persistedSession.ContextJson.Should().Contain("\"planner\"");
+        persistedSession.ContextJson.Should().Contain(
+            "\"structuredFinancialMetrics\"");
+        persistedSession.ContextJson.Should().NotContain("\"dirty\"");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_conflict_on_stale_payload_and_retry_with_current_payload()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        var userId = Guid.NewGuid();
+        Guid sessionId;
+        FinancialMetricsExtractionDraftDto draft;
+
+        await using (var setupContext = new CountingOrchestrationDbContext(options))
+        {
+            var session = await AddSessionAsync(setupContext, userId);
+            sessionId = session.Id;
+            draft = await CreateDraftAsync(
+                CreateService(setupContext),
+                sessionId,
+                userId);
+        }
+
+        await using var staleContext = new CountingOrchestrationDbContext(options);
+        await staleContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+
+        await Task.Delay(10);
+
+        await using (var concurrentContext = new CountingOrchestrationDbContext(options))
+        {
+            var concurrentService = CreateService(concurrentContext);
+            var addedMetric = new StructuredFinancialMetricInput(
+                Name: "ebitda",
+                Period: "2025A",
+                Value: 250m,
+                Unit: "USD_million",
+                Currency: "USD",
+                Source: FinancialMetricCandidateSourceKinds.HumanCorrected,
+                SourcePage: null,
+                Confidence: 1m);
+            var update = await concurrentService.UpdateAsync(
+                draft.Id,
+                sessionId,
+                userId,
+                new UpdateFinancialMetricsExtractionDraftRequest(
+                    Candidates: [],
+                    ProposedInput: draft.Payload.ProposedInput with
+                    {
+                        Metrics =
+                        [
+                            .. draft.Payload.ProposedInput.Metrics,
+                            addedMetric
+                        ]
+                    })
+                {
+                    MetricAdditions =
+                    [
+                        new FinancialMetricCandidateAddition(
+                            Name: "ebitda",
+                            Period: "2025A",
+                            Value: 250m,
+                            Currency: "USD",
+                            Unit: "USD_million")
+                    ]
+                },
+                CancellationToken.None);
+
+            update.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        }
+
+        var attachedPublisher = new FakeActivityEventPublisher();
+        var sessionService = new StructuredFinancialMetricsSessionService(
+            staleContext,
+            new StructuredFinancialMetricsValidator(),
+            new FinancialMetricInputMapper(),
+            attachedPublisher);
+        var reviewPublisher = new FakeActivityEventPublisher();
+        var staleService = CreateService(
+            staleContext,
+            sessionService,
+            reviewPublisher);
+
+        var staleConfirm = await staleService.ConfirmAsync(
+            draft.Id,
+            sessionId,
+            userId,
+            CancellationToken.None);
+
+        staleConfirm.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.Conflict);
+        reviewPublisher.PublishedEvents.Should().BeEmpty();
+
+        await using (var verificationContext = new OrchestrationDbContext(options))
+        {
+            var persistedSession = await verificationContext.AnalysisSessions
+                .SingleAsync(x => x.Id == sessionId);
+            var persistedDraft = await verificationContext
+                .FinancialMetricsExtractionDrafts
+                .SingleAsync(x => x.Id == draft.Id);
+
+            persistedSession.ContextJson.Should().Be("{}");
+            persistedDraft.Status.Should().Be(
+                FinancialMetricsExtractionDraftStatus.PendingReview);
+        }
+
+        var retry = await staleService.ConfirmAsync(
+            draft.Id,
+            sessionId,
+            userId,
+            CancellationToken.None);
+
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        reviewPublisher.PublishedEvents.Should().ContainSingle();
+
+        await using var retryVerificationContext =
+            new OrchestrationDbContext(options);
+        var confirmedSession = await retryVerificationContext.AnalysisSessions
+            .SingleAsync(x => x.Id == sessionId);
+        var confirmedDraft = await retryVerificationContext
+            .FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        using var contextDocument = JsonDocument.Parse(
+            confirmedSession.ContextJson);
+        var persistedMetrics = contextDocument.RootElement
+            .GetProperty("structuredFinancialMetrics")
+            .GetProperty("metrics")
+            .EnumerateArray()
+            .ToArray();
+        var persistedValue = persistedMetrics
+            .Single(metric => metric.GetProperty("name").GetString() == "ebitda")
+            .GetProperty("value")
+            .GetDecimal();
+
+        persistedMetrics.Should().HaveCount(2);
+        persistedValue.Should().Be(250m);
+        confirmedDraft.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.Confirmed);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_Should_conflict_when_session_context_changes_concurrently()
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        var userId = Guid.NewGuid();
+        Guid sessionId;
+        FinancialMetricsExtractionDraftDto draft;
+
+        await using (var setupContext = new CountingOrchestrationDbContext(options))
+        {
+            var session = await AddSessionAsync(setupContext, userId);
+            sessionId = session.Id;
+            draft = await CreateDraftAsync(
+                CreateService(setupContext),
+                sessionId,
+                userId);
+        }
+
+        await using var staleContext = new CountingOrchestrationDbContext(options);
+        await staleContext.AnalysisSessions.SingleAsync(x => x.Id == sessionId);
+
+        const string concurrentContextJson =
+            """{"planner":{"summary":"concurrent"}}""";
+
+        await using (var concurrentContext = new OrchestrationDbContext(options))
+        {
+            var concurrentSession = await concurrentContext.AnalysisSessions
+                .SingleAsync(x => x.Id == sessionId);
+            concurrentSession.SetContext(concurrentContextJson);
+            await concurrentContext.SaveChangesAsync();
+        }
+
+        var sessionService = new StructuredFinancialMetricsSessionService(
+            staleContext,
+            new StructuredFinancialMetricsValidator(),
+            new FinancialMetricInputMapper(),
+            new FakeActivityEventPublisher());
+        var reviewPublisher = new FakeActivityEventPublisher();
+        var service = CreateService(
+            staleContext,
+            sessionService,
+            reviewPublisher);
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            sessionId,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        reviewPublisher.PublishedEvents.Should().BeEmpty();
+
+        await using var verificationContext = new OrchestrationDbContext(options);
+        var persistedSession = await verificationContext.AnalysisSessions
+            .SingleAsync(x => x.Id == sessionId);
+        var persistedDraft = await verificationContext
+            .FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+
+        persistedSession.ContextJson.Should().Be(concurrentContextJson);
+        persistedDraft.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
     [Fact]
     public async Task DiscardAsync_Should_leave_active_context_unchanged_and_publish_once()
     {
@@ -1923,6 +2362,52 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         publisher.PublishedEvents.Should().ContainSingle(x =>
             x.SessionId == session.Id &&
             x.Type == "financial_metrics_extraction_review_discarded");
+    }
+
+    [Theory]
+    [InlineData("concurrency")]
+    [InlineData("update")]
+    public async Task DiscardAsync_Should_retry_in_same_context_after_save_failure(
+        string exceptionKind)
+    {
+        var databaseName = Guid.NewGuid().ToString();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
+            .UseInMemoryDatabase(databaseName, databaseRoot)
+            .Options;
+        await using var dbContext = new CountingOrchestrationDbContext(options);
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(
+            dbContext,
+            new StubStructuredFinancialMetricsSessionService(),
+            publisher);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        dbContext.NextSaveException = CreateSaveException(exceptionKind);
+
+        var failed = await service.DiscardAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+        var retry = await service.DiscardAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        failed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Conflict);
+        retry.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        publisher.PublishedEvents.Should().ContainSingle(x =>
+            x.Type == "financial_metrics_extraction_review_discarded");
+
+        await using var verificationContext = new OrchestrationDbContext(options);
+        var persistedDraft = await verificationContext
+            .FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        persistedDraft.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.Discarded);
     }
 
     [Fact]
@@ -2024,10 +2509,139 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken.None);
 
         createAsOther.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.NotFound);
-        getAsOther.Should().BeNull();
+        getAsOther.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.NotFound);
         updateAsOther.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.NotFound);
         confirmAsOther.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.NotFound);
         discardAsOther.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.NotFound);
+    }
+
+    [Theory]
+    [InlineData("""{"schemaVersion":2}""")]
+    [InlineData("""{"schemaVersion":1,"proposedInput":null,"candidates":null}""")]
+    public async Task GetPendingAsync_Should_return_invalid_identity_for_corrupted_payload(
+        string payloadJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var entity = FinancialMetricsExtractionDraft.Create(
+            session.Id,
+            userId,
+            "corrupted.pdf",
+            100,
+            "corrupted-hash",
+            payloadJson,
+            DateTimeOffset.UtcNow);
+        dbContext.FinancialMetricsExtractionDrafts.Add(entity);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.GetPendingAsync(
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Draft.Should().BeNull();
+        result.DraftIdentity.Should().NotBeNull();
+        result.DraftIdentity!.Id.Should().Be(entity.Id);
+        result.DraftIdentity.SessionId.Should().Be(session.Id);
+        result.DraftIdentity.Status.Should().Be("pending_review");
+        result.DraftIdentity.OriginalFileName.Should().Be("corrupted.pdf");
+    }
+
+    [Theory]
+    [InlineData("""{"schemaVersion":2}""")]
+    [InlineData("""{"schemaVersion":1,"proposedInput":null,"candidates":null}""")]
+    public async Task DiscardAsync_Should_discard_corrupted_payload_idempotently(
+        string payloadJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var entity = FinancialMetricsExtractionDraft.Create(
+            session.Id,
+            userId,
+            "corrupted.pdf",
+            100,
+            "corrupted-hash",
+            payloadJson,
+            DateTimeOffset.UtcNow);
+        dbContext.FinancialMetricsExtractionDrafts.Add(entity);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(
+            dbContext,
+            new StubStructuredFinancialMetricsSessionService(),
+            publisher);
+
+        var otherUser = await service.DiscardAsync(
+            entity.Id,
+            session.Id,
+            Guid.NewGuid(),
+            CancellationToken.None);
+        var discarded = await service.DiscardAsync(
+            entity.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+        var idempotent = await service.DiscardAsync(
+            entity.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        otherUser.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.NotFound);
+        discarded.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.Success);
+        discarded.Draft.Should().BeNull();
+        discarded.DraftIdentity!.Id.Should().Be(entity.Id);
+        discarded.DraftIdentity.Status.Should().Be("discarded");
+        idempotent.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.Success);
+        idempotent.Draft.Should().BeNull();
+        idempotent.DraftIdentity!.Status.Should().Be("discarded");
+        publisher.PublishedEvents.Should().ContainSingle(x =>
+            x.Type == "financial_metrics_extraction_review_discarded");
+        entity.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.Discarded);
+    }
+
+    [Fact]
+    public async Task DiscardAsync_Should_reject_confirmed_corrupted_payload()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var entity = FinancialMetricsExtractionDraft.Create(
+            session.Id,
+            userId,
+            "corrupted.pdf",
+            100,
+            "corrupted-hash",
+            """{"schemaVersion":2}""",
+            DateTimeOffset.UtcNow);
+        entity.Confirm(userId, DateTimeOffset.UtcNow.AddMinutes(1));
+        dbContext.FinancialMetricsExtractionDrafts.Add(entity);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(
+            dbContext,
+            new StubStructuredFinancialMetricsSessionService(),
+            publisher);
+
+        var result = await service.DiscardAsync(
+            entity.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(
+            FinancialMetricsExtractionDraftResultKind.Conflict);
+        publisher.PublishedEvents.Should().BeEmpty();
+        entity.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.Confirmed);
     }
 
     [Theory]
@@ -2303,6 +2917,51 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             FileSizeBytes: 4096,
             ContentHash: "content-hash",
             Payload: CreatePayload());
+    }
+
+    private static UpdateFinancialMetricsExtractionDraftRequest
+        CreateMetricAdditionUpdate(
+            FinancialMetricsExtractionDraftDto draft,
+            decimal value)
+    {
+        var addedMetric = new StructuredFinancialMetricInput(
+            Name: "ebitda",
+            Period: "2025A",
+            Value: value,
+            Unit: "USD_million",
+            Currency: "USD",
+            Source: FinancialMetricCandidateSourceKinds.HumanCorrected,
+            SourcePage: null,
+            Confidence: 1m);
+
+        return new UpdateFinancialMetricsExtractionDraftRequest(
+            Candidates: [],
+            ProposedInput: draft.Payload.ProposedInput with
+            {
+                Metrics = [.. draft.Payload.ProposedInput.Metrics, addedMetric]
+            })
+        {
+            MetricAdditions =
+            [
+                new FinancialMetricCandidateAddition(
+                    Name: "ebitda",
+                    Period: "2025A",
+                    Value: value,
+                    Currency: "USD",
+                    Unit: "USD_million")
+            ]
+        };
+    }
+
+    private static Exception CreateSaveException(string exceptionKind)
+    {
+        return exceptionKind switch
+        {
+            "concurrency" => new DbUpdateConcurrencyException(
+                "Injected concurrency conflict."),
+            "update" => new DbUpdateException("Injected update failure."),
+            _ => throw new InvalidOperationException()
+        };
     }
 
     private static FinancialMetricsExtractionDraftPayload CreatePayload(
@@ -2793,6 +3452,72 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken cancellationToken)
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
+        }
+    }
+
+    private sealed class DirtyThenThrowSessionService
+        : IStructuredFinancialMetricsSessionService
+    {
+        private readonly OrchestrationDbContext _dbContext;
+        private readonly Exception _firstException;
+        private readonly CancellationTokenSource? _cancellationSource;
+        private readonly StructuredFinancialMetricsSessionService _inner;
+        private bool _hasThrown;
+
+        public DirtyThenThrowSessionService(
+            OrchestrationDbContext dbContext,
+            Exception firstException,
+            CancellationTokenSource? cancellationSource = null)
+        {
+            _dbContext = dbContext;
+            _firstException = firstException;
+            _cancellationSource = cancellationSource;
+            _inner = new StructuredFinancialMetricsSessionService(
+                dbContext,
+                new StructuredFinancialMetricsValidator(),
+                new FinancialMetricInputMapper(),
+                new FakeActivityEventPublisher());
+        }
+
+        public async Task<FinancialMetricsSessionSaveResult?> StageAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!_hasThrown)
+            {
+                _hasThrown = true;
+                var session = await _dbContext.AnalysisSessions
+                    .SingleAsync(
+                        x => x.Id == request.SessionId,
+                        cancellationToken);
+                session.SetContext("""{"dirty":true}""");
+                _cancellationSource?.Cancel();
+                throw _firstException;
+            }
+
+            return await _inner.StageAsync(request, cancellationToken);
+        }
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            Guid sessionId,
+            StructuredFinancialMetricsInput input,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Confirm must not call SaveAsync.");
+        }
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("Confirm must not call SaveAsync.");
+        }
+
+        public Task<StructuredFinancialMetricsContext?> GetAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.GetAsync(sessionId, cancellationToken);
         }
     }
 

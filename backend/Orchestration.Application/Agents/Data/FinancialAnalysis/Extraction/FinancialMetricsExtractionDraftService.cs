@@ -119,11 +119,13 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The pending draft changed while it was being replaced.");
         }
         catch (DbUpdateException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The pending draft could not be replaced.");
         }
@@ -132,14 +134,15 @@ public sealed class FinancialMetricsExtractionDraftService(
             ToDto(replacement, payload));
     }
 
-    public async Task<FinancialMetricsExtractionDraftDto?> GetPendingAsync(
+    public async Task<FinancialMetricsExtractionDraftServiceResult> GetPendingAsync(
         Guid sessionId,
         Guid userId,
         CancellationToken cancellationToken)
     {
         if (sessionId == Guid.Empty || userId == Guid.Empty)
         {
-            return null;
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                "Session ID and user ID are required.");
         }
 
         var draft = await _dbContext.FinancialMetricsExtractionDrafts
@@ -150,13 +153,24 @@ public sealed class FinancialMetricsExtractionDraftService(
             .OrderByDescending(x => x.UpdatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (draft is null ||
-            !TryDeserializePayload(draft.PayloadJson, out var payload, out _))
+        if (draft is null)
         {
-            return null;
+            return FinancialMetricsExtractionDraftServiceResult.NotFound(
+                "Pending review draft was not found.");
         }
 
-        return ToDto(draft, payload);
+        if (!TryDeserializePayload(
+                draft.PayloadJson,
+                out var payload,
+                out var payloadError))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                payloadError,
+                draftIdentity: ToIdentityDto(draft));
+        }
+
+        return FinancialMetricsExtractionDraftServiceResult.Success(
+            ToDto(draft, payload));
     }
 
     public async Task<FinancialMetricsExtractionDraftServiceResult> UpdateAsync(
@@ -297,8 +311,15 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The review draft changed while it was being updated.");
+        }
+        catch (DbUpdateException)
+        {
+            _dbContext.ClearTrackedChanges();
+            return FinancialMetricsExtractionDraftServiceResult.Conflict(
+                "The review draft could not be updated.");
         }
 
         return FinancialMetricsExtractionDraftServiceResult.Success(
@@ -398,10 +419,12 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            _dbContext.ClearTrackedChanges();
             throw;
         }
         catch (Exception)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The reviewed financial metrics could not be saved.");
         }
@@ -430,11 +453,13 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The review draft changed while it was being confirmed.");
         }
         catch (DbUpdateException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The reviewed metrics and draft could not be saved atomically.");
         }
@@ -476,21 +501,15 @@ public sealed class FinancialMetricsExtractionDraftService(
                 "Review draft was not found.");
         }
 
-        if (!TryDeserializePayload(draft.PayloadJson, out var payload, out var payloadError))
-        {
-            return FinancialMetricsExtractionDraftServiceResult.Invalid(payloadError);
-        }
-
-        if (draft.Status == FinancialMetricsExtractionDraftStatus.Discarded)
-        {
-            return FinancialMetricsExtractionDraftServiceResult.Success(
-                ToDto(draft, payload));
-        }
-
         if (draft.Status == FinancialMetricsExtractionDraftStatus.Confirmed)
         {
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "A confirmed draft cannot be discarded.");
+        }
+
+        if (draft.Status == FinancialMetricsExtractionDraftStatus.Discarded)
+        {
+            return BuildDiscardSuccess(draft);
         }
 
         try
@@ -500,8 +519,15 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
         catch (DbUpdateConcurrencyException)
         {
+            _dbContext.ClearTrackedChanges();
             return FinancialMetricsExtractionDraftServiceResult.Conflict(
                 "The review draft changed while it was being discarded.");
+        }
+        catch (DbUpdateException)
+        {
+            _dbContext.ClearTrackedChanges();
+            return FinancialMetricsExtractionDraftServiceResult.Conflict(
+                "The review draft could not be discarded.");
         }
 
         await _activityPublisher.PublishAsync(
@@ -513,8 +539,7 @@ public sealed class FinancialMetricsExtractionDraftService(
                 DateTimeOffset.UtcNow),
             cancellationToken);
 
-        return FinancialMetricsExtractionDraftServiceResult.Success(
-            ToDto(draft, payload));
+        return BuildDiscardSuccess(draft);
     }
 
     private async Task<FinancialMetricsExtractionDraft?> FindOwnedDraftAsync(
@@ -1511,13 +1536,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         return new FinancialMetricsExtractionDraftDto(
             draft.Id,
             draft.SessionId,
-            draft.Status switch
-            {
-                FinancialMetricsExtractionDraftStatus.PendingReview => "pending_review",
-                FinancialMetricsExtractionDraftStatus.Confirmed => "confirmed",
-                FinancialMetricsExtractionDraftStatus.Discarded => "discarded",
-                _ => "unknown"
-            },
+            ToStatus(draft.Status),
             draft.OriginalFileName,
             draft.FileSizeBytes,
             draft.ContentHash,
@@ -1525,6 +1544,42 @@ public sealed class FinancialMetricsExtractionDraftService(
             draft.CreatedAt,
             draft.UpdatedAt,
             draft.CompletedAt);
+    }
+
+    private static FinancialMetricsExtractionDraftIdentityDto ToIdentityDto(
+        FinancialMetricsExtractionDraft draft)
+    {
+        return new FinancialMetricsExtractionDraftIdentityDto(
+            draft.Id,
+            draft.SessionId,
+            ToStatus(draft.Status),
+            draft.OriginalFileName,
+            draft.FileSizeBytes,
+            draft.ContentHash,
+            draft.CreatedAt,
+            draft.UpdatedAt,
+            draft.CompletedAt);
+    }
+
+    private static FinancialMetricsExtractionDraftServiceResult BuildDiscardSuccess(
+        FinancialMetricsExtractionDraft draft)
+    {
+        return TryDeserializePayload(draft.PayloadJson, out var payload, out _)
+            ? FinancialMetricsExtractionDraftServiceResult.Success(
+                ToDto(draft, payload))
+            : FinancialMetricsExtractionDraftServiceResult.Success(
+                ToIdentityDto(draft));
+    }
+
+    private static string ToStatus(FinancialMetricsExtractionDraftStatus status)
+    {
+        return status switch
+        {
+            FinancialMetricsExtractionDraftStatus.PendingReview => "pending_review",
+            FinancialMetricsExtractionDraftStatus.Confirmed => "confirmed",
+            FinancialMetricsExtractionDraftStatus.Discarded => "discarded",
+            _ => "unknown"
+        };
     }
 
     private static bool FailUpdates(

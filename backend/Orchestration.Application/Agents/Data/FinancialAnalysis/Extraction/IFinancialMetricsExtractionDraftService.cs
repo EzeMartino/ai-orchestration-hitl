@@ -8,7 +8,7 @@ public interface IFinancialMetricsExtractionDraftService
         CreateFinancialMetricsExtractionDraftRequest request,
         CancellationToken cancellationToken);
 
-    Task<FinancialMetricsExtractionDraftDto?> GetPendingAsync(
+    Task<FinancialMetricsExtractionDraftServiceResult> GetPendingAsync(
         Guid sessionId,
         Guid userId,
         CancellationToken cancellationToken);

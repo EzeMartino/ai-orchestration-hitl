@@ -266,6 +266,7 @@ namespace Orchestration.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ContextJson")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("Context");
@@ -339,6 +340,7 @@ namespace Orchestration.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("UserId")

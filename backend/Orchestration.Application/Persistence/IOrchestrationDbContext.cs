@@ -11,5 +11,7 @@ public interface IOrchestrationDbContext
     DbSet<ActivityEventLog> ActivityEvents { get; }
     DbSet<FinancialMetricsExtractionDraft> FinancialMetricsExtractionDrafts { get; }
 
+    void ClearTrackedChanges();
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

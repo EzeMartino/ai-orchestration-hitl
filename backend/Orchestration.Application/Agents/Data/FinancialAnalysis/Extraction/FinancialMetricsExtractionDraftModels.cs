@@ -121,6 +121,33 @@ public sealed record FinancialMetricsExtractionDraftDto(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? CompletedAt);
 
+public sealed record FinancialMetricsExtractionDraftIdentityDto(
+    Guid Id,
+    Guid SessionId,
+    string Status,
+    string OriginalFileName,
+    long FileSizeBytes,
+    string ContentHash,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? CompletedAt)
+{
+    public static FinancialMetricsExtractionDraftIdentityDto FromDraft(
+        FinancialMetricsExtractionDraftDto draft)
+    {
+        return new FinancialMetricsExtractionDraftIdentityDto(
+            draft.Id,
+            draft.SessionId,
+            draft.Status,
+            draft.OriginalFileName,
+            draft.FileSizeBytes,
+            draft.ContentHash,
+            draft.CreatedAt,
+            draft.UpdatedAt,
+            draft.CompletedAt);
+    }
+}
+
 public enum FinancialMetricsExtractionDraftResultKind
 {
     Success,
@@ -135,6 +162,12 @@ public sealed record FinancialMetricsExtractionDraftServiceResult(
     IReadOnlyList<string> Errors,
     IReadOnlyList<FinancialMetricsValidationIssue> ValidationIssues)
 {
+    public FinancialMetricsExtractionDraftIdentityDto? DraftIdentity
+    {
+        get;
+        init;
+    }
+
     public static FinancialMetricsExtractionDraftServiceResult Success(
         FinancialMetricsExtractionDraftDto draft)
     {
@@ -142,7 +175,24 @@ public sealed record FinancialMetricsExtractionDraftServiceResult(
             FinancialMetricsExtractionDraftResultKind.Success,
             draft,
             [],
-            []);
+            [])
+        {
+            DraftIdentity =
+                FinancialMetricsExtractionDraftIdentityDto.FromDraft(draft)
+        };
+    }
+
+    public static FinancialMetricsExtractionDraftServiceResult Success(
+        FinancialMetricsExtractionDraftIdentityDto draftIdentity)
+    {
+        return new FinancialMetricsExtractionDraftServiceResult(
+            FinancialMetricsExtractionDraftResultKind.Success,
+            null,
+            [],
+            [])
+        {
+            DraftIdentity = draftIdentity
+        };
     }
 
     public static FinancialMetricsExtractionDraftServiceResult NotFound(
@@ -155,12 +205,14 @@ public sealed record FinancialMetricsExtractionDraftServiceResult(
 
     public static FinancialMetricsExtractionDraftServiceResult Invalid(
         string error,
-        IReadOnlyList<FinancialMetricsValidationIssue>? validationIssues = null)
+        IReadOnlyList<FinancialMetricsValidationIssue>? validationIssues = null,
+        FinancialMetricsExtractionDraftIdentityDto? draftIdentity = null)
     {
         return Failure(
             FinancialMetricsExtractionDraftResultKind.Invalid,
             error,
-            validationIssues);
+            validationIssues,
+            draftIdentity);
     }
 
     public static FinancialMetricsExtractionDraftServiceResult Conflict(
@@ -174,12 +226,16 @@ public sealed record FinancialMetricsExtractionDraftServiceResult(
     private static FinancialMetricsExtractionDraftServiceResult Failure(
         FinancialMetricsExtractionDraftResultKind kind,
         string error,
-        IReadOnlyList<FinancialMetricsValidationIssue>? validationIssues = null)
+        IReadOnlyList<FinancialMetricsValidationIssue>? validationIssues = null,
+        FinancialMetricsExtractionDraftIdentityDto? draftIdentity = null)
     {
         return new FinancialMetricsExtractionDraftServiceResult(
             kind,
             null,
             [error],
-            validationIssues ?? []);
+            validationIssues ?? [])
+        {
+            DraftIdentity = draftIdentity
+        };
     }
 }

@@ -20,6 +20,11 @@ public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, Iden
     public DbSet<FinancialMetricsExtractionDraft> FinancialMetricsExtractionDrafts =>
         Set<FinancialMetricsExtractionDraft>();
 
+    public void ClearTrackedChanges()
+    {
+        ChangeTracker.Clear();
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -46,6 +51,7 @@ public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, Iden
             builder.Property(x => x.ContextJson)
                 .HasColumnName("Context")
                 .HasColumnType("jsonb")
+                .IsConcurrencyToken()
                 .IsRequired();
 
             builder.Property(x => x.CurrentAgent)
@@ -145,6 +151,7 @@ public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, Iden
                 .IsRequired();
 
             builder.Property(x => x.UpdatedAt)
+                .IsConcurrencyToken()
                 .IsRequired();
 
             builder.Property(x => x.CompletedAt);
