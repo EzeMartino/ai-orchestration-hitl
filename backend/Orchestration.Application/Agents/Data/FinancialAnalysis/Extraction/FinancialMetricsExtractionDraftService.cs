@@ -226,6 +226,21 @@ public sealed class FinancialMetricsExtractionDraftService(
                 proposedInputError);
         }
 
+        var validation = _validator.Validate(proposedInput);
+        var validationIssues = validation.Errors
+            .Concat(validation.Warnings)
+            .ToArray();
+
+        if (!TryValidateCanonicalProposedInput(
+                proposedInput,
+                validation,
+                out var canonicalIssue))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                "The reviewed financial metrics must already be in canonical form.",
+                [.. validationIssues, canonicalIssue]);
+        }
+
         if (!string.Equals(
                 payload.ProposedInput.DocumentId,
                 proposedInput.DocumentId,
@@ -268,10 +283,6 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
 
         var missingFields = ComputeMissingFields(proposedInput);
-        var validation = _validator.Validate(proposedInput);
-        var validationIssues = validation.Errors
-            .Concat(validation.Warnings)
-            .ToArray();
         var updatedPayload = payload with
         {
             ProposedInput = proposedInput,
@@ -367,15 +378,6 @@ public sealed class FinancialMetricsExtractionDraftService(
                 "A discarded draft cannot be confirmed.");
         }
 
-        if (!TryValidateSelectedCandidateCoherence(
-                payload.ProposedInput,
-                payload.Candidates,
-                payload.MetadataCandidates,
-                out var coherenceError))
-        {
-            return FinancialMetricsExtractionDraftServiceResult.Invalid(coherenceError);
-        }
-
         var blockingCandidates = payload.Candidates
             .Any(candidate => !IsResolvedReviewState(candidate.ReviewState)) ||
             payload.MetadataCandidates
@@ -387,7 +389,7 @@ public sealed class FinancialMetricsExtractionDraftService(
             .ToArray();
 
         if (blockingCandidates ||
-            payload.Conflicts.Count > 0 ||
+            payload.Conflicts.Any(conflict => !conflict.IsResolved) ||
             recomputedMissingFields.Count > 0)
         {
             return FinancialMetricsExtractionDraftServiceResult.Invalid(
@@ -400,6 +402,25 @@ public sealed class FinancialMetricsExtractionDraftService(
             return FinancialMetricsExtractionDraftServiceResult.Invalid(
                 "The reviewed financial metrics are invalid.",
                 validationIssues);
+        }
+
+        if (!TryValidateCanonicalProposedInput(
+                payload.ProposedInput,
+                validation,
+                out var canonicalIssue))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                "The reviewed financial metrics must already be in canonical form.",
+                [.. validationIssues, canonicalIssue]);
+        }
+
+        if (!TryValidateSelectedCandidateCoherence(
+                payload.ProposedInput,
+                payload.Candidates,
+                payload.MetadataCandidates,
+                out var coherenceError))
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(coherenceError);
         }
 
         FinancialMetricsSessionSaveResult? saveResult;
@@ -886,52 +907,6 @@ public sealed class FinancialMetricsExtractionDraftService(
             return false;
         }
 
-        var selectedMetricGroups = candidates
-            .Where(candidate => IsSelectedReviewState(candidate.ReviewState))
-            .GroupBy(candidate => (
-                Name: candidate.Name.Trim().ToUpperInvariant(),
-                Period: candidate.Period.Trim().ToUpperInvariant()));
-
-        foreach (var group in selectedMetricGroups)
-        {
-            var selected = group.ToArray();
-
-            if (selected.Length != 1)
-            {
-                error =
-                    "Each metric name and period can have only one accepted or human-corrected resolution.";
-                return false;
-            }
-
-            var proposedMetrics = proposedInput.Metrics
-                .Where(metric =>
-                    string.Equals(
-                        metric.Name?.Trim(),
-                        selected[0].Name.Trim(),
-                        StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(
-                        metric.Period?.Trim(),
-                        selected[0].Period.Trim(),
-                        StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-
-            if (proposedMetrics.Length != 1 ||
-                proposedMetrics[0].Value != selected[0].Value ||
-                !SameOptional(proposedMetrics[0].Currency, selected[0].Currency) ||
-                !SameOptional(proposedMetrics[0].Unit, selected[0].Unit) ||
-                !string.Equals(
-                    proposedMetrics[0].Source,
-                    ExpectedProposalSource(selected[0]),
-                    StringComparison.Ordinal) ||
-                proposedMetrics[0].SourcePage != selected[0].SourcePage ||
-                proposedMetrics[0].Confidence != selected[0].Confidence)
-            {
-                error =
-                    "Each selected metric resolution must match the proposed input.";
-                return false;
-            }
-        }
-
         foreach (var metric in proposedInput.Metrics)
         {
             var selected = candidates
@@ -947,12 +922,57 @@ public sealed class FinancialMetricsExtractionDraftService(
                         StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
-            if (selected.Length != 1)
+            var primaryCandidates = selected
+                .Where(candidate => MetricCoreMatchesProposal(candidate, metric))
+                .ToArray();
+
+            if (selected.Length == 0)
             {
                 error =
                     "Each proposed metric must have exactly one accepted or human-corrected resolution.";
                 return false;
             }
+
+            if (primaryCandidates.Length == 0)
+            {
+                error =
+                    "Each selected metric resolution must match the proposed input.";
+                return false;
+            }
+
+            if (primaryCandidates.Length > 1)
+            {
+                error =
+                    "Each proposed metric must have exactly one selected primary candidate.";
+                return false;
+            }
+
+            if (!TryValidateMetricFieldSupport(
+                    metric,
+                    primaryCandidates[0],
+                    selected))
+            {
+                error =
+                    "Selected metric supporters are incompatible with the proposed input.";
+                return false;
+            }
+        }
+
+        var proposedMetricKeys = proposedInput.Metrics
+            .Select(metric => (
+                Name: metric.Name.Trim().ToUpperInvariant(),
+                Period: metric.Period.Trim().ToUpperInvariant()))
+            .ToHashSet();
+
+        if (candidates
+            .Where(candidate => IsSelectedReviewState(candidate.ReviewState))
+            .Any(candidate => !proposedMetricKeys.Contains((
+                candidate.Name.Trim().ToUpperInvariant(),
+                candidate.Period.Trim().ToUpperInvariant()))))
+        {
+            error =
+                "Each selected metric resolution must match the proposed input.";
+            return false;
         }
 
         var selectedMetadataGroups = metadataCandidates
@@ -1009,6 +1029,91 @@ public sealed class FinancialMetricsExtractionDraftService(
         return true;
     }
 
+    private static bool MetricCoreMatchesProposal(
+        FinancialMetricCandidate candidate,
+        StructuredFinancialMetricInput proposedMetric)
+    {
+        return SameMetricKey(candidate, proposedMetric) &&
+            candidate.Value == proposedMetric.Value &&
+            string.Equals(
+                ExpectedProposalSource(candidate),
+                proposedMetric.Source,
+                StringComparison.Ordinal) &&
+            candidate.SourcePage == proposedMetric.SourcePage &&
+            candidate.Confidence == proposedMetric.Confidence;
+    }
+
+    private static bool TryValidateMetricFieldSupport(
+        StructuredFinancialMetricInput proposedMetric,
+        FinancialMetricCandidate primary,
+        IReadOnlyList<FinancialMetricCandidate> selected)
+    {
+        var currencySupporters = GetCurrencySupporters(
+            proposedMetric,
+            primary,
+            selected);
+        var unitSupporters = GetUnitSupporters(
+            proposedMetric,
+            primary,
+            selected);
+
+        if (currencySupporters.Count == 0 || unitSupporters.Count == 0)
+        {
+            return false;
+        }
+
+        var justifiedCandidateIds = currencySupporters
+            .Select(candidate => candidate.Id)
+            .Concat(unitSupporters.Select(candidate => candidate.Id))
+            .Append(primary.Id)
+            .ToHashSet();
+
+        return selected.All(candidate =>
+            candidate.Value == primary.Value &&
+            justifiedCandidateIds.Contains(candidate.Id));
+    }
+
+    private static IReadOnlyList<FinancialMetricCandidate> GetCurrencySupporters(
+        StructuredFinancialMetricInput proposedMetric,
+        FinancialMetricCandidate primary,
+        IReadOnlyList<FinancialMetricCandidate> selected)
+    {
+        if (!string.IsNullOrWhiteSpace(primary.Currency))
+        {
+            return SameOptional(primary.Currency, proposedMetric.Currency)
+                ? [primary]
+                : [];
+        }
+
+        return selected
+            .Where(candidate =>
+                candidate.Value == primary.Value &&
+                SameOptional(candidate.Currency, proposedMetric.Currency) &&
+                (string.IsNullOrWhiteSpace(primary.Unit) ||
+                 SameOptional(candidate.Unit, primary.Unit)))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<FinancialMetricCandidate> GetUnitSupporters(
+        StructuredFinancialMetricInput proposedMetric,
+        FinancialMetricCandidate primary,
+        IReadOnlyList<FinancialMetricCandidate> selected)
+    {
+        if (!string.IsNullOrWhiteSpace(primary.Unit))
+        {
+            return SameOptional(primary.Unit, proposedMetric.Unit)
+                ? [primary]
+                : [];
+        }
+
+        return selected
+            .Where(candidate =>
+                candidate.Value == primary.Value &&
+                SameOptional(candidate.Unit, proposedMetric.Unit) &&
+                SameOptional(candidate.Currency, proposedMetric.Currency))
+            .ToArray();
+    }
+
     private static string? ExpectedProposalSource(
         FinancialMetricCandidate candidate)
     {
@@ -1050,10 +1155,10 @@ public sealed class FinancialMetricsExtractionDraftService(
         IReadOnlyList<FinancialDocumentMetadataCandidate> metadataCandidates,
         IReadOnlyDictionary<Guid, FinancialMetricCandidateReviewUpdate> decisions,
         StructuredFinancialMetricsInput proposedInput,
-        out IReadOnlyList<FinancialMetricCandidateConflict> unresolvedConflicts,
+        out IReadOnlyList<FinancialMetricCandidateConflict> updatedConflicts,
         out string error)
     {
-        var unresolved = new List<FinancialMetricCandidateConflict>();
+        var resolved = new List<FinancialMetricCandidateConflict>();
         var candidateById = candidates.ToDictionary(x => x.Id);
         var metadataById = metadataCandidates.ToDictionary(x => x.Id);
 
@@ -1070,7 +1175,7 @@ public sealed class FinancialMetricsExtractionDraftService(
 
             if (involvedMetricIds.Length + involvedMetadataIds.Length == 0)
             {
-                unresolved.Add(conflict);
+                resolved.Add(ToUnresolvedConflict(conflict));
                 continue;
             }
 
@@ -1084,7 +1189,7 @@ public sealed class FinancialMetricsExtractionDraftService(
 
             if (!everyCandidateDecided)
             {
-                unresolved.Add(conflict);
+                resolved.Add(ToUnresolvedConflict(conflict));
                 continue;
             }
 
@@ -1126,9 +1231,18 @@ public sealed class FinancialMetricsExtractionDraftService(
                         StringComparison.OrdinalIgnoreCase)));
             }
 
+            selectedMetrics = selectedMetrics
+                .GroupBy(candidate => candidate.Id)
+                .Select(group => group.First())
+                .ToList();
+            selectedMetadata = selectedMetadata
+                .GroupBy(candidate => candidate.Id)
+                .Select(group => group.First())
+                .ToList();
+
             if (selectedMetrics.Count + selectedMetadata.Count != 1)
             {
-                unresolvedConflicts = [];
+                updatedConflicts = [];
                 error =
                     "A resolved conflict must have exactly one accepted or human-corrected candidate.";
                 return false;
@@ -1140,7 +1254,7 @@ public sealed class FinancialMetricsExtractionDraftService(
                     selectedMetrics[0],
                     proposedInput))
             {
-                unresolvedConflicts = [];
+                updatedConflicts = [];
                 error =
                     "The selected metric conflict resolution does not match the proposed input.";
                 return false;
@@ -1149,16 +1263,60 @@ public sealed class FinancialMetricsExtractionDraftService(
             if (selectedMetadata.Count == 1 &&
                 !MetadataMatchesProposal(selectedMetadata[0], proposedInput))
             {
-                unresolvedConflicts = [];
+                updatedConflicts = [];
                 error =
                     "The selected metadata conflict resolution does not match the proposed input.";
                 return false;
             }
+
+            var selectedMetric = selectedMetrics.SingleOrDefault();
+            var selectedMetadataCandidate = selectedMetadata.SingleOrDefault();
+            var selectedId =
+                selectedMetric?.Id ??
+                selectedMetadataCandidate!.Id;
+            var resolutionDecision =
+                selectedMetric?.ReviewState ??
+                selectedMetadataCandidate!.ReviewState;
+            var auditedMetricCandidates = involvedMetricIds
+                .Select(id => candidateById[id])
+                .Concat(selectedMetric is null ? [] : [selectedMetric])
+                .GroupBy(candidate => candidate.Id)
+                .Select(group => group.First())
+                .ToArray();
+            var auditedMetadataCandidates = involvedMetadataIds
+                .Select(id => metadataById[id])
+                .Concat(
+                    selectedMetadataCandidate is null
+                        ? []
+                        : [selectedMetadataCandidate])
+                .GroupBy(candidate => candidate.Id)
+                .Select(group => group.First())
+                .ToArray();
+
+            resolved.Add(conflict with
+            {
+                MetricCandidates = auditedMetricCandidates,
+                MetadataCandidates = auditedMetadataCandidates,
+                IsResolved = true,
+                SelectedCandidateId = selectedId,
+                ResolutionDecision = resolutionDecision
+            });
         }
 
-        unresolvedConflicts = unresolved.ToArray();
+        updatedConflicts = resolved.ToArray();
         error = "";
         return true;
+    }
+
+    private static FinancialMetricCandidateConflict ToUnresolvedConflict(
+        FinancialMetricCandidateConflict conflict)
+    {
+        return conflict with
+        {
+            IsResolved = false,
+            SelectedCandidateId = null,
+            ResolutionDecision = null
+        };
     }
 
     private static bool MetricConflictMatchesProposal(
@@ -1210,6 +1368,20 @@ public sealed class FinancialMetricsExtractionDraftService(
                 StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool SameMetricKey(
+        FinancialMetricCandidate candidate,
+        StructuredFinancialMetricInput metric)
+    {
+        return string.Equals(
+                candidate.Name.Trim(),
+                metric.Name.Trim(),
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                candidate.Period.Trim(),
+                metric.Period.Trim(),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsConflictDecisionState(string? reviewState)
     {
         return reviewState is
@@ -1251,6 +1423,70 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
 
         return missing.ToArray();
+    }
+
+    private static bool TryValidateCanonicalProposedInput(
+        StructuredFinancialMetricsInput input,
+        FinancialMetricsValidationResult validation,
+        out FinancialMetricsValidationIssue issue)
+    {
+        var documentFieldsAreCanonical =
+            IsCanonicalRequiredText(input.DocumentId) &&
+            IsCanonicalOptionalText(input.Company) &&
+            IsCanonicalOptionalText(input.Currency) &&
+            IsCanonicalOptionalText(input.Unit);
+        var metricsAreCanonical =
+            input.Metrics.Count == validation.Metrics.Count &&
+            input.Metrics
+                .Zip(validation.Metrics)
+                .All(pair => MetricEqualsCanonical(
+                    pair.First,
+                    pair.Second));
+
+        if (documentFieldsAreCanonical && metricsAreCanonical)
+        {
+            issue = null!;
+            return true;
+        }
+
+        issue = new FinancialMetricsValidationIssue(
+            Code: "NON_CANONICAL_REVIEWED_INPUT",
+            Message:
+                "Reviewed financial metrics must not rely on validator normalization, defaults, clamping, or duplicate resolution.",
+            MetricName: null,
+            Period: null,
+            Severity: "Error");
+        return false;
+    }
+
+    private static bool MetricEqualsCanonical(
+        StructuredFinancialMetricInput input,
+        ValidatedFinancialMetric canonical)
+    {
+        return string.Equals(input.Name, canonical.Name, StringComparison.Ordinal) &&
+            string.Equals(input.Period, canonical.Period, StringComparison.Ordinal) &&
+            input.Value == canonical.Value &&
+            string.Equals(input.Unit, canonical.Unit, StringComparison.Ordinal) &&
+            string.Equals(
+                input.Currency,
+                canonical.Currency,
+                StringComparison.Ordinal) &&
+            string.Equals(input.Source, canonical.Source, StringComparison.Ordinal) &&
+            input.SourcePage == canonical.SourcePage &&
+            input.Confidence == canonical.Confidence;
+    }
+
+    private static bool IsCanonicalRequiredText(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            string.Equals(value, value.Trim(), StringComparison.Ordinal);
+    }
+
+    private static bool IsCanonicalOptionalText(string? value)
+    {
+        return value is null ||
+            (!string.IsNullOrWhiteSpace(value) &&
+             string.Equals(value, value.Trim(), StringComparison.Ordinal));
     }
 
     private static bool TryDeserializePayload(
@@ -1361,6 +1597,9 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
 
         var candidateIdSet = candidateIds.ToHashSet();
+        var metricCandidateById = payload.Candidates.ToDictionary(x => x.Id);
+        var metadataCandidateById =
+            payload.MetadataCandidates.ToDictionary(x => x.Id);
         var normalizedConflicts = new List<FinancialMetricCandidateConflict>();
 
         foreach (var conflict in payload.Conflicts)
@@ -1383,7 +1622,11 @@ public sealed class FinancialMetricsExtractionDraftService(
                 .Concat(conflict.MetadataCandidates.Select(x => x.Id))
                 .ToArray();
 
-            if (conflictIds.Any(id => id == Guid.Empty || !candidateIdSet.Contains(id)))
+            if (conflictIds.Any(id => id == Guid.Empty || !candidateIdSet.Contains(id)) ||
+                conflict.MetricCandidates.Any(candidate =>
+                    !metricCandidateById.ContainsKey(candidate.Id)) ||
+                conflict.MetadataCandidates.Any(candidate =>
+                    !metadataCandidateById.ContainsKey(candidate.Id)))
             {
                 return FailPayload(
                     "Draft payload conflict references an unknown candidate.",
@@ -1391,11 +1634,39 @@ public sealed class FinancialMetricsExtractionDraftService(
                     out error);
             }
 
+            var distinctConflictIds = conflictIds.Distinct().ToArray();
+
+            if (distinctConflictIds.Length != conflictIds.Length)
+            {
+                return FailPayload(
+                    "Draft payload contains a malformed conflict.",
+                    out normalized,
+                    out error);
+            }
+
+            var currentMetricCandidates = conflict.MetricCandidates
+                .Select(candidate => metricCandidateById[candidate.Id])
+                .ToArray();
+            var currentMetadataCandidates = conflict.MetadataCandidates
+                .Select(candidate => metadataCandidateById[candidate.Id])
+                .ToArray();
+
+            if (!TryValidateConflictResolution(
+                    conflict,
+                    currentMetricCandidates,
+                    currentMetadataCandidates))
+            {
+                return FailPayload(
+                    "Draft payload contains an invalid conflict resolution.",
+                    out normalized,
+                    out error);
+            }
+
             normalizedConflicts.Add(conflict with
             {
                 FieldName = conflict.FieldName.Trim(),
-                MetricCandidates = conflict.MetricCandidates.ToArray(),
-                MetadataCandidates = conflict.MetadataCandidates.ToArray()
+                MetricCandidates = currentMetricCandidates,
+                MetadataCandidates = currentMetadataCandidates
             });
         }
 
@@ -1438,6 +1709,45 @@ public sealed class FinancialMetricsExtractionDraftService(
         return true;
     }
 
+    private static bool TryValidateConflictResolution(
+        FinancialMetricCandidateConflict conflict,
+        IReadOnlyList<FinancialMetricCandidate> metricCandidates,
+        IReadOnlyList<FinancialDocumentMetadataCandidate> metadataCandidates)
+    {
+        if (!conflict.IsResolved)
+        {
+            return conflict.SelectedCandidateId is null &&
+                conflict.ResolutionDecision is null;
+        }
+
+        if (conflict.SelectedCandidateId is not { } selectedCandidateId ||
+            selectedCandidateId == Guid.Empty ||
+            conflict.ResolutionDecision is not (
+                FinancialMetricCandidateReviewStates.Accepted or
+                FinancialMetricCandidateReviewStates.HumanCorrected))
+        {
+            return false;
+        }
+
+        var selectedStates = metricCandidates
+            .Select(candidate => (candidate.Id, candidate.ReviewState))
+            .Concat(metadataCandidates.Select(candidate =>
+                (candidate.Id, candidate.ReviewState)))
+            .Where(candidate => IsSelectedReviewState(candidate.ReviewState))
+            .ToArray();
+
+        return selectedStates.Length == 1 &&
+            selectedStates[0].Id == selectedCandidateId &&
+            string.Equals(
+                selectedStates[0].ReviewState,
+                conflict.ResolutionDecision,
+                StringComparison.Ordinal) &&
+            metricCandidates.All(candidate =>
+                IsConflictDecisionState(candidate.ReviewState)) &&
+            metadataCandidates.All(candidate =>
+                IsConflictDecisionState(candidate.ReviewState));
+    }
+
     private static bool TryNormalizeProposedInput(
         StructuredFinancialMetricsInput? proposedInput,
         out StructuredFinancialMetricsInput normalized,
@@ -1456,13 +1766,7 @@ public sealed class FinancialMetricsExtractionDraftService(
 
         normalized = proposedInput with
         {
-            Metrics = proposedInput.Metrics
-                .Select(metric => metric with
-                {
-                    Name = metric.Name.Trim(),
-                    Period = metric.Period.Trim()
-                })
-                .ToArray()
+            Metrics = proposedInput.Metrics.ToArray()
         };
         error = "";
         return true;

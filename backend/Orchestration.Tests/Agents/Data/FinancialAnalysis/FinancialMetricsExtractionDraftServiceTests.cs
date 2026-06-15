@@ -431,6 +431,186 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     }
 
     [Theory]
+    [InlineData("borrowed_currency", 2)]
+    [InlineData("borrowed_unit", 2)]
+    [InlineData("compatible_multi_support", 3)]
+    public async Task Update_and_confirm_Should_accept_reconciler_composite_proposal(
+        string composition,
+        int expectedSelectedCandidates)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var reconciliation = CreateCompositeReconciliation(composition);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreateReconciledPayload(reconciliation));
+
+        var updated = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: SelectAll(reconciliation),
+                ProposedInput: reconciliation.ProposedInput),
+            CancellationToken.None);
+        var confirmed = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        updated.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        updated.Draft!.Payload.Candidates.Should().Contain(candidate =>
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Accepted);
+        updated.Draft.Payload.Candidates.Count(candidate =>
+            candidate.ReviewState == FinancialMetricCandidateReviewStates.Accepted)
+            .Should().Be(expectedSelectedCandidates);
+        confirmed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        confirmed.Draft!.Status.Should().Be("confirmed");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_tampered_reconciler_composite_proposal()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var reconciliation = CreateCompositeReconciliation("borrowed_currency");
+        var proposedMetric = reconciliation.ProposedInput.Metrics.Single() with
+        {
+            Unit = "shares"
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreateReconciledPayload(reconciliation));
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: SelectAll(reconciliation),
+                ProposedInput: reconciliation.ProposedInput with
+                {
+                    Metrics = [proposedMetric]
+                }),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Selected metric supporters are incompatible with the proposed input.");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_incompatible_composite_field_mixing()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var primary = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Explicit) with
+        {
+            Currency = null,
+            Unit = "shares"
+        };
+        var incompatibleSupporter = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Explicit) with
+        {
+            Currency = "USD",
+            Unit = "USD_million",
+            Confidence = 0.9m
+        };
+        var payload = CreatePayload(
+            proposedInput: CreateInput(metrics:
+            [
+                CreateInput().Metrics.Single() with
+                {
+                    Currency = null,
+                    Unit = "shares"
+                }
+            ]),
+            candidates: [primary, incompatibleSupporter]);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: payload);
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(
+                        primary.Id,
+                        FinancialMetricCandidateReviewStates.Accepted),
+                    Decision(
+                        incompatibleSupporter.Id,
+                        FinancialMetricCandidateReviewStates.Accepted)
+                ],
+                ProposedInput: CreateInput(metrics:
+                [
+                    CreateInput().Metrics.Single() with
+                    {
+                        Currency = "USD",
+                        Unit = "shares"
+                    }
+                ])),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Selected metric supporters are incompatible with the proposed input.");
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_reject_competing_primary_candidates()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var first = CreateMetricCandidate(
+            reviewState: FinancialMetricCandidateReviewStates.Explicit);
+        var second = first with
+        {
+            Id = Guid.NewGuid()
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreatePayload(candidates: [first, second]));
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    Decision(first.Id, FinancialMetricCandidateReviewStates.Accepted),
+                    Decision(second.Id, FinancialMetricCandidateReviewStates.Accepted)
+                ],
+                ProposedInput: CreateInput()),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Each proposed metric must have exactly one selected primary candidate.");
+    }
+
+    [Theory]
     [InlineData("deterministic")]
     [InlineData("semantic")]
     public async Task UpdateAsync_Should_reject_reconciler_source_kind_tampering(
@@ -598,8 +778,78 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         result.Draft.Payload.Candidates.Should().Contain(x =>
             x.Id == rejected.Id &&
             x.ReviewState == FinancialMetricCandidateReviewStates.Rejected);
-        result.Draft.Payload.Conflicts.Should().BeEmpty();
+        result.Draft.Payload.Conflicts.Should().ContainSingle();
+        result.Draft.Payload.Conflicts.Single().Should().Match(
+            (FinancialMetricCandidateConflict item) =>
+                item.IsResolved &&
+                item.SelectedCandidateId == accepted.Id &&
+                item.ResolutionDecision ==
+                FinancialMetricCandidateReviewStates.Accepted);
         result.Draft.Payload.MissingFields.Should().BeEmpty();
+
+        var confirmed = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        confirmed.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_Should_track_human_corrected_conflict_resolution()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var correctedOriginal = CreateMetricCandidate(
+            value: 100m,
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var rejected = CreateMetricCandidate(
+            value: 120m,
+            reviewState: FinancialMetricCandidateReviewStates.Conflict);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreatePayload(
+                candidates: [correctedOriginal, rejected],
+                conflicts: [CreateMetricConflict(correctedOriginal, rejected)]));
+        var proposedMetric = CreateInput(
+            metricValue: 125m,
+            metricSource: FinancialMetricCandidateSourceKinds.HumanCorrected)
+            .Metrics.Single() with
+        {
+            Confidence = 1m
+        };
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates:
+                [
+                    HumanMetricCorrection(correctedOriginal.Id, 125m),
+                    Decision(rejected.Id, FinancialMetricCandidateReviewStates.Rejected)
+                ],
+                ProposedInput: CreateInput(metrics: [proposedMetric])),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        var corrected = result.Draft!.Payload.Candidates.Single(candidate =>
+            candidate.ReviewState ==
+            FinancialMetricCandidateReviewStates.HumanCorrected);
+        result.Draft.Payload.Conflicts.Should().ContainSingle();
+        result.Draft.Payload.Conflicts.Single().Should().Match(
+            (FinancialMetricCandidateConflict item) =>
+                item.IsResolved &&
+                item.SelectedCandidateId == corrected.Id &&
+                item.ResolutionDecision ==
+                FinancialMetricCandidateReviewStates.HumanCorrected &&
+                item.MetricCandidates.Any(candidate =>
+                    candidate.Id == corrected.Id));
     }
 
     [Fact]
@@ -1382,6 +1632,187 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     }
 
     [Theory]
+    [InlineData("confidence_null")]
+    [InlineData("confidence_low")]
+    [InlineData("confidence_high")]
+    [InlineData("source_page_zero")]
+    [InlineData("source_blank")]
+    [InlineData("unit_blank")]
+    [InlineData("currency_blank")]
+    [InlineData("name_case")]
+    [InlineData("name_whitespace")]
+    [InlineData("period_case")]
+    [InlineData("period_whitespace")]
+    [InlineData("source_whitespace")]
+    [InlineData("unit_whitespace")]
+    [InlineData("currency_whitespace")]
+    [InlineData("document_id_whitespace")]
+    [InlineData("company_whitespace")]
+    [InlineData("document_currency_whitespace")]
+    [InlineData("document_unit_whitespace")]
+    [InlineData("duplicate_replacement")]
+    [InlineData("duplicate_ignore")]
+    public async Task UpdateAsync_Should_reject_noncanonical_proposed_input(
+        string mutation)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var originalJson = entity.PayloadJson;
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: [],
+                ProposedInput: CreateNonCanonicalInput(mutation)),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "The reviewed financial metrics must already be in canonical form.");
+        result.ValidationIssues.Should().Contain(issue =>
+            issue.Code == "NON_CANONICAL_REVIEWED_INPUT");
+        entity.PayloadJson.Should().Be(originalJson);
+    }
+
+    [Theory]
+    [InlineData("confidence_null")]
+    [InlineData("confidence_low")]
+    [InlineData("confidence_high")]
+    [InlineData("source_page_zero")]
+    [InlineData("source_blank")]
+    [InlineData("unit_blank")]
+    [InlineData("currency_blank")]
+    [InlineData("name_case")]
+    [InlineData("name_whitespace")]
+    [InlineData("period_case")]
+    [InlineData("period_whitespace")]
+    [InlineData("source_whitespace")]
+    [InlineData("unit_whitespace")]
+    [InlineData("currency_whitespace")]
+    [InlineData("document_id_whitespace")]
+    [InlineData("company_whitespace")]
+    [InlineData("document_currency_whitespace")]
+    [InlineData("document_unit_whitespace")]
+    [InlineData("duplicate_replacement")]
+    [InlineData("duplicate_ignore")]
+    public async Task ConfirmAsync_Should_reject_noncanonical_persisted_input_before_staging(
+        string mutation)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var sessionService = new StubStructuredFinancialMetricsSessionService();
+        var service = CreateService(dbContext, sessionService);
+        var draft = await CreateDraftAsync(service, session.Id, userId);
+        var entity = await dbContext.FinancialMetricsExtractionDrafts
+            .SingleAsync(x => x.Id == draft.Id);
+        var tamperedPayload = CreatePayload(
+            proposedInput: CreateNonCanonicalInput(mutation));
+        entity.UpdatePayload(
+            JsonSerializer.Serialize(tamperedPayload),
+            DateTimeOffset.UtcNow.AddMinutes(1));
+        await dbContext.SaveChangesAsync();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "The reviewed financial metrics must already be in canonical form.");
+        result.ValidationIssues.Should().Contain(issue =>
+            issue.Code == "NON_CANONICAL_REVIEWED_INPUT");
+        sessionService.StageRequests.Should().BeEmpty();
+        entity.Status.Should().Be(
+            FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("state_mismatch")]
+    public async Task CreateOrReplaceAsync_Should_reject_tampered_conflict_resolution(
+        string tamper)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var accepted = CreateMetricCandidate();
+        var rejected = CreateMetricCandidate(
+            value: 120m,
+            reviewState: FinancialMetricCandidateReviewStates.Rejected);
+        var selectedId = tamper == "unknown"
+            ? Guid.NewGuid()
+            : rejected.Id;
+        var conflict = CreateMetricConflict(accepted, rejected) with
+        {
+            IsResolved = true,
+            SelectedCandidateId = selectedId,
+            ResolutionDecision = FinancialMetricCandidateReviewStates.Accepted
+        };
+        var service = CreateService(dbContext);
+
+        var result = await service.CreateOrReplaceAsync(
+            session.Id,
+            userId,
+            new CreateFinancialMetricsExtractionDraftRequest(
+                OriginalFileName: "report.pdf",
+                FileSizeBytes: 4096,
+                ContentHash: "content-hash",
+                Payload: CreatePayload(
+                    candidates: [accepted, rejected],
+                    conflicts: [conflict])),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Draft payload contains an invalid conflict resolution.");
+    }
+
+    [Fact]
+    public async Task CreateOrReplaceAsync_Should_reject_cross_typed_conflict_candidate_id()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var metric = CreateMetricCandidate();
+        var metadata = CreateMetadataCandidate();
+        var crossTypedSnapshot = metric with
+        {
+            Id = metadata.Id
+        };
+        var payload = CreatePayload(
+            candidates: [metric],
+            conflicts: [CreateMetricConflict(crossTypedSnapshot)]) with
+        {
+            MetadataCandidates = [metadata]
+        };
+        var service = CreateService(dbContext);
+
+        var result = await service.CreateOrReplaceAsync(
+            session.Id,
+            userId,
+            new CreateFinancialMetricsExtractionDraftRequest(
+                OriginalFileName: "report.pdf",
+                FileSizeBytes: 4096,
+                ContentHash: "content-hash",
+                Payload: payload),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Draft payload conflict references an unknown candidate.");
+    }
+
+    [Theory]
     [InlineData("candidate")]
     [InlineData("conflict")]
     [InlineData("missing")]
@@ -1593,19 +2024,17 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     public async Task ConfirmAsync_Should_reject_duplicate_selected_metric_candidates()
     {
         var accepted = CreateMetricCandidate(value: 100m);
-        var corrected = CreateMetricCandidate(
-            value: 100m,
-            sourceKind: FinancialMetricCandidateSourceKinds.HumanCorrected,
-            reviewState: FinancialMetricCandidateReviewStates.HumanCorrected);
+        var duplicate = accepted with
+        {
+            Id = Guid.NewGuid()
+        };
         var payload = CreatePayload(
-            proposedInput: CreateInput(
-                metricValue: 100m,
-                metricSource: FinancialMetricCandidateSourceKinds.HumanCorrected),
-            candidates: [accepted, corrected]);
+            proposedInput: CreateInput(metricValue: 100m),
+            candidates: [accepted, duplicate]);
 
         await AssertConfirmCoherenceBlockedAsync(
             payload,
-            "Each metric name and period can have only one accepted or human-corrected resolution.");
+            "Each proposed metric must have exactly one selected primary candidate.");
     }
 
     [Fact]
@@ -3021,6 +3450,115 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             ]);
     }
 
+    private static StructuredFinancialMetricsInput CreateNonCanonicalInput(
+        string mutation)
+    {
+        var input = CreateInput();
+        var metric = input.Metrics.Single();
+
+        return mutation switch
+        {
+            "confidence_null" => input with
+            {
+                Metrics = [metric with { Confidence = null }]
+            },
+            "confidence_low" => input with
+            {
+                Metrics = [metric with { Confidence = -0.1m }]
+            },
+            "confidence_high" => input with
+            {
+                Metrics = [metric with { Confidence = 1.1m }]
+            },
+            "source_page_zero" => input with
+            {
+                Metrics = [metric with { SourcePage = 0 }]
+            },
+            "source_blank" => input with
+            {
+                Metrics = [metric with { Source = " " }]
+            },
+            "unit_blank" => input with
+            {
+                Metrics = [metric with { Unit = " " }]
+            },
+            "currency_blank" => input with
+            {
+                Metrics = [metric with { Currency = " " }]
+            },
+            "name_case" => input with
+            {
+                Metrics = [metric with { Name = "Revenue" }]
+            },
+            "name_whitespace" => input with
+            {
+                Metrics = [metric with { Name = " revenue " }]
+            },
+            "period_case" => input with
+            {
+                Metrics = [metric with { Period = "2025a" }]
+            },
+            "period_whitespace" => input with
+            {
+                Metrics = [metric with { Period = " 2025A " }]
+            },
+            "source_whitespace" => input with
+            {
+                Metrics = [metric with { Source = " native_table " }]
+            },
+            "unit_whitespace" => input with
+            {
+                Metrics = [metric with { Unit = " USD_million " }]
+            },
+            "currency_whitespace" => input with
+            {
+                Metrics = [metric with { Currency = " USD " }]
+            },
+            "document_id_whitespace" => input with
+            {
+                DocumentId = " document-1 "
+            },
+            "company_whitespace" => input with
+            {
+                Company = " Acme "
+            },
+            "document_currency_whitespace" => input with
+            {
+                Currency = " USD "
+            },
+            "document_unit_whitespace" => input with
+            {
+                Unit = " USD_million "
+            },
+            "duplicate_replacement" => input with
+            {
+                Metrics =
+                [
+                    metric with { Confidence = 0.6m },
+                    metric with
+                    {
+                        Name = "Revenue",
+                        Value = 125m,
+                        Confidence = 0.9m
+                    }
+                ]
+            },
+            "duplicate_ignore" => input with
+            {
+                Metrics =
+                [
+                    metric,
+                    metric with
+                    {
+                        Name = "Revenue",
+                        Value = 125m
+                    }
+                ]
+            },
+            _ => throw new InvalidOperationException()
+        };
+    }
+
     private static FinancialMetricReconciliationResult CreateReconciliation(
         string candidateOrigin)
     {
@@ -3064,6 +3602,98 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 Mode = "ReviewOnly",
                 AutomaticAcceptanceConfidence = 0.9m
             });
+    }
+
+    private static FinancialMetricReconciliationResult
+        CreateCompositeReconciliation(string composition)
+    {
+        var metric = CreateInput(metricSource: "pdf_native").Metrics.Single();
+        var primary = composition switch
+        {
+            "borrowed_currency" => metric with
+            {
+                Currency = null
+            },
+            "borrowed_unit" => metric with
+            {
+                Unit = null
+            },
+            "compatible_multi_support" => metric with
+            {
+                Currency = null,
+                Unit = null,
+                Confidence = 0.99m
+            },
+            _ => throw new InvalidOperationException()
+        };
+        IReadOnlyList<FinancialMetricCandidate> supporters = composition switch
+        {
+            "borrowed_currency" =>
+            [
+                CompositeSupporter("USD", "USD_million", 0.9m)
+            ],
+            "borrowed_unit" =>
+            [
+                CompositeSupporter("USD", "USD_million", 0.9m)
+            ],
+            "compatible_multi_support" =>
+            [
+                CompositeSupporter("USD", null, 0.98m),
+                CompositeSupporter("USD", "USD_million", 0.97m)
+            ],
+            _ => throw new InvalidOperationException()
+        };
+        var reconciler = new FinancialMetricCandidateReconciler(
+            new StructuredFinancialMetricsValidator());
+
+        return reconciler.Reconcile(
+            CreateInput(metrics: [primary]),
+            new FinancialDocumentExtractionResult(
+                Company: null,
+                Currency: null,
+                Unit: null,
+                Metrics: supporters,
+                MetadataCandidates: []),
+            new FinancialMetricsExtractionOptions
+            {
+                Mode = "ReviewOnly",
+                AutomaticAcceptanceConfidence = 0.9m
+            });
+    }
+
+    private static FinancialMetricCandidate CompositeSupporter(
+        string? currency,
+        string? unit,
+        decimal confidence)
+    {
+        return new FinancialMetricCandidate(
+            Id: Guid.NewGuid(),
+            Name: "revenue",
+            Period: "2025A",
+            Value: 100m,
+            Currency: currency,
+            Unit: unit,
+            SourceKind: FinancialMetricCandidateSourceKinds.Reported,
+            Confidence: confidence,
+            SourcePage: 7,
+            Evidence: "Revenue 100",
+            ExtractionStrategy: "semantic_markdown_agent",
+            ReviewState: FinancialMetricCandidateReviewStates.Explicit,
+            InferenceExplanation: null);
+    }
+
+    private static IReadOnlyList<FinancialMetricCandidateReviewUpdate> SelectAll(
+        FinancialMetricReconciliationResult reconciliation)
+    {
+        return reconciliation.Candidates
+            .Select(candidate => Decision(
+                candidate.Id,
+                FinancialMetricCandidateReviewStates.Accepted))
+            .Concat(reconciliation.MetadataCandidates.Select(candidate =>
+                Decision(
+                    candidate.Id,
+                    FinancialMetricCandidateReviewStates.Accepted)))
+            .ToArray();
     }
 
     private static FinancialMetricsExtractionDraftPayload

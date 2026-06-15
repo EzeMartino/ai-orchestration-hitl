@@ -21,4 +21,7 @@ public sealed record FinancialMetricCandidateConflict(
     string? Period,
     string? ProposedValue,
     IReadOnlyList<FinancialMetricCandidate> MetricCandidates,
-    IReadOnlyList<FinancialDocumentMetadataCandidate> MetadataCandidates);
+    IReadOnlyList<FinancialDocumentMetadataCandidate> MetadataCandidates,
+    bool IsResolved = false,
+    Guid? SelectedCandidateId = null,
+    string? ResolutionDecision = null);
