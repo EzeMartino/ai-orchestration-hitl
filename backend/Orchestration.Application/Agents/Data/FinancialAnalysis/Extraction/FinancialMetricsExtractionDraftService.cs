@@ -15,6 +15,8 @@ public sealed class FinancialMetricsExtractionDraftService(
 {
     private const int MaxDiagnosticReasonCodes = 64;
     private const int MaxDiagnosticReasonCodeLength = 128;
+    private const string DeterministicPdfParserExtractionStrategy =
+        "deterministic_pdf_parser";
     private const string HumanReviewExtractionStrategy = "human_review";
 
     private static readonly JsonSerializerOptions JsonOptions =
@@ -894,7 +896,7 @@ public sealed class FinancialMetricsExtractionDraftService(
                 !SameOptional(proposedMetrics[0].Unit, selected[0].Unit) ||
                 !string.Equals(
                     proposedMetrics[0].Source,
-                    selected[0].SourceKind,
+                    ExpectedProposalSource(selected[0]),
                     StringComparison.Ordinal) ||
                 proposedMetrics[0].SourcePage != selected[0].SourcePage ||
                 proposedMetrics[0].Confidence != selected[0].Confidence)
@@ -980,6 +982,23 @@ public sealed class FinancialMetricsExtractionDraftService(
 
         error = "";
         return true;
+    }
+
+    private static string? ExpectedProposalSource(
+        FinancialMetricCandidate candidate)
+    {
+        if (candidate.SourceKind ==
+            FinancialMetricCandidateSourceKinds.HumanCorrected)
+        {
+            return FinancialMetricCandidateSourceKinds.HumanCorrected;
+        }
+
+        return string.Equals(
+            NormalizeOptional(candidate.ExtractionStrategy),
+            DeterministicPdfParserExtractionStrategy,
+            StringComparison.Ordinal)
+            ? NormalizeOptional(candidate.Evidence)
+            : NormalizeOptional(candidate.ExtractionStrategy);
     }
 
     private static bool MetadataMatchesProposal(

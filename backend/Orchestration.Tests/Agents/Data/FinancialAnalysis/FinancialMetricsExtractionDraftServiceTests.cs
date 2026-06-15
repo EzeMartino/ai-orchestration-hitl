@@ -307,6 +307,94 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         entity.PayloadJson.Should().Be(originalJson);
     }
 
+    [Theory]
+    [InlineData("deterministic")]
+    [InlineData("semantic")]
+    public async Task UpdateAsync_Should_accept_reconciler_source_round_trip(
+        string candidateOrigin)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var reconciliation = CreateReconciliation(candidateOrigin);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreateReconciledPayload(reconciliation));
+        var decisions = reconciliation.Candidates
+            .Select(candidate => Decision(
+                candidate.Id,
+                FinancialMetricCandidateReviewStates.Accepted))
+            .Concat(reconciliation.MetadataCandidates.Select(candidate =>
+                Decision(
+                    candidate.Id,
+                    FinancialMetricCandidateReviewStates.Accepted)))
+            .ToArray();
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: decisions,
+                ProposedInput: reconciliation.ProposedInput),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        result.Draft!.Payload.ProposedInput.Metrics.Single().Source.Should().Be(
+            reconciliation.ProposedInput.Metrics.Single().Source);
+    }
+
+    [Theory]
+    [InlineData("deterministic")]
+    [InlineData("semantic")]
+    public async Task UpdateAsync_Should_reject_reconciler_source_kind_tampering(
+        string candidateOrigin)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var reconciliation = CreateReconciliation(candidateOrigin);
+        var candidate = reconciliation.Candidates.Single();
+        var proposedMetric = reconciliation.ProposedInput.Metrics.Single() with
+        {
+            Source = candidate.SourceKind
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreateReconciledPayload(reconciliation));
+        var decisions = reconciliation.Candidates
+            .Select(item => Decision(
+                item.Id,
+                FinancialMetricCandidateReviewStates.Accepted))
+            .Concat(reconciliation.MetadataCandidates.Select(item =>
+                Decision(
+                    item.Id,
+                    FinancialMetricCandidateReviewStates.Accepted)))
+            .ToArray();
+
+        var result = await service.UpdateAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new UpdateFinancialMetricsExtractionDraftRequest(
+                Candidates: decisions,
+                ProposedInput: reconciliation.ProposedInput with
+                {
+                    Metrics = [proposedMetric]
+                }),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.Errors.Should().ContainSingle().Which.Should().Be(
+            "Each selected metric resolution must match the proposed input.");
+    }
+
     [Fact]
     public async Task UpdateAsync_Should_reject_noncanonical_human_correction_provenance()
     {
@@ -1317,6 +1405,62 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             "Each selected metric resolution must match the proposed input.");
     }
 
+    [Theory]
+    [InlineData("deterministic")]
+    [InlineData("semantic")]
+    public async Task ConfirmAsync_Should_accept_reconciler_source_round_trip(
+        string candidateOrigin)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var reconciliation = CreateReconciliation(candidateOrigin);
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(
+            service,
+            session.Id,
+            userId,
+            payload: CreateReconciledPayload(
+                reconciliation,
+                markAccepted: true));
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        result.Draft!.Status.Should().Be("confirmed");
+    }
+
+    [Theory]
+    [InlineData("deterministic")]
+    [InlineData("semantic")]
+    public async Task ConfirmAsync_Should_reject_reconciler_source_kind_tampering(
+        string candidateOrigin)
+    {
+        var reconciliation = CreateReconciliation(candidateOrigin);
+        var candidate = reconciliation.Candidates.Single();
+        var proposedMetric = reconciliation.ProposedInput.Metrics.Single() with
+        {
+            Source = candidate.SourceKind
+        };
+        var payload = CreateReconciledPayload(
+            reconciliation,
+            markAccepted: true) with
+        {
+            ProposedInput = reconciliation.ProposedInput with
+            {
+                Metrics = [proposedMetric]
+            }
+        };
+
+        await AssertConfirmCoherenceBlockedAsync(
+            payload,
+            "Each selected metric resolution must match the proposed input.");
+    }
+
     [Fact]
     public async Task ConfirmAsync_Should_reject_noncanonical_human_corrected_provenance()
     {
@@ -2196,7 +2340,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         string documentId = "document-1",
         string? company = "Acme",
         decimal metricValue = 100m,
-        string metricSource = "reported",
+        string metricSource = "native_table",
         IReadOnlyList<StructuredFinancialMetricInput>? metrics = null)
     {
         return new StructuredFinancialMetricsInput(
@@ -2216,6 +2360,85 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                     SourcePage: 7,
                     Confidence: 0.95m)
             ]);
+    }
+
+    private static FinancialMetricReconciliationResult CreateReconciliation(
+        string candidateOrigin)
+    {
+        var reconciler = new FinancialMetricCandidateReconciler(
+            new StructuredFinancialMetricsValidator());
+        var deterministicInput = candidateOrigin == "deterministic"
+            ? CreateInput(metricSource: "pdf_native")
+            : CreateInput(metrics: []);
+        var semanticResult = candidateOrigin == "semantic"
+            ? new FinancialDocumentExtractionResult(
+                Company: null,
+                Currency: null,
+                Unit: null,
+                Metrics:
+                [
+                    new FinancialMetricCandidate(
+                        Id: Guid.NewGuid(),
+                        Name: "revenue",
+                        Period: "2025A",
+                        Value: 100m,
+                        Currency: "USD",
+                        Unit: "USD_million",
+                        SourceKind:
+                            FinancialMetricCandidateSourceKinds.Reported,
+                        Confidence: 0.95m,
+                        SourcePage: 7,
+                        Evidence: "Revenue 100",
+                        ExtractionStrategy: "semantic_markdown_agent",
+                        ReviewState:
+                            FinancialMetricCandidateReviewStates.Explicit,
+                        InferenceExplanation: null)
+                ],
+                MetadataCandidates: [])
+            : null;
+
+        return reconciler.Reconcile(
+            deterministicInput,
+            semanticResult,
+            new FinancialMetricsExtractionOptions
+            {
+                Mode = "ReviewOnly",
+                AutomaticAcceptanceConfidence = 0.9m
+            });
+    }
+
+    private static FinancialMetricsExtractionDraftPayload
+        CreateReconciledPayload(
+            FinancialMetricReconciliationResult reconciliation,
+            bool markAccepted = false)
+    {
+        var candidates = markAccepted
+            ? reconciliation.Candidates
+                .Select(candidate => candidate with
+                {
+                    ReviewState =
+                        FinancialMetricCandidateReviewStates.Accepted
+                })
+                .ToArray()
+            : reconciliation.Candidates;
+        var metadataCandidates = markAccepted
+            ? reconciliation.MetadataCandidates
+                .Select(candidate => candidate with
+                {
+                    ReviewState =
+                        FinancialMetricCandidateReviewStates.Accepted
+                })
+                .ToArray()
+            : reconciliation.MetadataCandidates;
+
+        return CreatePayload(
+            proposedInput: reconciliation.ProposedInput,
+            candidates: candidates,
+            conflicts: reconciliation.Conflicts,
+            missingFields: reconciliation.MissingFields) with
+        {
+            MetadataCandidates = metadataCandidates
+        };
     }
 
     private static StructuredFinancialMetricsInput WithoutMetadataField(
