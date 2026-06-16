@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -10,6 +10,7 @@ using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using UglyToad.PdfPig.Core;
@@ -26,7 +27,8 @@ public class AnalysisSessionsController(
     IActivityEventPublisher activityPublisher,
     IStructuredFinancialMetricsSessionService financialMetricsSessionService,
     IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
-    IStructuredFinancialMetricsPdfExtractor financialMetricsPdfExtractor,
+    IStructuredFinancialMetricsPdfIngestionService financialMetricsPdfIngestionService,
+    IFinancialMetricsExtractionDraftService financialMetricsExtractionDraftService,
     IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions) : ControllerBase
 {
     private readonly IOrchestrationDbContext _dbContext = dbContext;
@@ -35,8 +37,34 @@ public class AnalysisSessionsController(
     private readonly IActivityEventPublisher _activityPublisher = activityPublisher;
     private readonly IStructuredFinancialMetricsSessionService _financialMetricsSessionService = financialMetricsSessionService;
     private readonly IStructuredFinancialMetricsCsvParser _financialMetricsCsvParser = financialMetricsCsvParser;
-    private readonly IStructuredFinancialMetricsPdfExtractor _financialMetricsPdfExtractor = financialMetricsPdfExtractor;
+    private readonly IStructuredFinancialMetricsPdfIngestionService _financialMetricsPdfIngestionService = financialMetricsPdfIngestionService;
+    private readonly IFinancialMetricsExtractionDraftService _financialMetricsExtractionDraftService = financialMetricsExtractionDraftService;
     private readonly StructuredFinancialMetricsFileUploadOptions _fileUploadOptions = fileUploadOptions.Value;
+
+    public AnalysisSessionsController(
+        IOrchestrationDbContext dbContext,
+        AnalysisOrchestratorService orchestrator,
+        IAnalysisSessionStartPreflightValidator startPreflightValidator,
+        IActivityEventPublisher activityPublisher,
+        IStructuredFinancialMetricsSessionService financialMetricsSessionService,
+        IStructuredFinancialMetricsCsvParser financialMetricsCsvParser,
+        IStructuredFinancialMetricsPdfExtractor financialMetricsPdfExtractor,
+        IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions)
+        : this(
+            dbContext,
+            orchestrator,
+            startPreflightValidator,
+            activityPublisher,
+            financialMetricsSessionService,
+            financialMetricsCsvParser,
+            new LegacyPdfIngestionService(
+                financialMetricsPdfExtractor,
+                financialMetricsSessionService
+            ),
+            new NullFinancialMetricsExtractionDraftService(),
+            fileUploadOptions)
+    {
+    }
 
     private Guid CurrentUserId => Guid.Parse(
         User.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -429,6 +457,75 @@ public class AnalysisSessionsController(
         ));
     }
 
+    [HttpGet("{id:guid}/financial-metrics/review")]
+    public async Task<IActionResult> GetFinancialMetricsReview(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _financialMetricsExtractionDraftService.GetPendingAsync(
+            id,
+            CurrentUserId,
+            cancellationToken
+        );
+
+        return ToDraftActionResult(result);
+    }
+
+    [HttpPut("{id:guid}/financial-metrics/review/{draftId:guid}")]
+    public async Task<IActionResult> UpdateFinancialMetricsReview(
+        Guid id,
+        Guid draftId,
+        [FromBody] UpdateFinancialMetricsExtractionDraftRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest();
+        }
+
+        var result = await _financialMetricsExtractionDraftService.UpdateAsync(
+            draftId,
+            id,
+            CurrentUserId,
+            request,
+            cancellationToken
+        );
+
+        return ToDraftActionResult(result);
+    }
+
+    [HttpPost("{id:guid}/financial-metrics/review/{draftId:guid}/confirm")]
+    public async Task<IActionResult> ConfirmFinancialMetricsReview(
+        Guid id,
+        Guid draftId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _financialMetricsExtractionDraftService.ConfirmAsync(
+            draftId,
+            id,
+            CurrentUserId,
+            cancellationToken
+        );
+
+        return ToDraftActionResult(result, invalidAsConflict: true);
+    }
+
+    [HttpPost("{id:guid}/financial-metrics/review/{draftId:guid}/discard")]
+    public async Task<IActionResult> DiscardFinancialMetricsReview(
+        Guid id,
+        Guid draftId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _financialMetricsExtractionDraftService.DiscardAsync(
+            draftId,
+            id,
+            CurrentUserId,
+            cancellationToken
+        );
+
+        return ToDraftActionResult(result);
+    }
+
     private async Task<IActionResult> SaveJsonFileAsync(
         Guid id,
         StructuredFinancialMetricsFileUploadRequest request,
@@ -515,12 +612,26 @@ public class AnalysisSessionsController(
         StructuredFinancialMetricsFileUploadRequest request,
         CancellationToken cancellationToken)
     {
-        StructuredFinancialMetricsPdfExtractionResult? extraction;
+        StructuredFinancialMetricsPdfIngestionResult ingestion;
 
         try
         {
-            await using var stream = request.File!.OpenReadStream();
-            extraction = await ExtractPdfMetricsAsync(request, stream, cancellationToken);
+            var pdfBytes = await ReadFileBytesAsync(request.File!, cancellationToken);
+            ingestion = await _financialMetricsPdfIngestionService.IngestAsync(
+                new StructuredFinancialMetricsPdfIngestionRequest(
+                    SessionId: id,
+                    UserId: CurrentUserId,
+                    PdfBytes: pdfBytes,
+                    DocumentId: request.DocumentId ?? "",
+                    Company: request.Company,
+                    Currency: request.Currency,
+                    Unit: request.Unit,
+                    OriginalFileName: Path.GetFileName(request.File!.FileName),
+                    FileSizeBytes: request.File.Length,
+                    ContentHash: ComputeSha256(pdfBytes)
+                ),
+                cancellationToken
+            );
         }
         catch (PdfOcrDependencyException)
         {
@@ -541,66 +652,9 @@ public class AnalysisSessionsController(
             return BadRequest(new FileUploadErrorResponse("Archivo PDF no válido."));
         }
 
-        if (extraction is null || !extraction.IsValid || extraction.Input is null)
-        {
-            var errors = extraction?.Errors ?? [];
-
-            if (errors.Any(issue => issue.Code == "PDF_OCR_NOT_CONFIGURED"))
-            {
-                return BadRequest(new FileUploadErrorResponse(
-                    "Las dependencias de OCR para PDF no están configuradas."
-                ));
-            }
-
-            var invalidResult = new FinancialMetricsSessionSaveResult(
-                SessionId: id,
-                IsValid: false,
-                Context: null,
-                Errors: errors,
-                Warnings: extraction?.Warnings ?? []
-            );
-
-            return Ok(CreateFileResponse(request.File, "pdf", invalidResult));
-        }
-
-        var result = await _financialMetricsSessionService.SaveAsync(
-            new SaveStructuredFinancialMetricsRequest(
-                SessionId: id,
-                Input: ApplyFallbackMetadata(extraction.Input, request),
-                Provenance: await CreateBinaryFileProvenanceAsync(
-                    request.File,
-                    "pdf_file",
-                    cancellationToken
-                )
-            ),
-            cancellationToken
-        );
-
-        if (result is null)
-        {
-            return NotFound();
-        }
-
-        return Ok(CreateFileResponse(request.File, "pdf", result));
+        return Ok(CreatePdfFileResponse(id, request.File!, ingestion));
     }
 
-    private Task<StructuredFinancialMetricsPdfExtractionResult> ExtractPdfMetricsAsync(
-        StructuredFinancialMetricsFileUploadRequest request,
-        Stream stream,
-        CancellationToken cancellationToken)
-    {
-        return _financialMetricsPdfExtractor.ExtractAsync(
-            stream,
-            new StructuredFinancialMetricsPdfExtractionRequest(
-                DocumentId: request.DocumentId,
-                Company: request.Company,
-                Currency: request.Currency,
-                Unit: request.Unit,
-                OriginalFileName: request.File!.FileName
-            ),
-            cancellationToken
-        );
-    }
 
     private async Task<IActionResult> SaveCsvInputAsync(
         Guid id,
@@ -734,6 +788,17 @@ public class AnalysisSessionsController(
         return await reader.ReadToEndAsync(cancellationToken);
     }
 
+    private static async Task<byte[]> ReadFileBytesAsync(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+
+        return buffer.ToArray();
+    }
+
     private static StructuredFinancialMetricsInput ApplyFallbackMetadata(
         StructuredFinancialMetricsInput input,
         StructuredFinancialMetricsFileUploadRequest request)
@@ -768,8 +833,56 @@ public class AnalysisSessionsController(
             Warnings: result.Warnings,
             FileName: Path.GetFileName(file.FileName),
             FileType: fileType,
-            FileSizeBytes: file.Length
+            FileSizeBytes: file.Length,
+            Outcome: "accepted",
+            ReviewDraft: null
         );
+    }
+
+    private static SaveFinancialMetricsFileResponse CreatePdfFileResponse(
+        Guid sessionId,
+        IFormFile file,
+        StructuredFinancialMetricsPdfIngestionResult result)
+    {
+        return result.Outcome switch
+        {
+            FinancialMetricsFileOutcome.Accepted => new SaveFinancialMetricsFileResponse(
+                SessionId: result.SaveResult?.SessionId ?? sessionId,
+                IsValid: result.SaveResult?.IsValid ?? false,
+                Context: result.SaveResult?.Context,
+                Errors: result.SaveResult?.Errors ?? result.Errors,
+                Warnings: result.SaveResult?.Warnings ?? result.Warnings,
+                FileName: Path.GetFileName(file.FileName),
+                FileType: "pdf",
+                FileSizeBytes: file.Length,
+                Outcome: "accepted",
+                ReviewDraft: null
+            ),
+            FinancialMetricsFileOutcome.ReviewRequired => new SaveFinancialMetricsFileResponse(
+                SessionId: sessionId,
+                IsValid: false,
+                Context: null,
+                Errors: result.Errors,
+                Warnings: result.Warnings,
+                FileName: Path.GetFileName(file.FileName),
+                FileType: "pdf",
+                FileSizeBytes: file.Length,
+                Outcome: "review_required",
+                ReviewDraft: result.ReviewDraft
+            ),
+            _ => new SaveFinancialMetricsFileResponse(
+                SessionId: sessionId,
+                IsValid: false,
+                Context: null,
+                Errors: result.Errors,
+                Warnings: result.Warnings,
+                FileName: Path.GetFileName(file.FileName),
+                FileType: "pdf",
+                FileSizeBytes: file.Length,
+                Outcome: "failed",
+                ReviewDraft: null
+            )
+        };
     }
 
     private static StructuredFinancialMetricsProvenanceInput CreateFileProvenance(
@@ -809,10 +922,176 @@ public class AnalysisSessionsController(
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    private static string ComputeSha256(
+        byte[] content)
+    {
+        var hash = SHA256.HashData(content);
+
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private IActionResult ToDraftActionResult(
+        FinancialMetricsExtractionDraftServiceResult result,
+        bool invalidAsConflict = false)
+    {
+        if (result.Kind == FinancialMetricsExtractionDraftResultKind.Success)
+        {
+            return Ok(result.Draft ?? (object?)result.DraftIdentity);
+        }
+
+        var error = new FinancialMetricsExtractionDraftErrorResponse(
+            result.Errors,
+            result.ValidationIssues
+        );
+
+        return result.Kind switch
+        {
+            FinancialMetricsExtractionDraftResultKind.NotFound => NotFound(),
+            FinancialMetricsExtractionDraftResultKind.Invalid when invalidAsConflict => Conflict(error),
+            FinancialMetricsExtractionDraftResultKind.Invalid => BadRequest(error),
+            FinancialMetricsExtractionDraftResultKind.Conflict => Conflict(error),
+            _ => BadRequest(error)
+        };
+    }
+
     private sealed record CsvSaveResult(
         IActionResult ActionResult,
         FinancialMetricsSessionSaveResult? SaveResult
     );
+
+    private sealed class NullFinancialMetricsExtractionDraftService
+        : IFinancialMetricsExtractionDraftService
+    {
+        public Task<FinancialMetricsExtractionDraftServiceResult> CreateOrReplaceAsync(
+            Guid sessionId,
+            Guid userId,
+            CreateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken)
+        {
+            return NotFound();
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> GetPendingAsync(
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            return NotFound();
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> UpdateAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            UpdateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken)
+        {
+            return NotFound();
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> ConfirmAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            return NotFound();
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            return NotFound();
+        }
+
+        private static Task<FinancialMetricsExtractionDraftServiceResult> NotFound()
+        {
+            return Task.FromResult(
+                FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.")
+            );
+        }
+    }
+
+    private sealed class LegacyPdfIngestionService(
+        IStructuredFinancialMetricsPdfExtractor pdfExtractor,
+        IStructuredFinancialMetricsSessionService sessionService)
+        : IStructuredFinancialMetricsPdfIngestionService
+    {
+        public async Task<StructuredFinancialMetricsPdfIngestionResult> IngestAsync(
+            StructuredFinancialMetricsPdfIngestionRequest request,
+            CancellationToken cancellationToken)
+        {
+            await using var stream = new MemoryStream(request.PdfBytes);
+            var extraction = await pdfExtractor.ExtractAsync(
+                stream,
+                new StructuredFinancialMetricsPdfExtractionRequest(
+                    DocumentId: request.DocumentId,
+                    Company: request.Company,
+                    Currency: request.Currency,
+                    Unit: request.Unit,
+                    OriginalFileName: request.OriginalFileName
+                ),
+                cancellationToken
+            );
+
+            if (!extraction.IsValid || extraction.Input is null)
+            {
+                return new StructuredFinancialMetricsPdfIngestionResult(
+                    FinancialMetricsFileOutcome.Failed,
+                    SaveResult: null,
+                    ReviewDraft: null,
+                    extraction.Errors,
+                    extraction.Warnings
+                );
+            }
+
+            var saveResult = await sessionService.SaveAsync(
+                new SaveStructuredFinancialMetricsRequest(
+                    request.SessionId,
+                    ApplyFallbackMetadata(extraction.Input, request),
+                    new StructuredFinancialMetricsProvenanceInput(
+                        IngestionMethod: "pdf_file",
+                        OriginalFileName: request.OriginalFileName,
+                        FileSizeBytes: request.FileSizeBytes,
+                        ContentHash: request.ContentHash
+                    )
+                ),
+                cancellationToken
+            );
+
+            return new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Accepted,
+                saveResult,
+                ReviewDraft: null,
+                Errors: saveResult?.Errors ?? [],
+                Warnings: saveResult?.Warnings ?? []
+            );
+        }
+
+        private static StructuredFinancialMetricsInput ApplyFallbackMetadata(
+            StructuredFinancialMetricsInput input,
+            StructuredFinancialMetricsPdfIngestionRequest request)
+        {
+            return input with
+            {
+                DocumentId = string.IsNullOrWhiteSpace(input.DocumentId)
+                    ? request.DocumentId
+                    : input.DocumentId,
+                Company = string.IsNullOrWhiteSpace(input.Company)
+                    ? request.Company
+                    : input.Company,
+                Currency = string.IsNullOrWhiteSpace(input.Currency)
+                    ? request.Currency
+                    : input.Currency,
+                Unit = string.IsNullOrWhiteSpace(input.Unit)
+                    ? request.Unit
+                    : input.Unit
+            };
+        }
+    }
 
 }
 
@@ -837,7 +1116,9 @@ public sealed record SaveFinancialMetricsFileResponse(
     IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
     string FileName,
     string FileType,
-    long FileSizeBytes
+    long FileSizeBytes,
+    string Outcome = "accepted",
+    FinancialMetricsExtractionDraftDto? ReviewDraft = null
 );
 
 public sealed record FileUploadErrorResponse(
@@ -855,4 +1136,9 @@ public sealed record SaveFinancialMetricsResponse(
 public sealed record GetFinancialMetricsResponse(
     Guid SessionId,
     StructuredFinancialMetricsContext? Context
+);
+
+public sealed record FinancialMetricsExtractionDraftErrorResponse(
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<FinancialMetricsValidationIssue> ValidationIssues
 );

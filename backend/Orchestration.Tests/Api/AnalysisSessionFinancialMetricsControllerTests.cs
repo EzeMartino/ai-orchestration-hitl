@@ -8,6 +8,7 @@ using System.Text;
 using Orchestration.Api.Controllers;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
@@ -15,6 +16,7 @@ using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
 using Orchestration.Tests.Agents.Data.FinancialAnalysis;
@@ -25,10 +27,21 @@ namespace Orchestration.Tests.Api;
 public sealed class AnalysisSessionFinancialMetricsControllerTests
 {
     [Fact]
-    public void AnalysisSessionsController_Should_have_single_public_constructor()
+    public void AnalysisSessionsController_Should_accept_ingestion_and_draft_services()
     {
-        typeof(AnalysisSessionsController).GetConstructors()
-            .Should().ContainSingle();
+        var hasExpectedConstructor = typeof(AnalysisSessionsController)
+            .GetConstructors()
+            .Any(ctor =>
+            {
+                var parameters = ctor.GetParameters();
+
+                return parameters.Any(parameter =>
+                        parameter.ParameterType == typeof(IStructuredFinancialMetricsPdfIngestionService)) &&
+                    parameters.Any(parameter =>
+                        parameter.ParameterType == typeof(IFinancialMetricsExtractionDraftService));
+            });
+
+        hasExpectedConstructor.Should().BeTrue();
     }
 
     [Fact]
@@ -295,6 +308,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.FileName.Should().Be("metrics.json");
         response.FileType.Should().Be("json");
         response.FileSizeBytes.Should().BeGreaterThan(0);
+        response.Outcome.Should().Be("accepted");
+        response.ReviewDraft.Should().BeNull();
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("json-file-input");
         response.Context.Company.Should().Be("JSON File Co");
@@ -446,34 +461,23 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
-    public async Task SaveFinancialMetricsFile_Should_persist_valid_pdf_file()
+    public async Task SaveFinancialMetricsFile_Should_return_accepted_for_pdf_when_ingestion_accepts()
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            PdfResult.Valid(new StructuredFinancialMetricsInput(
-                DocumentId: "pdf-file-input",
-                Company: "PDF File Co",
-                Currency: "USD",
-                Unit: "USD_thousand",
-                Metrics:
-                [
-                    new StructuredFinancialMetricInput(
-                        Name: "Revenue",
-                        Period: "2024A",
-                        Value: 1647768m,
-                        Unit: "USD_thousand",
-                        Currency: "USD",
-                        Source: "pdf_extraction",
-                        SourcePage: 18,
-                        Confidence: 0.9m
-                    )
-                ]
-            ))
+        var saveResult = CreateValidSaveResult(session.Id);
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Accepted,
+                saveResult,
+                ReviewDraft: null,
+                Errors: [],
+                Warnings: []
+            )
         );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -494,6 +498,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.IsValid.Should().BeTrue();
         response.FileName.Should().Be("report.pdf");
         response.FileType.Should().Be("pdf");
+        response.Outcome.Should().Be("accepted");
+        response.ReviewDraft.Should().BeNull();
         response.Context.Should().NotBeNull();
         response.Context!.Provenance.Should().NotBeNull();
         response.Context.Provenance!.IngestionMethod.Should().Be("pdf_file");
@@ -503,21 +509,112 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             metric.Source == "pdf_extraction" &&
             metric.SourcePage == 18
         );
-        pdfExtractor.LastRequest.Should().NotBeNull();
-        pdfExtractor.LastRequest!.DocumentId.Should().Be("form-pdf-document");
+        ingestion.LastRequest.Should().NotBeNull();
+        ingestion.LastRequest!.SessionId.Should().Be(session.Id);
+        ingestion.LastRequest.UserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
     }
 
     [Fact]
-    public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_extractor_rejects_invalid_file()
+    public async Task SaveFinancialMetricsFile_Should_return_review_required_for_pdf_when_ingestion_requires_review()
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
+        var draft = CreateDraft(session.Id);
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.ReviewRequired,
+                SaveResult: null,
+                draft,
+                Errors:
+                [
+                    new FinancialMetricsValidationIssue(
+                        "PDF_REVIEW_REQUIRED",
+                        "Review required.",
+                        MetricName: null,
+                        Period: null,
+                        Severity: "error"
+                    )
+                ],
+                Warnings: []
+            )
+        );
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest("report.pdf", "%PDF test content", documentId: "form-pdf-document"),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.Outcome.Should().Be("review_required");
+        response.IsValid.Should().BeFalse();
+        response.Context.Should().BeNull();
+        response.ReviewDraft.Should().Be(draft);
+        response.Errors.Should().ContainSingle(issue => issue.Code == "PDF_REVIEW_REQUIRED");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_return_failed_for_pdf_when_ingestion_fails()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Failed,
+                SaveResult: null,
+                ReviewDraft: null,
+                Errors:
+                [
+                    new FinancialMetricsValidationIssue(
+                        "PDF_INGESTION_FAILED",
+                        "PDF ingestion failed.",
+                        MetricName: null,
+                        Period: null,
+                        Severity: "error"
+                    )
+                ],
+                Warnings: []
+            )
+        );
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest("report.pdf", "%PDF test content", documentId: "form-pdf-document"),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.Outcome.Should().Be("failed");
+        response.IsValid.Should().BeFalse();
+        response.Context.Should().BeNull();
+        response.ReviewDraft.Should().BeNull();
+        response.Errors.Should().ContainSingle(issue => issue.Code == "PDF_INGESTION_FAILED");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_ingestion_rejects_invalid_file()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
             exception: new PdfDocumentFormatException("PDF payload is corrupt.")
         );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -537,111 +634,75 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
-    public async Task SaveFinancialMetricsFile_Should_pass_pdf_bytes_to_extractor_unmodified()
+    public async Task SaveFinancialMetricsFile_Should_pass_pdf_bytes_and_metadata_to_ingestion_service()
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         byte[] pdfBytes = [0x25, 0x50, 0x44, 0x46, 0x00, 0x80, 0xff, 0x0a];
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            PdfResult.Valid(new StructuredFinancialMetricsInput(
-                DocumentId: "pdf-file-input",
-                Company: "PDF File Co",
-                Currency: "USD",
-                Unit: "USD_thousand",
-                Metrics:
-                [
-                    new StructuredFinancialMetricInput(
-                        Name: "Revenue",
-                        Period: "2024A",
-                        Value: 1647768m,
-                        Unit: null,
-                        Currency: null,
-                        Source: null,
-                        SourcePage: null,
-                        Confidence: null
-                    )
-                ]
-            )),
-            expectedBytes: pdfBytes
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Accepted,
+                CreateValidSaveResult(session.Id),
+                ReviewDraft: null,
+                Errors: [],
+                Warnings: []
+            )
         );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
             CreateFileUploadRequest(
-                "report.pdf",
+                "C:\\unsafe\\report.pdf",
                 pdfBytes,
-                documentId: "form-pdf-document"
+                documentId: "form-pdf-document",
+                company: "Form PDF Co",
+                currency: "USD",
+                unit: "USD_thousand"
             ),
             CancellationToken.None
         );
 
         result.Should().BeOfType<OkObjectResult>();
-        pdfExtractor.AssertedStreamBytes.Should().BeTrue();
+        ingestion.LastRequest.Should().NotBeNull();
+        ingestion.LastRequest!.PdfBytes.Should().Equal(pdfBytes);
+        ingestion.LastRequest.OriginalFileName.Should().Be("report.pdf");
+        ingestion.LastRequest.FileSizeBytes.Should().Be(pdfBytes.Length);
+        ingestion.LastRequest.ContentHash.Should().Be(ComputeSha256(pdfBytes));
+        ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
+        ingestion.LastRequest.Company.Should().Be("Form PDF Co");
+        ingestion.LastRequest.Currency.Should().Be("USD");
+        ingestion.LastRequest.Unit.Should().Be("USD_thousand");
     }
 
     [Fact]
-    public async Task SaveFinancialMetricsFile_Should_hash_pdf_provenance_from_original_bytes()
+    public async Task SaveFinancialMetricsFile_Should_return_review_required_for_pdf_without_metrics()
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        byte[] pdfBytes = [0x25, 0x50, 0x44, 0x46, 0x00, 0x80, 0xff, 0x0a];
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            PdfResult.Valid(new StructuredFinancialMetricsInput(
-                DocumentId: "pdf-file-input",
-                Company: "PDF File Co",
-                Currency: "USD",
-                Unit: "USD_thousand",
-                Metrics:
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.ReviewRequired,
+                SaveResult: null,
+                CreateDraft(session.Id),
+                Errors:
                 [
-                    new StructuredFinancialMetricInput(
-                        Name: "Revenue",
-                        Period: "2024A",
-                        Value: 1647768m,
-                        Unit: null,
-                        Currency: null,
-                        Source: null,
-                        SourcePage: null,
-                        Confidence: null
+                    new FinancialMetricsValidationIssue(
+                        "PDF_METRICS_NOT_FOUND",
+                        "No financial metrics were found.",
+                        MetricName: null,
+                        Period: null,
+                        Severity: "error"
                     )
-                ]
-            ))
+                ],
+                Warnings: []
+            )
         );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
-
-        var result = await controller.SaveFinancialMetricsFile(
-            session.Id,
-            CreateFileUploadRequest(
-                "report.pdf",
-                pdfBytes,
-                documentId: "form-pdf-document"
-            ),
-            CancellationToken.None
-        );
-
-        var response = result.Should().BeOfType<OkObjectResult>()
-            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
-            .Subject;
-        response.Context.Should().NotBeNull();
-        response.Context!.Provenance.Should().NotBeNull();
-        response.Context.Provenance!.ContentHash.Should().Be(ComputeSha256(pdfBytes));
-    }
-
-    [Fact]
-    public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_pdf_without_metrics()
-    {
-        await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
-        dbContext.AnalysisSessions.Add(session);
-        await dbContext.SaveChangesAsync();
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            PdfResult.Invalid("PDF_METRICS_NOT_FOUND", "No financial metrics were found.")
-        );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -658,6 +719,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             .Subject;
         response.IsValid.Should().BeFalse();
         response.Context.Should().BeNull();
+        response.Outcome.Should().Be("review_required");
+        response.ReviewDraft.Should().NotBeNull();
         response.Errors.Should().ContainSingle(issue => issue.Code == "PDF_METRICS_NOT_FOUND");
         session.ContextJson.Should().Be("{}");
     }
@@ -669,10 +732,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var pdfExtractor = new FakeStructuredFinancialMetricsPdfExtractor(
-            PdfResult.Invalid("PDF_OCR_NOT_CONFIGURED", "OCR is not configured.")
+        var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
+            exception: new PdfOcrDependencyException("OCR is not configured.")
         );
-        var controller = CreateController(dbContext, pdfExtractor: pdfExtractor);
+        var controller = CreateController(dbContext, pdfIngestionService: ingestion);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -721,6 +784,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.IsValid.Should().BeTrue();
         response.FileName.Should().Be("metrics.csv");
         response.FileType.Should().Be("csv");
+        response.Outcome.Should().Be("accepted");
+        response.ReviewDraft.Should().BeNull();
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("csv-file-input");
         response.Context.Company.Should().Be("CSV File Co");
@@ -970,10 +1035,209 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             .Subject;
         response.IsValid.Should().BeTrue();
         response.FileName.Should().Be("METRICS.JSON");
+        response.Outcome.Should().Be("accepted");
+        response.ReviewDraft.Should().BeNull();
         response.Context.Should().NotBeNull();
         response.Context!.DocumentId.Should().Be("uppercase-json-file");
         response.Context.Provenance.Should().NotBeNull();
         response.Context.Provenance!.OriginalFileName.Should().Be("METRICS.JSON");
+    }
+
+    [Fact]
+    public async Task GetFinancialMetricsReview_Should_return_pending_draft_for_current_user()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var draft = CreateDraft(session.Id);
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            GetPendingResult = FinancialMetricsExtractionDraftServiceResult.Success(draft)
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.GetFinancialMetricsReview(session.Id, CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(draft);
+        draftService.LastSessionId.Should().Be(session.Id);
+        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+    }
+
+    [Fact]
+    public async Task GetFinancialMetricsReview_Should_return_not_found_for_another_users_draft()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            GetPendingResult = FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.")
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.GetFinancialMetricsReview(session.Id, CancellationToken.None);
+
+        result.Should().BeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task UpdateFinancialMetricsReview_Should_use_route_session_and_current_user()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var request = CreateDraftUpdateRequest(session.Id);
+        var draft = CreateDraft(session.Id, draftId);
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            UpdateResult = FinancialMetricsExtractionDraftServiceResult.Success(draft)
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.UpdateFinancialMetricsReview(
+            session.Id,
+            draftId,
+            request,
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(draft);
+        draftService.LastDraftId.Should().Be(draftId);
+        draftService.LastSessionId.Should().Be(session.Id);
+        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastUpdateRequest.Should().BeSameAs(request);
+    }
+
+    [Fact]
+    public async Task ConfirmFinancialMetricsReview_Should_return_ok_with_service_result()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        session.SetContext("""{"structuredFinancialMetrics":{"documentId":"existing","metrics":[]}}""");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var identity = FinancialMetricsExtractionDraftIdentityDto.FromDraft(
+            CreateDraft(session.Id, draftId, status: "confirmed")
+        );
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            ConfirmResult = FinancialMetricsExtractionDraftServiceResult.Success(identity)
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.ConfirmFinancialMetricsReview(
+            session.Id,
+            draftId,
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(identity);
+        draftService.LastDraftId.Should().Be(draftId);
+        draftService.LastSessionId.Should().Be(session.Id);
+        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+    }
+
+    [Fact]
+    public async Task DiscardFinancialMetricsReview_Should_leave_existing_context_unchanged()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        session.SetContext("""{"structuredFinancialMetrics":{"documentId":"existing","metrics":[]}}""");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var originalContext = session.ContextJson;
+        var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var identity = FinancialMetricsExtractionDraftIdentityDto.FromDraft(
+            CreateDraft(session.Id, draftId, status: "discarded")
+        );
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            DiscardResult = FinancialMetricsExtractionDraftServiceResult.Success(identity)
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.DiscardFinancialMetricsReview(
+            session.Id,
+            draftId,
+            CancellationToken.None
+        );
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(identity);
+        session.ContextJson.Should().Be(originalContext);
+    }
+
+    [Fact]
+    public async Task Terminal_review_actions_Should_return_ok_when_service_reports_success()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var confirmed = FinancialMetricsExtractionDraftIdentityDto.FromDraft(
+            CreateDraft(session.Id, draftId, status: "confirmed")
+        );
+        var discarded = FinancialMetricsExtractionDraftIdentityDto.FromDraft(
+            CreateDraft(session.Id, draftId, status: "discarded")
+        );
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            ConfirmResult = FinancialMetricsExtractionDraftServiceResult.Success(confirmed),
+            DiscardResult = FinancialMetricsExtractionDraftServiceResult.Success(discarded)
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var confirm = await controller.ConfirmFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
+        var discard = await controller.DiscardFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
+
+        confirm.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(confirmed);
+        discard.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(discarded);
+    }
+
+    [Fact]
+    public async Task ConfirmFinancialMetricsReview_Should_return_conflict_with_validation_issues_when_confirmation_is_invalid()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var validationIssue = new FinancialMetricsValidationIssue(
+            "METRIC_VALUE_REQUIRED",
+            "Metric value is required.",
+            MetricName: "revenue",
+            Period: "2024A",
+            Severity: "error"
+        );
+        var draftService = new FakeFinancialMetricsExtractionDraftService
+        {
+            ConfirmResult = FinancialMetricsExtractionDraftServiceResult.Invalid(
+                "Draft cannot be confirmed.",
+                [validationIssue]
+            )
+        };
+        var controller = CreateController(dbContext, draftService: draftService);
+
+        var result = await controller.ConfirmFinancialMetricsReview(
+            session.Id,
+            Guid.Parse("00000000-0000-0000-0000-000000000099"),
+            CancellationToken.None
+        );
+
+        var response = result.Should().BeOfType<ConflictObjectResult>()
+            .Which.Value.Should().BeOfType<FinancialMetricsExtractionDraftErrorResponse>()
+            .Subject;
+        response.ValidationIssues.Should().ContainSingle(issue => issue.Code == "METRIC_VALUE_REQUIRED");
     }
 
     [Fact]
@@ -1138,7 +1402,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         FakeActivityEventPublisher? publisher = null,
         DataAgentOptions? dataAgentOptions = null,
         AnalysisOrchestratorService? orchestrator = null,
-        IStructuredFinancialMetricsPdfExtractor? pdfExtractor = null)
+        IStructuredFinancialMetricsPdfIngestionService? pdfIngestionService = null,
+        IFinancialMetricsExtractionDraftService? draftService = null)
     {
         publisher ??= new FakeActivityEventPublisher();
 
@@ -1151,7 +1416,25 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
-            pdfExtractor ?? new FakeStructuredFinancialMetricsPdfExtractor(PdfResult.Invalid("PDF_NOT_CONFIGURED", "PDF extractor was not configured.")),
+            pdfIngestionService ?? new FakeStructuredFinancialMetricsPdfIngestionService(
+                new StructuredFinancialMetricsPdfIngestionResult(
+                    FinancialMetricsFileOutcome.Failed,
+                    SaveResult: null,
+                    ReviewDraft: null,
+                    Errors:
+                    [
+                        new FinancialMetricsValidationIssue(
+                            "PDF_NOT_CONFIGURED",
+                            "PDF ingestion was not configured.",
+                            MetricName: null,
+                            Period: null,
+                            Severity: "error"
+                        )
+                    ],
+                    Warnings: []
+                )
+            ),
+            draftService ?? new FakeFinancialMetricsExtractionDraftService(),
             Options.Create(fileUploadOptions ?? new StructuredFinancialMetricsFileUploadOptions())
         );
 
@@ -1273,6 +1556,142 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    private static FinancialMetricsSessionSaveResult CreateValidSaveResult(
+        Guid sessionId)
+    {
+        var input = new StructuredFinancialMetricsInput(
+            DocumentId: "pdf-file-input",
+            Company: "PDF File Co",
+            Currency: "USD",
+            Unit: "USD_thousand",
+            Metrics:
+            [
+                new StructuredFinancialMetricInput(
+                    Name: "Revenue",
+                    Period: "2024A",
+                    Value: 1647768m,
+                    Unit: "USD_thousand",
+                    Currency: "USD",
+                    Source: "pdf_extraction",
+                    SourcePage: 18,
+                    Confidence: 0.9m
+                )
+            ]
+        );
+        var context = new StructuredFinancialMetricsContext(
+            DocumentId: input.DocumentId,
+            Company: input.Company,
+            Currency: input.Currency,
+            Unit: input.Unit,
+            Metrics:
+            [
+                new FinancialMetric(
+                    Name: "revenue",
+                    Period: "2024A",
+                    Value: 1647768m,
+                    Unit: "USD_thousand",
+                    Statement: "income_statement",
+                    Source: "pdf_extraction",
+                    Currency: "USD",
+                    SourcePage: 18,
+                    Confidence: 0.9m
+                )
+            ],
+            ValidationWarnings: [],
+            UploadedAt: DateTimeOffset.UtcNow,
+            Provenance: new StructuredFinancialMetricsProvenance(
+                IngestionMethod: "pdf_file",
+                OriginalFileName: "report.pdf",
+                FileSizeBytes: 17,
+                ContentHash: "hash",
+                MetricCount: 1,
+                WarningCount: 0
+            )
+        );
+
+        return new FinancialMetricsSessionSaveResult(
+            sessionId,
+            IsValid: true,
+            context,
+            Errors: [],
+            Warnings: []
+        );
+    }
+
+    private static FinancialMetricsExtractionDraftDto CreateDraft(
+        Guid sessionId,
+        Guid? draftId = null,
+        string status = "pending")
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        return new FinancialMetricsExtractionDraftDto(
+            Id: draftId ?? Guid.Parse("00000000-0000-0000-0000-000000000050"),
+            SessionId: sessionId,
+            Status: status,
+            OriginalFileName: "report.pdf",
+            FileSizeBytes: 123,
+            ContentHash: "hash",
+            Payload: CreateDraftPayload(),
+            CreatedAt: now,
+            UpdatedAt: now,
+            CompletedAt: status == "pending" ? null : now
+        );
+    }
+
+    private static FinancialMetricsExtractionDraftPayload CreateDraftPayload()
+    {
+        return new FinancialMetricsExtractionDraftPayload(
+            SchemaVersion: FinancialMetricsExtractionDraftPayload.CurrentSchemaVersion,
+            ProposedInput: StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            Candidates:
+            [
+                new FinancialMetricCandidate(
+                    Id: Guid.Parse("00000000-0000-0000-0000-000000000060"),
+                    Name: "Revenue",
+                    Period: "2024A",
+                    Value: 1647768m,
+                    Currency: "USD",
+                    Unit: "USD_thousand",
+                    SourceKind: FinancialMetricCandidateSourceKinds.Reported,
+                    Confidence: 0.9m,
+                    SourcePage: 18,
+                    Evidence: "Revenue 1,647,768",
+                    ExtractionStrategy: "native_text",
+                    ReviewState: FinancialMetricCandidateReviewStates.Accepted,
+                    InferenceExplanation: null
+                )
+            ],
+            Conflicts: [],
+            MissingFields: [],
+            FallbackReasons: [],
+            ValidationIssues: [],
+            Diagnostics: new FinancialMetricsExtractionDiagnostics()
+        );
+    }
+
+    private static UpdateFinancialMetricsExtractionDraftRequest CreateDraftUpdateRequest(
+        Guid sessionId)
+    {
+        var draft = CreateDraft(sessionId);
+        var candidate = draft.Payload.Candidates[0];
+
+        return new UpdateFinancialMetricsExtractionDraftRequest(
+            Candidates:
+            [
+                new FinancialMetricCandidateReviewUpdate(
+                    candidate.Id,
+                    FinancialMetricCandidateReviewDecisions.Accepted,
+                    Value: candidate.Value,
+                    Currency: candidate.Currency,
+                    Unit: candidate.Unit,
+                    MetadataValue: null
+                )
+            ],
+            ProposedInput: draft.Payload.ProposedInput
+        );
+    }
+
     private sealed class FakePlannerAgent : IPlannerAgent
     {
         public int RunCalls { get; private set; }
@@ -1320,72 +1739,112 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         }
     }
 
-    private sealed class FakeStructuredFinancialMetricsPdfExtractor(
-        StructuredFinancialMetricsPdfExtractionResult? result = null,
-        byte[]? expectedBytes = null,
-        Exception? exception = null) : IStructuredFinancialMetricsPdfExtractor
+    private sealed class FakeStructuredFinancialMetricsPdfIngestionService(
+        StructuredFinancialMetricsPdfIngestionResult? result = null,
+        Exception? exception = null) : IStructuredFinancialMetricsPdfIngestionService
     {
-        public StructuredFinancialMetricsPdfExtractionRequest? LastRequest { get; private set; }
-        public bool AssertedStreamBytes { get; private set; }
+        public StructuredFinancialMetricsPdfIngestionRequest? LastRequest { get; private set; }
 
-        public async Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
-            Stream pdf,
-            StructuredFinancialMetricsPdfExtractionRequest request,
+        public Task<StructuredFinancialMetricsPdfIngestionResult> IngestAsync(
+            StructuredFinancialMetricsPdfIngestionRequest request,
             CancellationToken cancellationToken)
         {
             LastRequest = request;
-
-            if (expectedBytes is not null)
-            {
-                using var buffer = new MemoryStream();
-                await pdf.CopyToAsync(buffer, cancellationToken);
-                buffer.ToArray().Should().Equal(expectedBytes);
-                AssertedStreamBytes = true;
-            }
 
             if (exception is not null)
             {
                 throw exception;
             }
 
-            return result ?? PdfResult.Invalid("PDF_NOT_CONFIGURED", "PDF extractor was not configured.");
+            return Task.FromResult(result ?? new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Failed,
+                SaveResult: null,
+                ReviewDraft: null,
+                Errors: [],
+                Warnings: []
+            ));
         }
     }
 
-    private static class PdfResult
+    private sealed class FakeFinancialMetricsExtractionDraftService
+        : IFinancialMetricsExtractionDraftService
     {
-        public static StructuredFinancialMetricsPdfExtractionResult Valid(
-            StructuredFinancialMetricsInput input)
+        public FinancialMetricsExtractionDraftServiceResult GetPendingResult { get; init; } =
+            FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.");
+
+        public FinancialMetricsExtractionDraftServiceResult UpdateResult { get; init; } =
+            FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.");
+
+        public FinancialMetricsExtractionDraftServiceResult ConfirmResult { get; init; } =
+            FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.");
+
+        public FinancialMetricsExtractionDraftServiceResult DiscardResult { get; init; } =
+            FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.");
+
+        public Guid? LastDraftId { get; private set; }
+        public Guid? LastSessionId { get; private set; }
+        public Guid? LastUserId { get; private set; }
+        public UpdateFinancialMetricsExtractionDraftRequest? LastUpdateRequest { get; private set; }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> CreateOrReplaceAsync(
+            Guid sessionId,
+            Guid userId,
+            CreateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken)
         {
-            return new StructuredFinancialMetricsPdfExtractionResult(
-                IsValid: true,
-                Input: input,
-                Errors: [],
-                Warnings: [],
-                UsedOcr: false
-            );
+            throw new NotSupportedException();
         }
 
-        public static StructuredFinancialMetricsPdfExtractionResult Invalid(
-            string code,
-            string message)
+        public Task<FinancialMetricsExtractionDraftServiceResult> GetPendingAsync(
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
         {
-            return new StructuredFinancialMetricsPdfExtractionResult(
-                IsValid: false,
-                Input: null,
-                Errors:
-                [
-                    new FinancialMetricsValidationIssue(
-                        Code: code,
-                        Message: message,
-                        MetricName: null,
-                        Period: null,
-                        Severity: "error"
-                    )
-                ],
-                Warnings: [],
-                UsedOcr: false
-            );
+            LastSessionId = sessionId;
+            LastUserId = userId;
+
+            return Task.FromResult(GetPendingResult);
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> UpdateAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            UpdateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastDraftId = draftId;
+            LastSessionId = sessionId;
+            LastUserId = userId;
+            LastUpdateRequest = request;
+
+            return Task.FromResult(UpdateResult);
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> ConfirmAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            LastDraftId = draftId;
+            LastSessionId = sessionId;
+            LastUserId = userId;
+
+            return Task.FromResult(ConfirmResult);
+        }
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken)
+        {
+            LastDraftId = draftId;
+            LastSessionId = sessionId;
+            LastUserId = userId;
+
+            return Task.FromResult(DiscardResult);
         }
     }
 }
