@@ -27,21 +27,19 @@ namespace Orchestration.Tests.Api;
 public sealed class AnalysisSessionFinancialMetricsControllerTests
 {
     [Fact]
-    public void AnalysisSessionsController_Should_accept_ingestion_and_draft_services()
+    public void AnalysisSessionsController_Should_expose_only_review_ingestion_constructor()
     {
-        var hasExpectedConstructor = typeof(AnalysisSessionsController)
+        var constructor = typeof(AnalysisSessionsController)
             .GetConstructors()
-            .Any(ctor =>
-            {
-                var parameters = ctor.GetParameters();
+            .Should()
+            .ContainSingle()
+            .Subject;
+        var parameterTypes = constructor.GetParameters()
+            .Select(parameter => parameter.ParameterType);
 
-                return parameters.Any(parameter =>
-                        parameter.ParameterType == typeof(IStructuredFinancialMetricsPdfIngestionService)) &&
-                    parameters.Any(parameter =>
-                        parameter.ParameterType == typeof(IFinancialMetricsExtractionDraftService));
-            });
-
-        hasExpectedConstructor.Should().BeTrue();
+        parameterTypes.Should().Contain(typeof(IStructuredFinancialMetricsPdfIngestionService));
+        parameterTypes.Should().Contain(typeof(IFinancialMetricsExtractionDraftService));
+        parameterTypes.Should().NotContain(typeof(IStructuredFinancialMetricsPdfExtractor));
     }
 
     [Fact]
