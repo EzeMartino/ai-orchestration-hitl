@@ -29,6 +29,24 @@ var dataAgentStructuredMetricsFixturePath =
     builder.Configuration["DataAgent:StructuredMetricsFixturePath"];
 var legalAgentAiReviewEnabled =
     builder.Configuration["LegalAgent:AiReviewEnabled"];
+var financialMetricsExtractionSemanticEnrichmentEnabled =
+    builder.Configuration["FinancialMetricsExtraction:SemanticEnrichmentEnabled"];
+var financialMetricsExtractionMode =
+    builder.Configuration["FinancialMetricsExtraction:Mode"];
+var financialMetricsExtractionDeterministicCoverageThreshold =
+    builder.Configuration["FinancialMetricsExtraction:DeterministicCoverageThreshold"];
+var financialMetricsExtractionAutomaticAcceptanceConfidence =
+    builder.Configuration["FinancialMetricsExtraction:AutomaticAcceptanceConfidence"];
+var financialMetricsExtractionMaxMarkdownCharacters =
+    builder.Configuration["FinancialMetricsExtraction:MaxMarkdownCharacters"];
+var financialMetricsExtractionMaxMarkdownChunks =
+    builder.Configuration["FinancialMetricsExtraction:MaxMarkdownChunks"];
+var financialMetricsExtractionConversionTimeoutSeconds =
+    builder.Configuration["FinancialMetricsExtraction:ConversionTimeoutSeconds"];
+var financialMetricsExtractionSemanticExtractionTimeoutSeconds =
+    builder.Configuration["FinancialMetricsExtraction:SemanticExtractionTimeoutSeconds"];
+var financialMetricsExtractionMaxEvidenceExcerptCharacters =
+    builder.Configuration["FinancialMetricsExtraction:MaxEvidenceExcerptCharacters"];
 
 var postgres = builder
     .AddPostgres("postgres")
@@ -113,6 +131,15 @@ var api = builder
     .WithEnvironment("DataAgent__RiskThresholdProfile", dataAgentRiskThresholdProfile ?? "default_oil_and_gas_equity_research")
     .WithEnvironment("DataAgent__StructuredMetricsFixturePath", dataAgentStructuredMetricsFixturePath ?? "")
     .WithEnvironment("LegalAgent__AiReviewEnabled", legalAgentAiReviewEnabled ?? "false")
+    .WithEnvironment("FinancialMetricsExtraction__SemanticEnrichmentEnabled", financialMetricsExtractionSemanticEnrichmentEnabled ?? "false")
+    .WithEnvironment("FinancialMetricsExtraction__Mode", financialMetricsExtractionMode ?? "ReviewOnly")
+    .WithEnvironment("FinancialMetricsExtraction__DeterministicCoverageThreshold", financialMetricsExtractionDeterministicCoverageThreshold ?? "0.7")
+    .WithEnvironment("FinancialMetricsExtraction__AutomaticAcceptanceConfidence", financialMetricsExtractionAutomaticAcceptanceConfidence ?? "0.9")
+    .WithEnvironment("FinancialMetricsExtraction__MaxMarkdownCharacters", financialMetricsExtractionMaxMarkdownCharacters ?? "200000")
+    .WithEnvironment("FinancialMetricsExtraction__MaxMarkdownChunks", financialMetricsExtractionMaxMarkdownChunks ?? "12")
+    .WithEnvironment("FinancialMetricsExtraction__ConversionTimeoutSeconds", financialMetricsExtractionConversionTimeoutSeconds ?? "60")
+    .WithEnvironment("FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds", financialMetricsExtractionSemanticExtractionTimeoutSeconds ?? "90")
+    .WithEnvironment("FinancialMetricsExtraction__MaxEvidenceExcerptCharacters", financialMetricsExtractionMaxEvidenceExcerptCharacters ?? "500")
     .WithReference(orchestrationDb)
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)

@@ -5,6 +5,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Application.FinancialAnalysis.Thresholds;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
@@ -19,6 +20,7 @@ using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
@@ -70,6 +72,9 @@ builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
 builder.Services.Configure<StructuredFinancialMetricsPdfExtractionOptions>(
     builder.Configuration.GetSection(StructuredFinancialMetricsPdfExtractionOptions.SectionName)
 );
+builder.Services.Configure<FinancialMetricsExtractionOptions>(
+    builder.Configuration.GetSection(FinancialMetricsExtractionOptions.SectionName)
+);
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
@@ -84,6 +89,17 @@ builder.Services.AddScoped<IStructuredFinancialMetricsTextParser, StructuredFina
 builder.Services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
 builder.Services.AddScoped<IOcrTextExtractor, LocalOcrTextExtractor>();
 builder.Services.AddScoped<IStructuredFinancialMetricsPdfExtractor, StructuredFinancialMetricsPdfExtractor>();
+builder.Services.AddScoped<IFinancialDocumentMarkdownConverter, CSnakesFinancialDocumentMarkdownConverter>();
+builder.Services.AddScoped<ISearchablePdfOcrService, LocalSearchablePdfOcrService>();
+builder.Services.AddScoped<
+    IFinancialMetricsExtractionCompletenessEvaluator,
+    FinancialMetricsExtractionCompletenessEvaluator>();
+builder.Services.AddScoped<IFinancialMetricCandidateReconciler, FinancialMetricCandidateReconciler>();
+builder.Services.AddScoped<IFinancialMetricsExtractionDraftService, FinancialMetricsExtractionDraftService>();
+builder.Services.AddScoped<
+    IStructuredFinancialMetricsPdfIngestionService,
+    StructuredFinancialMetricsPdfIngestionService>();
+builder.Services.AddFinancialDocumentExtraction(builder.Configuration);
 builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
 builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();
