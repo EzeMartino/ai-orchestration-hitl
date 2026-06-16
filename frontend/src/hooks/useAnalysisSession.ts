@@ -4,11 +4,13 @@ import type {
   AnalysisSessionResponse,
   AnalysisSessionSummary,
   AnalysisSessionStartPreflightResult,
+  FinancialMetricsExtractionDraft,
   StructuredFinancialMetricsContext,
   SaveFinancialMetricsResponse,
   StructuredFinancialMetricsInput,
   StructuredFinancialMetricsCsvInput,
   StructuredFinancialMetricsFileMetadata,
+  UpdateFinancialMetricsExtractionDraftRequest,
 } from "../types/domain.types";
 import * as api from "../services/api";
 
@@ -27,6 +29,11 @@ export function useAnalysisSession() {
   const [isSavingStructuredMetrics, setIsSavingStructuredMetrics] = useState(false);
   const [metricsSaveResult, setMetricsSaveResult] = useState<SaveFinancialMetricsResponse | null>(null);
   const [metricsSaveError, setMetricsSaveError] = useState<string | null>(null);
+  const [financialMetricsReview, setFinancialMetricsReview] =
+    useState<FinancialMetricsExtractionDraft | null>(null);
+  const [isLoadingFinancialMetricsReview, setIsLoadingFinancialMetricsReview] = useState(false);
+  const [isSavingFinancialMetricsReview, setIsSavingFinancialMetricsReview] = useState(false);
+  const [financialMetricsReviewError, setFinancialMetricsReviewError] = useState<string | null>(null);
   const [startPreflight, setStartPreflight] = useState<AnalysisSessionStartPreflightResult | null>(null);
   const [isCheckingStartPreflight, setIsCheckingStartPreflight] = useState(false);
   const [startPreflightError, setStartPreflightError] = useState<string | null>(null);
@@ -101,6 +108,34 @@ export function useAnalysisSession() {
     }
   };
 
+  const loadFinancialMetricsReview = async (sessionId: string) => {
+    setIsLoadingFinancialMetricsReview(true);
+    setFinancialMetricsReviewError(null);
+    try {
+      const draft = await api.getFinancialMetricsReview(sessionId);
+      setFinancialMetricsReview(draft);
+      return draft;
+    } catch (error) {
+      console.error(error);
+      setFinancialMetricsReview(null);
+      setFinancialMetricsReviewError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cargar el borrador de revisión de métricas financieras."
+      );
+      return null;
+    } finally {
+      setIsLoadingFinancialMetricsReview(false);
+    }
+  };
+
+  const refreshAfterFinancialMetricsReview = async (sessionId: string) => {
+    await loadStructuredFinancialMetrics(sessionId);
+    const updated = await api.loadSessionDetails(sessionId);
+    setSession(updated);
+    await refreshStartPreflight(sessionId);
+  };
+
   const createSession = async () => {
     setIsCreating(true);
     setErrorMessage(null);
@@ -109,8 +144,10 @@ export function useAnalysisSession() {
       setSession(createdSession);
       setEvents([]);
       setStructuredMetrics(null);
+      setFinancialMetricsReview(null);
       setMetricsSaveResult(null);
       setMetricsSaveError(null);
+      setFinancialMetricsReviewError(null);
       setSelectedSessionId(createdSession.id);
 
       await loadSavedSessions();
@@ -237,6 +274,7 @@ export function useAnalysisSession() {
       const result = await api.saveJsonMetrics(session.id, input);
       setMetricsSaveResult(result);
       if (result.isValid) {
+        setFinancialMetricsReview(null);
         await loadStructuredFinancialMetrics(session.id);
         const updated = await api.loadSessionDetails(session.id);
         setSession(updated);
@@ -259,6 +297,7 @@ export function useAnalysisSession() {
       const result = await api.saveCsvMetrics(session.id, input);
       setMetricsSaveResult(result);
       if (result.isValid) {
+        setFinancialMetricsReview(null);
         await loadStructuredFinancialMetrics(session.id);
         const updated = await api.loadSessionDetails(session.id);
         setSession(updated);
@@ -280,13 +319,21 @@ export function useAnalysisSession() {
     setIsSavingStructuredMetrics(true);
     setMetricsSaveError(null);
     setMetricsSaveResult(null);
+    setFinancialMetricsReviewError(null);
     try {
       const result = await api.uploadFinancialMetricsFile(session.id, file, metadata);
       setMetricsSaveResult(result);
-      if (result.isValid) {
+      const outcome = result.outcome ?? (result.isValid ? "accepted" : "failed");
+
+      if (outcome === "review_required") {
+        setFinancialMetricsReview(result.reviewDraft ?? null);
+      } else if (outcome === "accepted" && result.isValid) {
+        setFinancialMetricsReview(null);
         await loadStructuredFinancialMetrics(session.id);
         const updated = await api.loadSessionDetails(session.id);
         setSession(updated);
+      } else if (outcome === "failed") {
+        setFinancialMetricsReview(null);
       }
       await refreshStartPreflight(session.id);
     } catch (error) {
@@ -298,6 +345,73 @@ export function useAnalysisSession() {
       );
     } finally {
       setIsSavingStructuredMetrics(false);
+    }
+  };
+
+  const updateFinancialMetricsReview = async (
+    draftId: string,
+    request: UpdateFinancialMetricsExtractionDraftRequest
+  ) => {
+    if (!session) return null;
+    setIsSavingFinancialMetricsReview(true);
+    setFinancialMetricsReviewError(null);
+    try {
+      const draft = await api.updateFinancialMetricsReview(session.id, draftId, request);
+      setFinancialMetricsReview(draft);
+      await refreshStartPreflight(session.id);
+      return draft;
+    } catch (error) {
+      console.error(error);
+      setFinancialMetricsReviewError(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron guardar los cambios del borrador de revisión."
+      );
+      return null;
+    } finally {
+      setIsSavingFinancialMetricsReview(false);
+    }
+  };
+
+  const confirmFinancialMetricsReview = async (draftId: string) => {
+    if (!session) return;
+    setIsSavingFinancialMetricsReview(true);
+    setFinancialMetricsReviewError(null);
+    try {
+      await api.confirmFinancialMetricsReview(session.id, draftId);
+      setFinancialMetricsReview(null);
+      setMetricsSaveResult(null);
+      await refreshAfterFinancialMetricsReview(session.id);
+    } catch (error) {
+      console.error(error);
+      setFinancialMetricsReviewError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo confirmar el borrador de revisión."
+      );
+    } finally {
+      setIsSavingFinancialMetricsReview(false);
+    }
+  };
+
+  const discardFinancialMetricsReview = async (draftId: string) => {
+    if (!session) return;
+    setIsSavingFinancialMetricsReview(true);
+    setFinancialMetricsReviewError(null);
+    try {
+      await api.discardFinancialMetricsReview(session.id, draftId);
+      setFinancialMetricsReview(null);
+      setMetricsSaveResult(null);
+      await refreshAfterFinancialMetricsReview(session.id);
+    } catch (error) {
+      console.error(error);
+      setFinancialMetricsReviewError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo descartar el borrador de revisión."
+      );
+    } finally {
+      setIsSavingFinancialMetricsReview(false);
     }
   };
 
@@ -315,6 +429,10 @@ export function useAnalysisSession() {
 
     if (!session?.id) {
       setStructuredMetrics(null);
+      setFinancialMetricsReview(null);
+      setFinancialMetricsReviewError(null);
+      setIsLoadingFinancialMetricsReview(false);
+      setIsSavingFinancialMetricsReview(false);
       setStartPreflight(null);
       setStartPreflightError(null);
       setIsCheckingStartPreflight(false);
@@ -327,6 +445,10 @@ export function useAnalysisSession() {
     loadStructuredFinancialMetrics(session.id).catch((error) => {
       console.error("Failed to load structured financial metrics:", error);
       setStructuredMetrics(null);
+    });
+
+    loadFinancialMetricsReview(session.id).catch((error) => {
+      console.error("Failed to load financial metrics review:", error);
     });
 
     refreshStartPreflight(session.id).catch((error) => {
@@ -352,6 +474,10 @@ export function useAnalysisSession() {
     isSavingStructuredMetrics,
     metricsSaveResult,
     metricsSaveError,
+    financialMetricsReview,
+    isLoadingFinancialMetricsReview,
+    isSavingFinancialMetricsReview,
+    financialMetricsReviewError,
     startPreflight,
     isCheckingStartPreflight,
     startPreflightError,
@@ -364,6 +490,10 @@ export function useAnalysisSession() {
     saveJsonMetrics,
     saveCsvMetrics,
     uploadFinancialMetricsFile,
+    loadFinancialMetricsReview,
+    updateFinancialMetricsReview,
+    confirmFinancialMetricsReview,
+    discardFinancialMetricsReview,
     refreshStartPreflight,
   };
 }

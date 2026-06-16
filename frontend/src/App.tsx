@@ -18,6 +18,7 @@ import ToolPlanAuditPanel from "./components/ToolPlanAuditPanel";
 import EvidencePanel from "./components/EvidencePanel";
 import FinancialRiskEvidencePanel from "./components/FinancialRiskEvidencePanel";
 import StructuredFinancialMetricsPanel from "./components/StructuredFinancialMetricsPanel";
+import FinancialMetricsReviewPanel from "./components/FinancialMetricsReviewPanel";
 import CompliancePanel from "./components/CompliancePanel";
 import StartReadinessPanel from "./components/StartReadinessPanel";
 
@@ -108,6 +109,10 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
     isSavingStructuredMetrics,
     metricsSaveResult,
     metricsSaveError,
+    financialMetricsReview,
+    isLoadingFinancialMetricsReview,
+    isSavingFinancialMetricsReview,
+    financialMetricsReviewError,
     startPreflight,
     isCheckingStartPreflight,
     startPreflightError,
@@ -120,6 +125,9 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
     saveJsonMetrics,
     saveCsvMetrics,
     uploadFinancialMetricsFile,
+    updateFinancialMetricsReview,
+    confirmFinancialMetricsReview,
+    discardFinancialMetricsReview,
   } = useAnalysisSession();
 
   const connectionStatus = useSignalRConnection(addActivityEvent);
@@ -305,6 +313,16 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
             onSaveJson={saveJsonMetrics}
             onSaveCsv={saveCsvMetrics}
             onUploadFile={uploadFinancialMetricsFile}
+          />
+
+          <FinancialMetricsReviewPanel
+            draft={financialMetricsReview}
+            isLoading={isLoadingFinancialMetricsReview}
+            isSaving={isSavingFinancialMetricsReview}
+            error={financialMetricsReviewError}
+            onUpdate={updateFinancialMetricsReview}
+            onConfirm={confirmFinancialMetricsReview}
+            onDiscard={discardFinancialMetricsReview}
           />
 
           <PlannerPanel planner={planner} />

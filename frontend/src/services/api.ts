@@ -3,11 +3,14 @@ import type {
   AnalysisSessionResponse,
   AnalysisSessionSummary,
   AnalysisSessionStartPreflightResult,
+  FinancialMetricsExtractionDraft,
+  FinancialMetricsExtractionDraftIdentity,
   GetFinancialMetricsResponse,
   SaveFinancialMetricsResponse,
   StructuredFinancialMetricsInput,
   StructuredFinancialMetricsCsvInput,
   StructuredFinancialMetricsFileMetadata,
+  UpdateFinancialMetricsExtractionDraftRequest,
   LoginRequest,
   LoginResponse,
   RegisterRequest,
@@ -53,6 +56,27 @@ async function authenticatedFetch(url: string, options: RequestInit = {}): Promi
   return response;
 }
 
+async function readBackendErrorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => null) as {
+    error?: string;
+    errors?: string[];
+    validationIssues?: Array<{ message?: string }>;
+  } | null;
+
+  if (payload?.error) {
+    return payload.error;
+  }
+
+  const messages = [
+    ...(payload?.errors ?? []),
+    ...((payload?.validationIssues ?? [])
+      .map((issue) => issue.message)
+      .filter((message): message is string => Boolean(message))),
+  ];
+
+  return messages.length > 0 ? messages.join(" ") : fallback;
+}
+
 export async function loadSessionEvents(sessionId: string): Promise<ActivityEvent[]> {
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/events`);
   if (!response.ok) {
@@ -83,6 +107,89 @@ export async function loadStructuredFinancialMetrics(sessionId: string): Promise
     throw new Error("No se pudieron cargar las métricas financieras estructuradas.");
   }
   return (await response.json()) as GetFinancialMetricsResponse;
+}
+
+export async function getFinancialMetricsReview(
+  sessionId: string
+): Promise<FinancialMetricsExtractionDraft | null> {
+  const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/review`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(
+      await readBackendErrorMessage(
+        response,
+        "No se pudo cargar el borrador de revisión de métricas financieras."
+      )
+    );
+  }
+  return (await response.json()) as FinancialMetricsExtractionDraft;
+}
+
+export async function updateFinancialMetricsReview(
+  sessionId: string,
+  draftId: string,
+  request: UpdateFinancialMetricsExtractionDraftRequest
+): Promise<FinancialMetricsExtractionDraft> {
+  const response = await authenticatedFetch(
+    `${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/review/${draftId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(request),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      await readBackendErrorMessage(
+        response,
+        "No se pudieron guardar los cambios del borrador de revisión."
+      )
+    );
+  }
+  return (await response.json()) as FinancialMetricsExtractionDraft;
+}
+
+export async function confirmFinancialMetricsReview(
+  sessionId: string,
+  draftId: string
+): Promise<FinancialMetricsExtractionDraft | FinancialMetricsExtractionDraftIdentity> {
+  const response = await authenticatedFetch(
+    `${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/review/${draftId}/confirm`,
+    {
+      method: "POST",
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      await readBackendErrorMessage(
+        response,
+        "No se pudo confirmar el borrador de revisión."
+      )
+    );
+  }
+  return (await response.json()) as FinancialMetricsExtractionDraft | FinancialMetricsExtractionDraftIdentity;
+}
+
+export async function discardFinancialMetricsReview(
+  sessionId: string,
+  draftId: string
+): Promise<FinancialMetricsExtractionDraft | FinancialMetricsExtractionDraftIdentity> {
+  const response = await authenticatedFetch(
+    `${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/review/${draftId}/discard`,
+    {
+      method: "POST",
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      await readBackendErrorMessage(
+        response,
+        "No se pudo descartar el borrador de revisión."
+      )
+    );
+  }
+  return (await response.json()) as FinancialMetricsExtractionDraft | FinancialMetricsExtractionDraftIdentity;
 }
 
 export async function getStartPreflight(sessionId: string): Promise<AnalysisSessionStartPreflightResult> {
