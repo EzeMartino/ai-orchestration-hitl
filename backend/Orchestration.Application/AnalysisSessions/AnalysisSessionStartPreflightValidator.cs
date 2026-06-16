@@ -54,12 +54,6 @@ public sealed class AnalysisSessionStartPreflightValidator
         AnalysisSession session,
         CancellationToken cancellationToken)
     {
-        if (!_options.FinancialAnalysisToolsEnabled ||
-            !_options.RequireSessionFinancialMetrics)
-        {
-            return AnalysisSessionStartPreflightResult.Allowed;
-        }
-
         var hasPendingFinancialMetricsReview = _dbContext is not null &&
             await _dbContext.FinancialMetricsExtractionDrafts.AnyAsync(
                 draft => draft.SessionId == session.Id
@@ -81,6 +75,12 @@ public sealed class AnalysisSessionStartPreflightValidator
                 ],
                 Warnings: []
             );
+        }
+
+        if (!_options.FinancialAnalysisToolsEnabled ||
+            !_options.RequireSessionFinancialMetrics)
+        {
+            return AnalysisSessionStartPreflightResult.Allowed;
         }
 
         if (HasStructuredFinancialMetrics(session.ContextJson))

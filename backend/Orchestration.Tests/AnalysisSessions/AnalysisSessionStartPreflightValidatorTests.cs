@@ -96,6 +96,35 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         result.Warnings.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task ValidateAsync_Should_block_pending_pdf_review_regardless_of_data_agent_metric_gate(
+        bool financialAnalysisToolsEnabled,
+        bool requireSessionFinancialMetrics)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(CreateStructuredMetricsContextJson());
+        dbContext.FinancialMetricsExtractionDrafts.Add(CreateDraft(
+            session.Id,
+            FinancialMetricsExtractionDraftStatus.PendingReview));
+        await dbContext.SaveChangesAsync();
+
+        var validator = CreateValidator(new DataAgentOptions
+        {
+            FinancialAnalysisToolsEnabled = financialAnalysisToolsEnabled,
+            RequireSessionFinancialMetrics = requireSessionFinancialMetrics
+        }, dbContext);
+
+        var result = await validator.ValidateAsync(session, CancellationToken.None);
+
+        result.CanStart.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Code.Should().Be(FinancialMetricsReviewRequiredCode);
+    }
+
     [Fact]
     public async Task ValidateAsync_Should_allow_start_when_pdf_review_drafts_are_confirmed_or_discarded()
     {
