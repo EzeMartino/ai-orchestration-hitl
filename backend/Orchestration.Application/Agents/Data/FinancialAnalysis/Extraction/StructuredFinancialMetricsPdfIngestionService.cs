@@ -254,11 +254,15 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
                     request.PdfExtractionOptions,
                     cancellationToken);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
             {
                 reasonCodes.Add("ocr_failed");
 
-                return new SemanticFallbackResult(null, ex.Message);
+                return new SemanticFallbackResult(null, "ocr_failed");
             }
 
             diagnostics.OcrSucceeded = ocr.Succeeded;
@@ -278,16 +282,24 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         try
         {
             using var markdownPdf = CreatePdfStream(markdownPdfBytes);
+            using var conversionTimeout =
+                CreateTimeoutTokenSource(
+                    cancellationToken,
+                    request.ExtractionOptions.ConversionTimeoutSeconds);
             markdown = await _markdownConverter.ConvertPdfAsync(
                 markdownPdf,
                 request.ExtractionOptions.MaxMarkdownCharacters,
-                cancellationToken);
+                conversionTimeout.Token);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
         {
             reasonCodes.Add("markitdown_failed");
 
-            return new SemanticFallbackResult(null, ex.Message);
+            return new SemanticFallbackResult(null, "markitdown_failed");
         }
 
         diagnostics.MarkItDownSucceeded = markdown.Succeeded;
@@ -309,14 +321,18 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
                     markdown.Markdown,
                     request.ExtractionOptions.MaxEvidenceExcerptCharacters,
                     request.ExtractionOptions.MaxMarkdownChunks,
-                    Math.Max(1, diagnostics.PageCount ?? 1)),
+                    GetMaxSourcePage(request.PdfExtractionOptions)),
                 cancellationToken);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
         {
             reasonCodes.Add("semantic_failed");
 
-            return new SemanticFallbackResult(null, ex.Message);
+            return new SemanticFallbackResult(null, "semantic_failed");
         }
 
         diagnostics.SemanticSucceeded = semantic.Succeeded;
@@ -646,6 +662,31 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             issue.Severity,
             "Warning",
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static CancellationTokenSource CreateTimeoutTokenSource(
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+
+        if (timeoutSeconds <= 0)
+        {
+            timeout.Cancel();
+        }
+        else
+        {
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        }
+
+        return timeout;
+    }
+
+    private static int GetMaxSourcePage(
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        return Math.Max(1, options.MaxPages);
     }
 
     private static bool IsAutoAcceptMode(FinancialMetricsExtractionOptions options)

@@ -50,7 +50,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         fixture.SemanticAgent.Requests.Should().ContainSingle();
         fixture.SemanticAgent.Requests.Single().MaxEvidenceExcerptCharacters.Should().Be(123);
         fixture.SemanticAgent.Requests.Single().MaxMarkdownChunks.Should().Be(7);
-        fixture.SemanticAgent.Requests.Single().MaxSourcePage.Should().Be(1);
+        fixture.SemanticAgent.Requests.Single().MaxSourcePage.Should().Be(20);
     }
 
     [Fact]
@@ -269,6 +269,39 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         payload.ToString().Should().NotContain("AQID");
     }
 
+    [Fact]
+    public async Task IngestAsync_Should_pass_timeout_cancellation_token_to_markitdown()
+    {
+        var fixture = new Fixture();
+        fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
+
+        await fixture.Service.IngestAsync(Request(SemanticOptions(
+            mode: "ReviewOnly",
+            conversionTimeoutSeconds: 0)));
+
+        fixture.MarkdownConverter.LastCancellationToken.IsCancellationRequested
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IngestAsync_Should_propagate_operation_cancellation_from_markitdown()
+    {
+        var fixture = new Fixture();
+        fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
+        fixture.MarkdownConverter.Exception =
+            new OperationCanceledException("conversion canceled");
+
+        var act = () => fixture.Service.IngestAsync(Request(SemanticOptions()));
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        fixture.DraftService.Requests.Should().BeEmpty();
+        fixture.SessionService.SaveRequests.Should().BeEmpty();
+    }
+
     private static StructuredFinancialMetricsPdfIngestionRequest Request(
         FinancialMetricsExtractionOptions? options = null)
     {
@@ -289,14 +322,17 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         };
     }
 
-    private static FinancialMetricsExtractionOptions SemanticOptions(string mode = "ReviewOnly")
+    private static FinancialMetricsExtractionOptions SemanticOptions(
+        string mode = "ReviewOnly",
+        int conversionTimeoutSeconds = 60)
     {
         return new FinancialMetricsExtractionOptions
         {
             SemanticEnrichmentEnabled = true,
             Mode = mode,
             MaxEvidenceExcerptCharacters = 123,
-            MaxMarkdownChunks = 7
+            MaxMarkdownChunks = 7,
+            ConversionTimeoutSeconds = conversionTimeoutSeconds
         };
     }
 
@@ -472,6 +508,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     {
         public int Calls { get; private set; }
         public List<byte[]> SeenPdfBytes { get; } = [];
+        public CancellationToken LastCancellationToken { get; private set; }
+        public Exception? Exception { get; set; }
 
         public Task<FinancialDocumentMarkdownResult> ConvertPdfAsync(
             Stream pdf,
@@ -479,7 +517,13 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             CancellationToken cancellationToken)
         {
             Calls++;
+            LastCancellationToken = cancellationToken;
             SeenPdfBytes.Add(ReadAll(pdf));
+
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
 
             return Task.FromResult(new FinancialDocumentMarkdownResult(
                 true,
