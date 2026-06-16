@@ -146,13 +146,15 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
 
             if (deterministicResult.Input is not null)
             {
+                var validationIssues =
+                    deterministicResult.Errors.Concat(deterministicResult.Warnings).ToArray();
                 return await CreateReviewAsync(
                     request,
                     deterministicResult.Input,
                     CreateDeterministicCandidates(deterministicResult.Input),
                     [],
-                    [],
-                    deterministicResult.Errors.Concat(deterministicResult.Warnings).ToArray(),
+                    GetMissingFields(deterministicResult.Input),
+                    validationIssues,
                     diagnostics,
                     total,
                     reasonCodes,
@@ -322,6 +324,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         if (!semantic.Succeeded)
         {
             reasonCodes.Add("semantic_failed");
+
+            return new SemanticFallbackResult(null, semantic.FailureReason);
         }
 
         return new SemanticFallbackResult(semantic.Result, semantic.FailureReason);
@@ -402,7 +406,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             deterministicResult.Input,
             CreateDeterministicCandidates(deterministicResult.Input),
             [],
-            reasonCodes,
+            GetMissingFields(deterministicResult.Input),
             deterministicResult.Errors.Concat(deterministicResult.Warnings).ToArray(),
             diagnostics,
             total,
@@ -473,8 +477,12 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             FinancialMetricsFileOutcome.ReviewRequired,
             null,
             draft.Draft,
-            [],
-            []);
+            validationIssues
+                .Where(issue => !IsWarning(issue))
+                .ToArray(),
+            validationIssues
+                .Where(IsWarning)
+                .ToArray());
     }
 
     private async Task<StructuredFinancialMetricsPdfIngestionResult> FailAsync(
@@ -602,6 +610,42 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             request.Currency,
             request.Unit,
             []);
+    }
+
+    private static IReadOnlyList<string> GetMissingFields(
+        StructuredFinancialMetricsInput input)
+    {
+        var fields = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(input.Company))
+        {
+            fields.Add("company");
+        }
+
+        if (string.IsNullOrWhiteSpace(input.Currency))
+        {
+            fields.Add("currency");
+        }
+
+        if (string.IsNullOrWhiteSpace(input.Unit))
+        {
+            fields.Add("unit");
+        }
+
+        if (input.Metrics.Count == 0)
+        {
+            fields.Add("metrics");
+        }
+
+        return fields;
+    }
+
+    private static bool IsWarning(FinancialMetricsValidationIssue issue)
+    {
+        return string.Equals(
+            issue.Severity,
+            "Warning",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsAutoAcceptMode(FinancialMetricsExtractionOptions options)

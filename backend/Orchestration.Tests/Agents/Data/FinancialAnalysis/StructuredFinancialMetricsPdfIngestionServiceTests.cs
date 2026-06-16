@@ -75,7 +75,10 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     public async Task IngestAsync_Should_create_review_from_deterministic_candidates_when_semantic_agent_fails()
     {
         var fixture = new Fixture();
-        fixture.PdfExtractor.Result = PdfResult(isValid: false, nativeTextAvailable: true);
+        fixture.PdfExtractor.Result = PdfResult(
+            input: CompleteInput(currency: null, unit: null),
+            isValid: false,
+            nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.SemanticAgent.ParseResult =
@@ -89,7 +92,32 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         fixture.DraftService.Requests.Should().ContainSingle();
         fixture.DraftService.Requests.Single().Payload.Candidates
             .Should().Contain(candidate => candidate.ExtractionStrategy == "deterministic_pdf_parser");
+        fixture.DraftService.Requests.Single().Payload.MissingFields
+            .Should().BeEquivalentTo("currency", "unit");
+        result.Errors.Should().Contain(issue => issue.Code == "deterministic_invalid");
         fixture.DraftService.Requests.Single().Payload.Diagnostics.SemanticSucceeded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IngestAsync_Should_not_reconcile_or_save_when_semantic_result_failed_with_payload()
+    {
+        var fixture = new Fixture();
+        fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
+        fixture.SemanticAgent.ParseResult =
+            new FinancialDocumentExtractionParseResult(
+                false,
+                new FinancialDocumentExtractionResult(null, null, null, [Candidate("revenue")]),
+                "invalid_response");
+        fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
+
+        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+
+        result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
+        fixture.Reconciler.Calls.Should().Be(0);
+        fixture.SessionService.SaveRequests.Should().BeEmpty();
+        fixture.DraftService.Requests.Should().ContainSingle();
     }
 
     [Fact]
@@ -216,6 +244,31 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         fixture.DraftService.Requests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task IngestAsync_Should_keep_fallback_reasons_out_of_missing_fields_and_avoid_content_leaks()
+    {
+        var fixture = new Fixture();
+        fixture.PdfExtractor.Result = PdfResult(
+            input: CompleteInput(currency: null),
+            isValid: false,
+            nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(
+                true,
+                ["currency_missing", "metric_coverage_below_threshold"]);
+
+        var result = await fixture.Service.IngestAsync(Request());
+
+        result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
+        result.Errors.Should().Contain(issue => issue.Code == "deterministic_invalid");
+        var payload = fixture.DraftService.Requests.Single().Payload;
+        payload.MissingFields.Should().Equal("currency");
+        payload.FallbackReasons.Should().Equal("currency_missing", "metric_coverage_below_threshold");
+        payload.Diagnostics.ReasonCodes.Should().Equal("currency_missing", "metric_coverage_below_threshold");
+        payload.ToString().Should().NotContain("Revenue 100 EBITDA 25");
+        payload.ToString().Should().NotContain("AQID");
+    }
+
     private static StructuredFinancialMetricsPdfIngestionRequest Request(
         FinancialMetricsExtractionOptions? options = null)
     {
@@ -307,13 +360,16 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             canAutoAccept);
     }
 
-    private static StructuredFinancialMetricsInput CompleteInput(string company = "Vista Energy")
+    private static StructuredFinancialMetricsInput CompleteInput(
+        string company = "Vista Energy",
+        string? currency = "USD",
+        string? unit = "USD_million")
     {
         return new StructuredFinancialMetricsInput(
             "doc-1",
             company,
-            "USD",
-            "USD_million",
+            currency,
+            unit,
             [Metric("revenue"), Metric("ebitda")]);
     }
 
@@ -480,8 +536,12 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             FinancialDocumentExtractionResult? semanticResult,
             FinancialMetricsExtractionOptions options)
         {
+            Calls++;
+
             return Result;
         }
+
+        public int Calls { get; private set; }
     }
 
     private sealed class FakeDraftService : IFinancialMetricsExtractionDraftService
