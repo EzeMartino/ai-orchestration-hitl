@@ -3,6 +3,7 @@ import type {
   FinancialDocumentMetadataCandidate,
   FinancialMetricCandidateConflict,
   FinancialMetricCandidate,
+  FinancialMetricCandidateAddition,
   FinancialMetricCandidateReviewDecision,
   FinancialMetricCandidateReviewState,
   FinancialMetricsExtractionDraft,
@@ -39,6 +40,18 @@ type ReviewStateCounts = {
 type MetadataFieldName = "company" | "currency" | "unit";
 
 const metadataFieldNames: MetadataFieldName[] = ["company", "currency", "unit"];
+
+type DraftMetricAddition = FinancialMetricCandidateAddition & {
+  localId: string;
+};
+
+type MetricAdditionForm = {
+  name: string;
+  period: string;
+  value: string;
+  currency: string;
+  unit: string;
+};
 
 const resolvedReviewStates = new Set([
   "explicit",
@@ -174,6 +187,19 @@ function candidateToMetric(candidate: FinancialMetricCandidate): StructuredFinan
   };
 }
 
+function additionToMetric(addition: DraftMetricAddition): StructuredFinancialMetricInput {
+  return {
+    name: addition.name,
+    period: addition.period,
+    value: addition.value ?? null,
+    currency: addition.currency ?? null,
+    unit: addition.unit ?? null,
+    source: "human_corrected",
+    sourcePage: null,
+    confidence: 1,
+  };
+}
+
 function selectedMetricCandidates(candidates: FinancialMetricCandidate[]) {
   return candidates.filter((candidate) =>
     candidate.reviewState === "explicit" ||
@@ -242,9 +268,17 @@ function createMetadataAdditions(draft: FinancialMetricsExtractionDraft) {
 }
 
 function createUpdateRequest(
-  draft: FinancialMetricsExtractionDraft
+  draft: FinancialMetricsExtractionDraft,
+  metricAdditions: DraftMetricAddition[]
 ): UpdateFinancialMetricsExtractionDraftRequest {
   const selectedCandidates = selectedMetricCandidates(draft.payload.candidates);
+  const normalizedMetricAdditions = metricAdditions.map((addition) => ({
+    name: addition.name.trim(),
+    period: addition.period.trim(),
+    value: addition.value ?? null,
+    currency: addition.currency?.trim() || null,
+    unit: addition.unit?.trim() || null,
+  }));
   const metricUpdates = draft.payload.candidates
     .map(createCandidateUpdate)
     .filter((update): update is NonNullable<typeof update> => Boolean(update));
@@ -256,9 +290,12 @@ function createUpdateRequest(
     candidates: [...metricUpdates, ...metadataUpdates],
     proposedInput: {
       ...draft.payload.proposedInput,
-      metrics: selectedCandidates.map(candidateToMetric),
+      metrics: [
+        ...selectedCandidates.map(candidateToMetric),
+        ...metricAdditions.map(additionToMetric),
+      ],
     },
-    metricAdditions: [],
+    metricAdditions: normalizedMetricAdditions,
     metadataAdditions: createMetadataAdditions(draft),
   };
 }
@@ -315,9 +352,25 @@ export function FinancialMetricsReviewPanel({
   const [workingDraft, setWorkingDraft] = useState<FinancialMetricsExtractionDraft | null>(
     draft ?? null
   );
+  const [metricAdditions, setMetricAdditions] = useState<DraftMetricAddition[]>([]);
+  const [metricAdditionForm, setMetricAdditionForm] = useState<MetricAdditionForm>({
+    name: "",
+    period: "",
+    value: "",
+    currency: "",
+    unit: "",
+  });
 
   useEffect(() => {
     setWorkingDraft(draft ?? null);
+    setMetricAdditions([]);
+    setMetricAdditionForm({
+      name: "",
+      period: "",
+      value: "",
+      currency: draft?.payload.proposedInput.currency ?? "",
+      unit: draft?.payload.proposedInput.unit ?? "",
+    });
   }, [draft]);
 
   const counts = useMemo(
@@ -325,12 +378,12 @@ export function FinancialMetricsReviewPanel({
     [workingDraft]
   );
   const validation = workingDraft
-    ? validateReviewDraft(workingDraft)
+    ? validateReviewDraft(workingDraft, { metricAdditionCount: metricAdditions.length })
     : { canConfirm: false, blockingCandidateIds: [], missingFields: [] };
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
-  const dirty = isDraftDirty(draft ?? null, workingDraft);
+  const dirty = isDraftDirty(draft ?? null, workingDraft) || metricAdditions.length > 0;
 
   if (isLoading && !workingDraft) {
     return (
@@ -422,6 +475,63 @@ export function FinancialMetricsReviewPanel({
         ? applyMetadataCandidateEdit(current, editableCandidate.id, value)
         : applyProposedMetadataEdit(current, fieldName, value);
     });
+
+    if (fieldName === "currency" || fieldName === "unit") {
+      setMetricAdditionForm((current) => ({
+        ...current,
+        [fieldName]: current[fieldName].trim().length === 0 ? value : current[fieldName],
+      }));
+    }
+  }
+
+  function handleMetricAdditionFormChange(
+    fieldName: keyof MetricAdditionForm,
+    value: string
+  ) {
+    setMetricAdditionForm((current) => ({
+      ...current,
+      [fieldName]: value,
+    }));
+  }
+
+  function handleAddMetric() {
+    const value = Number(metricAdditionForm.value);
+
+    if (
+      metricAdditionForm.name.trim().length === 0 ||
+      metricAdditionForm.period.trim().length === 0 ||
+      metricAdditionForm.value.trim().length === 0 ||
+      Number.isNaN(value)
+    ) {
+      return;
+    }
+
+    setMetricAdditions((current) => [
+      ...current,
+      {
+        localId:
+          globalThis.crypto?.randomUUID?.() ??
+          `metric-addition-${Date.now()}-${current.length + 1}`,
+        name: metricAdditionForm.name.trim(),
+        period: metricAdditionForm.period.trim(),
+        value,
+        currency: metricAdditionForm.currency.trim() || null,
+        unit: metricAdditionForm.unit.trim() || null,
+      },
+    ]);
+    setMetricAdditionForm((current) => ({
+      name: "",
+      period: "",
+      value: "",
+      currency: current.currency,
+      unit: current.unit,
+    }));
+  }
+
+  function handleRemoveMetricAddition(localId: string) {
+    setMetricAdditions((current) =>
+      current.filter((addition) => addition.localId !== localId)
+    );
   }
 
   function handleValueEdit(candidateId: string, valueText: string) {
@@ -438,9 +548,13 @@ export function FinancialMetricsReviewPanel({
       return null;
     }
 
-    const updated = await onUpdate(workingDraft.id, createUpdateRequest(workingDraft));
+    const updated = await onUpdate(
+      workingDraft.id,
+      createUpdateRequest(workingDraft, metricAdditions)
+    );
     if (updated) {
       setWorkingDraft(updated);
+      setMetricAdditions([]);
     }
 
     return updated;
@@ -535,6 +649,94 @@ export function FinancialMetricsReviewPanel({
             </label>
           ))}
         </div>
+      </div>
+
+      <div className="financialMetricsReviewMetricAdditions">
+        <h3>Agregar métrica manual</h3>
+        <div className="metricAdditionGrid">
+          <label>
+            Métrica
+            <input
+              value={metricAdditionForm.name}
+              onChange={(event) =>
+                handleMetricAdditionFormChange("name", event.target.value)
+              }
+              placeholder="Revenue"
+            />
+          </label>
+          <label>
+            Periodo
+            <input
+              value={metricAdditionForm.period}
+              onChange={(event) =>
+                handleMetricAdditionFormChange("period", event.target.value)
+              }
+              placeholder="2025A"
+            />
+          </label>
+          <label>
+            Valor
+            <input
+              type="number"
+              value={metricAdditionForm.value}
+              onChange={(event) =>
+                handleMetricAdditionFormChange("value", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            Moneda
+            <input
+              value={metricAdditionForm.currency}
+              onChange={(event) =>
+                handleMetricAdditionFormChange("currency", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            Unidad
+            <input
+              value={metricAdditionForm.unit}
+              onChange={(event) =>
+                handleMetricAdditionFormChange("unit", event.target.value)
+              }
+            />
+          </label>
+          <button
+            type="button"
+            onClick={handleAddMetric}
+            disabled={
+              metricAdditionForm.name.trim().length === 0 ||
+              metricAdditionForm.period.trim().length === 0 ||
+              metricAdditionForm.value.trim().length === 0 ||
+              Number.isNaN(Number(metricAdditionForm.value))
+            }
+          >
+            Agregar métrica
+          </button>
+        </div>
+
+        {metricAdditions.length > 0 && (
+          <ul className="metricAdditionList" aria-label="Métricas manuales pendientes">
+            {metricAdditions.map((addition) => (
+              <li key={addition.localId}>
+                <span>
+                  <strong>{addition.name}</strong> {addition.period}: {addition.value}
+                  {addition.currency ? ` ${addition.currency}` : ""}
+                  {addition.unit ? ` (${addition.unit})` : ""}
+                </span>
+                <button
+                  type="button"
+                  className="metricAdditionRemove"
+                  onClick={() => handleRemoveMetricAddition(addition.localId)}
+                  aria-label={`Quitar ${addition.name} ${addition.period}`}
+                >
+                  Quitar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {(workingDraft.payload.metadataCandidates?.length ?? 0) > 0 && (

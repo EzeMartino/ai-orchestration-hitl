@@ -1141,6 +1141,77 @@ code {
   min-width: 760px;
 }
 
+.financialMetricsReviewMetricAdditions {
+  margin-top: 1rem;
+}
+
+.financialMetricsReviewMetricAdditions h3 {
+  margin: 0 0 0.65rem;
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+.metricAdditionGrid {
+  display: grid;
+  grid-template-columns: 1.3fr 0.8fr 0.8fr 0.8fr 1fr auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.metricAdditionGrid label {
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.metricAdditionGrid input {
+  width: 100%;
+  margin-top: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+  font: inherit;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.metricAdditionGrid button {
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  background: #0f766e;
+  white-space: nowrap;
+}
+
+.metricAdditionList {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.metricAdditionList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  color: #cbd5e1;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.metricAdditionList span {
+  overflow-wrap: anywhere;
+}
+
+.metricAdditionRemove {
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  background: #7f1d1d;
+}
+
 .financialMetricsReviewTableWrap {
   margin-top: 1rem;
   overflow-x: auto;
@@ -2104,6 +2175,7 @@ code {
   .financialReviewNotes,
   .financialMetricsReviewSummary,
   .financialMetricsReviewDocumentGrid,
+  .metricAdditionGrid,
   .csvMetaGrid,
   .ratioStrip {
     grid-template-columns: 1fr;

@@ -14,6 +14,10 @@ export type ReviewDraftValidationResult = {
   missingFields: string[];
 };
 
+export type ReviewDraftValidationOptions = {
+  metricAdditionCount?: number;
+};
+
 export type FinancialMetricCandidateEdit = Pick<
   FinancialMetricCandidate,
   "value" | "currency" | "unit"
@@ -65,11 +69,13 @@ function computeMissingFields(input: StructuredFinancialMetricsInput) {
   return missing;
 }
 
-function computeDraftMissingFields(draft: FinancialMetricsExtractionDraft) {
-  const missing = new Set([
-    ...(draft.payload.missingFields ?? []),
-    ...computeMissingFields(draft.payload.proposedInput),
-  ].map(normalizeMetadataFieldName));
+function computeDraftMissingFields(
+  draft: FinancialMetricsExtractionDraft,
+  options: ReviewDraftValidationOptions,
+) {
+  const missing = new Set(
+    computeMissingFields(draft.payload.proposedInput).map(normalizeMetadataFieldName)
+  );
   const input = draft.payload.proposedInput;
 
   if (input.company?.trim()) {
@@ -84,9 +90,12 @@ function computeDraftMissingFields(draft: FinancialMetricsExtractionDraft) {
     missing.delete("unit");
   }
 
-  if (draft.payload.candidates.some((candidate) =>
-    selectedReviewStates.has(candidate.reviewState)
-  )) {
+  if (
+    (options.metricAdditionCount ?? 0) > 0 ||
+    draft.payload.candidates.some((candidate) =>
+      selectedReviewStates.has(candidate.reviewState)
+    )
+  ) {
     missing.delete("metrics");
   } else {
     missing.add("metrics");
@@ -97,6 +106,7 @@ function computeDraftMissingFields(draft: FinancialMetricsExtractionDraft) {
 
 export function validateReviewDraft(
   draft: FinancialMetricsExtractionDraft,
+  options: ReviewDraftValidationOptions = {},
 ): ReviewDraftValidationResult {
   const blockingCandidateIds = [
     ...draft.payload.candidates,
@@ -104,7 +114,7 @@ export function validateReviewDraft(
   ]
     .filter((candidate) => blockingReviewStates.has(candidate.reviewState))
     .map((candidate) => candidate.id);
-  const missingFields = computeDraftMissingFields(draft);
+  const missingFields = computeDraftMissingFields(draft, options);
 
   return {
     canConfirm: blockingCandidateIds.length === 0 && missingFields.length === 0,

@@ -141,6 +141,28 @@ test("validateReviewDraft blocks confirmation when metadata candidates or missin
   assert.deepEqual(result.missingFields, ["unit"]);
 });
 
+test("validateReviewDraft allows a pending metric addition to satisfy missing metrics", () => {
+  const draft = createDraft([], {
+    missingFields: ["metrics"],
+  });
+
+  const result = validateReviewDraft(draft, { metricAdditionCount: 1 });
+
+  assert.equal(result.canConfirm, true);
+  assert.deepEqual(result.missingFields, []);
+});
+
+test("validateReviewDraft ignores stale backend missing fields when current draft is complete", () => {
+  const draft = createDraft([{ id: "accepted-metric", reviewState: "accepted" }], {
+    missingFields: ["required_ratio_inputs_missing"],
+  });
+
+  const result = validateReviewDraft(draft);
+
+  assert.equal(result.canConfirm, true);
+  assert.deepEqual(result.missingFields, []);
+});
+
 test("applyMetadataCandidateEdit marks edited metadata as human corrected and updates proposed input", () => {
   const draft = createDraft([], {
     metadataCandidates: [
