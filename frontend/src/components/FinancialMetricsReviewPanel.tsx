@@ -501,7 +501,7 @@ export function FinancialMetricsReviewPanel({
       metricAdditionForm.name.trim().length === 0 ||
       metricAdditionForm.period.trim().length === 0 ||
       metricAdditionForm.value.trim().length === 0 ||
-      Number.isNaN(value)
+      !Number.isFinite(value)
     ) {
       return;
     }
@@ -709,7 +709,7 @@ export function FinancialMetricsReviewPanel({
               metricAdditionForm.name.trim().length === 0 ||
               metricAdditionForm.period.trim().length === 0 ||
               metricAdditionForm.value.trim().length === 0 ||
-              Number.isNaN(Number(metricAdditionForm.value))
+              !Number.isFinite(Number(metricAdditionForm.value))
             }
           >
             Agregar métrica
