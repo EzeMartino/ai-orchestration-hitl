@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyCandidateEdit,
+  applyMetadataCandidateEdit,
   validateReviewDraft,
 } from "../src/utils/financialMetricsReview.ts";
 
-function createDraft(candidateOverrides = []) {
+function createDraft(candidateOverrides = [], overrides = {}) {
   return {
     id: "draft-1",
     sessionId: "session-1",
@@ -22,7 +23,7 @@ function createDraft(candidateOverrides = []) {
         documentId: "metrics-pdf",
         company: "Demo Co",
         currency: "USD",
-        unit: "USD_thousand",
+        unit: overrides.proposedUnit ?? "USD_thousand",
         metrics: [],
       },
       candidates: candidateOverrides.map((candidate, index) => ({
@@ -42,7 +43,7 @@ function createDraft(candidateOverrides = []) {
         ...candidate,
       })),
       conflicts: [],
-      missingFields: [],
+      missingFields: overrides.missingFields ?? [],
       fallbackReasons: [],
       validationIssues: [],
       diagnostics: {
@@ -64,7 +65,7 @@ function createDraft(candidateOverrides = []) {
         totalDurationMilliseconds: 80,
         reasonCodes: [],
       },
-      metadataCandidates: [],
+      metadataCandidates: overrides.metadataCandidates ?? [],
     },
   };
 }
@@ -111,4 +112,57 @@ test("applyCandidateEdit marks edited candidates as human corrected", () => {
   assert.equal(updated.payload.candidates[0].unit, "EUR_million");
   assert.equal(updated.payload.candidates[0].sourceKind, "human_corrected");
   assert.equal(updated.payload.candidates[0].reviewState, "human_corrected");
+});
+
+test("validateReviewDraft blocks confirmation when metadata candidates or missing fields remain unresolved", () => {
+  const draft = createDraft([{ id: "accepted-metric", reviewState: "accepted" }], {
+    metadataCandidates: [
+      {
+        id: "metadata-currency",
+        fieldName: "currency",
+        value: "USD",
+        sourceKind: "inferred",
+        confidence: 0.7,
+        sourcePage: 1,
+        evidence: "$ symbol",
+        extractionStrategy: "semantic",
+        reviewState: "inferred",
+        inferenceExplanation: "Currency inferred from symbol.",
+      },
+    ],
+    proposedUnit: "",
+    missingFields: ["unit"],
+  });
+
+  const result = validateReviewDraft(draft);
+
+  assert.equal(result.canConfirm, false);
+  assert.deepEqual(result.blockingCandidateIds, ["metadata-currency"]);
+  assert.deepEqual(result.missingFields, ["unit"]);
+});
+
+test("applyMetadataCandidateEdit marks edited metadata as human corrected and updates proposed input", () => {
+  const draft = createDraft([], {
+    metadataCandidates: [
+      {
+        id: "metadata-currency",
+        fieldName: "currency",
+        value: "USD",
+        sourceKind: "inferred",
+        confidence: 0.7,
+        sourcePage: 1,
+        evidence: "$ symbol",
+        extractionStrategy: "semantic",
+        reviewState: "inferred",
+        inferenceExplanation: "Currency inferred from symbol.",
+      },
+    ],
+  });
+
+  const updated = applyMetadataCandidateEdit(draft, "metadata-currency", "ARS");
+
+  assert.equal(updated.payload.metadataCandidates[0].value, "ARS");
+  assert.equal(updated.payload.metadataCandidates[0].sourceKind, "human_corrected");
+  assert.equal(updated.payload.metadataCandidates[0].reviewState, "human_corrected");
+  assert.equal(updated.payload.proposedInput.currency, "ARS");
 });

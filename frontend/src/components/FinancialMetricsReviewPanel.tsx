@@ -7,10 +7,13 @@ import type {
   FinancialMetricCandidateReviewState,
   FinancialMetricsExtractionDraft,
   StructuredFinancialMetricInput,
+  StructuredFinancialMetricsInput,
   UpdateFinancialMetricsExtractionDraftRequest,
 } from "../types/domain.types";
 import {
   applyCandidateEdit,
+  applyMetadataCandidateEdit,
+  applyProposedMetadataEdit,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
 
@@ -33,6 +36,10 @@ type ReviewStateCounts = {
   inferred: number;
 };
 
+type MetadataFieldName = "company" | "currency" | "unit";
+
+const metadataFieldNames: MetadataFieldName[] = ["company", "currency", "unit"];
+
 const resolvedReviewStates = new Set([
   "explicit",
   "accepted",
@@ -46,8 +53,47 @@ const selectedReviewStates = new Set([
   "human_corrected",
 ]);
 
-function countReviewStates(candidates: FinancialMetricCandidate[]): ReviewStateCounts {
-  return candidates.reduce(
+function normalizeMetadataFieldName(fieldName: string) {
+  return fieldName.trim().toLowerCase();
+}
+
+function formatMetadataFieldName(fieldName: string) {
+  switch (normalizeMetadataFieldName(fieldName)) {
+    case "company":
+      return "CompaÃ±Ã­a";
+    case "currency":
+      return "Moneda";
+    case "unit":
+      return "Unidad";
+    default:
+      return fieldName;
+  }
+}
+
+function getProposedMetadataValue(
+  input: StructuredFinancialMetricsInput,
+  fieldName: MetadataFieldName
+) {
+  switch (fieldName) {
+    case "company":
+      return input.company ?? "";
+    case "currency":
+      return input.currency ?? "";
+    case "unit":
+      return input.unit ?? "";
+    default:
+      return "";
+  }
+}
+
+function countReviewStates(
+  draft?: FinancialMetricsExtractionDraft | null
+): ReviewStateCounts {
+  const candidates = [
+    ...(draft?.payload.candidates ?? []),
+    ...(draft?.payload.metadataCandidates ?? []),
+  ];
+  const counts = candidates.reduce(
     (counts, candidate) => ({
       conflict: counts.conflict + (candidate.reviewState === "conflict" ? 1 : 0),
       missing: counts.missing + (candidate.reviewState === "missing" ? 1 : 0),
@@ -55,6 +101,11 @@ function countReviewStates(candidates: FinancialMetricCandidate[]): ReviewStateC
     }),
     { conflict: 0, missing: 0, inferred: 0 }
   );
+
+  return {
+    ...counts,
+    missing: counts.missing + (draft?.payload.missingFields.length ?? 0),
+  };
 }
 
 function formatCandidateValue(value?: number | null) {
@@ -165,6 +216,31 @@ function createMetadataUpdate(candidate: FinancialDocumentMetadataCandidate) {
   };
 }
 
+function createMetadataAdditions(draft: FinancialMetricsExtractionDraft) {
+  const existingFields = new Set(
+    (draft.payload.metadataCandidates ?? []).map((candidate) =>
+      normalizeMetadataFieldName(candidate.fieldName)
+    )
+  );
+
+  return metadataFieldNames
+    .filter((fieldName) => !existingFields.has(fieldName))
+    .map((fieldName) => {
+      const value = getProposedMetadataValue(draft.payload.proposedInput, fieldName);
+
+      return value.trim().length > 0
+        ? {
+            fieldName,
+            value: value.trim(),
+          }
+        : null;
+    })
+    .filter(
+      (addition): addition is { fieldName: MetadataFieldName; value: string } =>
+        Boolean(addition)
+    );
+}
+
 function createUpdateRequest(
   draft: FinancialMetricsExtractionDraft
 ): UpdateFinancialMetricsExtractionDraftRequest {
@@ -183,7 +259,7 @@ function createUpdateRequest(
       metrics: selectedCandidates.map(candidateToMetric),
     },
     metricAdditions: [],
-    metadataAdditions: [],
+    metadataAdditions: createMetadataAdditions(draft),
   };
 }
 
@@ -245,12 +321,12 @@ export function FinancialMetricsReviewPanel({
   }, [draft]);
 
   const counts = useMemo(
-    () => countReviewStates(workingDraft?.payload.candidates ?? []),
+    () => countReviewStates(workingDraft),
     [workingDraft]
   );
   const validation = workingDraft
     ? validateReviewDraft(workingDraft)
-    : { canConfirm: false, blockingCandidateIds: [] };
+    : { canConfirm: false, blockingCandidateIds: [], missingFields: [] };
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
@@ -290,6 +366,64 @@ export function FinancialMetricsReviewPanel({
     });
   }
 
+  function updateMetadataCandidate(
+    candidateId: string,
+    updater: (
+      candidate: FinancialDocumentMetadataCandidate
+    ) => FinancialDocumentMetadataCandidate,
+    syncProposedInput = false
+  ) {
+    setWorkingDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const original = (current.payload.metadataCandidates ?? []).find(
+        (candidate) => candidate.id === candidateId
+      );
+
+      if (!original) {
+        return current;
+      }
+
+      const updated = updater(original);
+      const nextDraft = {
+        ...current,
+        payload: {
+          ...current.payload,
+          metadataCandidates: (current.payload.metadataCandidates ?? []).map(
+            (candidate) => candidate.id === candidateId ? updated : candidate
+          ),
+        },
+      };
+
+      return syncProposedInput
+        ? applyProposedMetadataEdit(nextDraft, updated.fieldName, updated.value)
+        : nextDraft;
+    });
+  }
+
+  function handleProposedMetadataChange(fieldName: MetadataFieldName, value: string) {
+    setWorkingDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const matchingCandidates = (current.payload.metadataCandidates ?? []).filter(
+        (candidate) =>
+          normalizeMetadataFieldName(candidate.fieldName) === fieldName
+      );
+      const unresolvedCandidate = matchingCandidates.find(
+        (candidate) => !resolvedReviewStates.has(candidate.reviewState)
+      );
+      const editableCandidate = unresolvedCandidate ?? matchingCandidates[0];
+
+      return editableCandidate
+        ? applyMetadataCandidateEdit(current, editableCandidate.id, value)
+        : applyProposedMetadataEdit(current, fieldName, value);
+    });
+  }
+
   function handleValueEdit(candidateId: string, valueText: string) {
     if (!workingDraft) {
       return;
@@ -325,8 +459,16 @@ export function FinancialMetricsReviewPanel({
     await onConfirm(saved.id);
   }
 
-  const blockingReason = !validation.canConfirm
-    ? `${validation.blockingCandidateIds.length} candidato(s) requieren decisión.`
+  const blockingMessages = [
+    validation.blockingCandidateIds.length > 0
+      ? `${validation.blockingCandidateIds.length} candidato(s) requieren decisión.`
+      : null,
+    validation.missingFields.length > 0
+      ? `Campos faltantes: ${validation.missingFields.join(", ")}.`
+      : null,
+  ].filter(Boolean);
+  const blockingReason = blockingMessages.length > 0
+    ? blockingMessages.join(" ")
     : hasUnresolvedConflicts
         ? "Hay conflictos pendientes de resolución."
         : undefined;
@@ -367,8 +509,134 @@ export function FinancialMetricsReviewPanel({
       <div className="financialMetricsReviewMeta">
         <span>Archivo: {workingDraft.originalFileName}</span>
         <span>Candidatos: {workingDraft.payload.candidates.length}</span>
+        <span>Metadatos: {workingDraft.payload.metadataCandidates?.length ?? 0}</span>
         <span>Estado: {workingDraft.status}</span>
       </div>
+
+      <div className="financialMetricsReviewDocumentFields">
+        <h3>Metadatos del documento</h3>
+        <div className="financialMetricsReviewDocumentGrid">
+          <label>
+            DocumentId
+            <input value={workingDraft.payload.proposedInput.documentId} readOnly />
+          </label>
+          {metadataFieldNames.map((fieldName) => (
+            <label key={fieldName}>
+              {formatMetadataFieldName(fieldName)}
+              <input
+                value={getProposedMetadataValue(
+                  workingDraft.payload.proposedInput,
+                  fieldName
+                )}
+                onChange={(event) =>
+                  handleProposedMetadataChange(fieldName, event.target.value)
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {(workingDraft.payload.metadataCandidates?.length ?? 0) > 0 && (
+        <div className="financialMetricsReviewTableWrap metadataReviewTableWrap">
+          <table className="financialMetricsReviewTable metadataReviewTable">
+            <caption>Candidatos de metadatos del PDF</caption>
+            <thead>
+              <tr>
+                <th scope="col">Campo</th>
+                <th scope="col">Valor</th>
+                <th scope="col">Fuente/Pág.</th>
+                <th scope="col">Conf.</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(workingDraft.payload.metadataCandidates ?? []).map((candidate) => (
+                <Fragment key={candidate.id}>
+                  <tr>
+                    <th scope="row">{formatMetadataFieldName(candidate.fieldName)}</th>
+                    <td>
+                      <label className="srOnly" htmlFor={`metadata-value-${candidate.id}`}>
+                        Valor de {formatMetadataFieldName(candidate.fieldName)}
+                      </label>
+                      <input
+                        id={`metadata-value-${candidate.id}`}
+                        value={candidate.value ?? ""}
+                        onChange={(event) =>
+                          setWorkingDraft((current) =>
+                            current
+                              ? applyMetadataCandidateEdit(
+                                  current,
+                                  candidate.id,
+                                  event.target.value
+                                )
+                              : current
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <span>{candidate.sourceKind}</span>
+                      <small>{candidate.sourcePage ? `Pág. ${candidate.sourcePage}` : "Sin pág."}</small>
+                    </td>
+                    <td>{formatConfidence(candidate.confidence)}</td>
+                    <td>
+                      <span className={`reviewStatePill reviewState-${candidate.reviewState}`}>
+                        {formatReviewState(candidate.reviewState)}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="candidateActions">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateMetadataCandidate(
+                              candidate.id,
+                              (current) => ({
+                                ...current,
+                                reviewState: "accepted",
+                              }),
+                              true
+                            )
+                          }
+                          aria-label={`Aceptar ${formatMetadataFieldName(candidate.fieldName)}`}
+                        >
+                          Aceptar
+                        </button>
+                        <button
+                          type="button"
+                          className="candidateRejectButton"
+                          onClick={() =>
+                            updateMetadataCandidate(candidate.id, (current) => ({
+                              ...current,
+                              reviewState: "rejected",
+                            }))
+                          }
+                          aria-label={`Rechazar ${formatMetadataFieldName(candidate.fieldName)}`}
+                        >
+                          Rechazar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className="candidateEvidenceRow">
+                    <td colSpan={6}>
+                      <details>
+                        <summary>Evidencia y explicación</summary>
+                        <p>{candidate.evidence || "Sin evidencia textual."}</p>
+                        {candidate.inferenceExplanation && (
+                          <small>{candidate.inferenceExplanation}</small>
+                        )}
+                      </details>
+                    </td>
+                  </tr>
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="financialMetricsReviewTableWrap">
         <table className="financialMetricsReviewTable">

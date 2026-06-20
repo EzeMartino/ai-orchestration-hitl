@@ -1100,6 +1100,47 @@ code {
   overflow-wrap: anywhere;
 }
 
+.financialMetricsReviewDocumentFields {
+  margin-top: 1rem;
+}
+
+.financialMetricsReviewDocumentFields h3 {
+  margin: 0 0 0.65rem;
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+.financialMetricsReviewDocumentGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.financialMetricsReviewDocumentGrid label {
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.financialMetricsReviewDocumentGrid input {
+  width: 100%;
+  margin-top: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+  font: inherit;
+  color: #f1f5f9;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.financialMetricsReviewDocumentGrid input:read-only {
+  color: #94a3b8;
+}
+
+.metadataReviewTable {
+  min-width: 760px;
+}
+
 .financialMetricsReviewTableWrap {
   margin-top: 1rem;
   overflow-x: auto;
@@ -2062,6 +2103,7 @@ code {
   .aiReviewMeta,
   .financialReviewNotes,
   .financialMetricsReviewSummary,
+  .financialMetricsReviewDocumentGrid,
   .csvMetaGrid,
   .ratioStrip {
     grid-template-columns: 1fr;
