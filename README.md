@@ -222,7 +222,7 @@ This project does **not** currently include:
 - LLM-controlled workflow transitions,
 - autonomous legal interpretation,
 - universal visual table parsing,
-- LLM-based financial metric extraction,
+- unsupervised or automatically trusted LLM financial metric extraction,
 - natural language report understanding,
 - automatic financial decision-making,
 - production-grade regulatory advice.
@@ -635,7 +635,7 @@ Current capabilities:
 - summarize quantitative evidence,
 - expose financial risk evidence in the dashboard.
 
-The current implementation expects structured financial metrics. JSON and CSV inputs are already structured; PDF ingestion is a deterministic preprocessing path that extracts supported metric rows from native PDF text or local OCR output before persisting the same structured metrics contract. It does not perform universal visual table extraction or LLM-based financial data extraction.
+The current implementation expects structured financial metrics. JSON and CSV inputs are already structured. PDF ingestion starts with deterministic extraction from native PDF text or local OCR output and can optionally use MarkItDown plus a Semantic Kernel extraction agent as a review-gated enrichment fallback. It does not perform universal visual table extraction, and semantic candidates are not trusted silently.
 
 Financial-analysis architecture:
 
@@ -695,7 +695,7 @@ These tools are read-only, auditable, and cannot modify workflow state, approve 
 This phase does not include:
 
 - universal visual PDF table parsing,
-- LLM-based metric extraction,
+- unsupervised or automatically trusted LLM metric extraction,
 - production-grade accounting validation,
 - legal or investment advice.
 
@@ -756,6 +756,58 @@ The resulting analysis context is persisted under:
 
 ```text
 financialAnalysis
+```
+
+### PDF Metrics Extraction and Human Review
+
+PDF uploads use a deterministic-first flow:
+
+```text
+PDF upload
+  -> native text extraction
+  -> deterministic supported-metric parser
+  -> if incomplete, optional local searchable-PDF OCR
+  -> MarkItDown 0.1.6 Markdown conversion
+  -> optional Semantic Kernel extraction agent using the shared Llm:* config
+  -> deterministic reconciliation and validation
+  -> accepted, review_required, or failed
+```
+
+The deterministic parser remains the first path and the structured metrics validator remains authoritative. When the deterministic result is complete enough, the PDF is accepted without MarkItDown or LLM involvement. When coverage, metadata, confidence, conflicts, or missing fields require enrichment, the service can convert the PDF to Markdown with `markitdown[pdf]==0.1.6` and ask the semantic extraction agent to map candidates into the existing structured metrics contract.
+
+Image-only and hybrid PDFs are handled locally. If native text is insufficient, the backend creates a searchable PDF using local OCR tools (`pdftoppm`, `tesseract`, and `pypdf`) and then passes that searchable PDF to MarkItDown. This project does not use `markitdown-ocr`, cloud OCR, remote PDF services, or an LLM client inside MarkItDown.
+
+Semantic extraction has three modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `Shadow` | Runs semantic enrichment for diagnostics, but persists the deterministic result only. |
+| `ReviewOnly` | Creates review drafts for semantic, inferred, conflicting, or incomplete data. This is the default. |
+| `AutoAccept` | Persists semantic output only when all automatic-acceptance rules pass: explicit candidates, required metadata present, no unresolved conflicts, high confidence, and deterministic validation success. |
+
+The semantic agent reuses the same configuration family as the PlannerAgent:
+
+```text
+Llm__Enabled=true
+Llm__Provider=OpenAI
+Llm__Model=<model-name>
+Llm__ApiKey=<api-key>
+Llm__ServiceId=planner-reasoning
+FinancialMetricsExtraction__SemanticEnrichmentEnabled=true
+FinancialMetricsExtraction__Mode=ReviewOnly
+```
+
+Do not commit API keys. If `FinancialMetricsExtraction__SemanticEnrichmentEnabled=false`, or if `Llm__Enabled=false`, the semantic extraction agent is unavailable and the system falls back to deterministic PDF handling.
+
+When the response outcome is `review_required`, active `structuredFinancialMetrics` are not changed. A `FinancialMetricsExtractionDraft` is stored separately, the dashboard opens the review editor, and `Start Session` is blocked until the draft is confirmed or discarded. The reviewer can accept, reject, correct, or add candidates. Confirming a valid draft persists active metrics with `ingestionMethod=pdf_file_reviewed`; discarding leaves prior active metrics unchanged.
+
+Review endpoints:
+
+```http
+GET  /api/analysis-sessions/{sessionId}/financial-metrics/review
+PUT  /api/analysis-sessions/{sessionId}/financial-metrics/review/{draftId}
+POST /api/analysis-sessions/{sessionId}/financial-metrics/review/{draftId}/confirm
+POST /api/analysis-sessions/{sessionId}/financial-metrics/review/{draftId}/discard
 ```
 
 ### JSON Metrics Input
@@ -849,7 +901,7 @@ Form fields:
 - `currency`: optional,
 - `unit`: optional.
 
-Uploaded files are parsed in memory, validated, normalized, and persisted as structured metrics in the analysis session context.
+Uploaded JSON and CSV files are parsed in memory, validated, normalized, and persisted as structured metrics in the analysis session context. PDF files follow the deterministic-first extraction path and may return `review_required`; in that case, the review draft is stored separately and active metrics are not changed until a human confirms it.
 
 The raw file is not stored.
 
@@ -863,7 +915,7 @@ The default upload size limit is 20 MB.
 
 The file upload path uses the same validation, normalization, and session persistence flow as pasted JSON or CSV input. Analysis still starts only when the user clicks `Start Session`.
 
-This is not Excel ingestion, LLM extraction, source-document verification, or universal visual table parsing.
+This is not Excel ingestion, unsupervised LLM extraction, source-document verification, or universal visual table parsing.
 
 ### Metrics Provider Order
 
@@ -1005,6 +1057,22 @@ StructuredFinancialMetricsPdfExtraction__TesseractPath=tesseract
 StructuredFinancialMetricsPdfExtraction__TesseractLanguage=eng
 ```
 
+Semantic PDF enrichment defaults:
+
+```text
+FinancialMetricsExtraction__SemanticEnrichmentEnabled=false
+FinancialMetricsExtraction__Mode=ReviewOnly
+FinancialMetricsExtraction__DeterministicCoverageThreshold=0.7
+FinancialMetricsExtraction__AutomaticAcceptanceConfidence=0.9
+FinancialMetricsExtraction__MaxMarkdownCharacters=200000
+FinancialMetricsExtraction__MaxMarkdownChunks=12
+FinancialMetricsExtraction__ConversionTimeoutSeconds=60
+FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds=90
+FinancialMetricsExtraction__MaxEvidenceExcerptCharacters=500
+```
+
+`FinancialMetricsExtraction__Mode` accepts `Shadow`, `ReviewOnly`, or `AutoAccept`. Keep `ReviewOnly` for local validation when you want humans to approve inferred or conflicting PDF data before it becomes active session metrics.
+
 ## Financial Risk Threshold Profiles
 
 To customize risk heuristic sensitivity, you can configure the active risk threshold profile:
@@ -1053,10 +1121,10 @@ This phase does not include:
 
 - Excel ingestion,
 - universal table extraction from visual reports,
-- LLM-based financial metric extraction,
+- unsupervised or automatically trusted LLM financial metric extraction,
 - accounting correctness guarantees.
 
-The system validates structure and computes advisory risk signals. PDF text/OCR extraction is deterministic and limited to supported metric aliases; it does not verify that the source document was transcribed correctly.
+The system validates structure and computes advisory risk signals. PDF extraction is deterministic first, with optional MarkItDown/Semantic Kernel enrichment for review-gated candidates; it does not verify that the source document was transcribed correctly.
 
 Structured metrics may be incomplete or manually provided. Missing data produces warnings or limitations instead of invented values.
 
@@ -1234,6 +1302,37 @@ DataAgent__FinancialAnalysisToolsEnabled=true
 
 The current provider expects structured financial metrics. `DataAgent__StructuredMetricsFixturePath` can point to a local structured metrics fixture for development validation.
 
+### Python and Local PDF Dependencies
+
+The API resolves `Python:Home` to `python-agents/data_agent` by default. That directory must contain the CSnakes virtual environment and the data-agent dependencies:
+
+```powershell
+py -m venv python-agents/data_agent/.venv
+python-agents/data_agent/.venv/Scripts/python.exe -m pip install -r python-agents/data_agent/requirements.txt
+```
+
+`requirements.txt` pins:
+
+```text
+markitdown[pdf]==0.1.6
+pypdf==6.13.1
+```
+
+For local OCR of image-only PDFs, install command-line PDF/OCR tools and make sure they are on `PATH`, or point the app at them with:
+
+```text
+StructuredFinancialMetricsPdfExtraction__PdfToPpmPath=<path-to-pdftoppm>
+StructuredFinancialMetricsPdfExtraction__TesseractPath=<path-to-tesseract>
+StructuredFinancialMetricsPdfExtraction__TesseractLanguage=eng
+```
+
+Troubleshooting:
+
+- Missing Python dependencies usually surface as MarkItDown import/conversion failures. Reinstall from `python-agents/data_agent/requirements.txt` inside `.venv`.
+- OCR failures usually mean `pdftoppm`, `tesseract`, or the configured language data cannot be found. Verify the configured paths from the API process, especially when running through Aspire.
+- Timeout failures are bounded by `StructuredFinancialMetricsPdfExtraction__OcrTimeoutSeconds`, `FinancialMetricsExtraction__ConversionTimeoutSeconds`, and `FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds`.
+- MarkItDown failures should not crash the API. The ingestion path degrades to deterministic candidates and returns `review_required` or `failed`; previous active metrics stay unchanged.
+
 ### Tool Calling Diagnostics
 
 In `Development`, use:
@@ -1357,6 +1456,10 @@ Current test coverage includes:
 - structured JSON/CSV/PDF metrics file upload,
 - native PDF text metrics extraction,
 - local OCR fallback for image-only or hybrid PDFs,
+- MarkItDown PDF-to-Markdown conversion,
+- semantic PDF extraction review drafts,
+- financial metrics review confirm/discard flow,
+- pending-review start preflight blocking,
 - session metrics provider ordering,
 - structured metrics input UI compatibility,
 - frontend build compatibility,
@@ -1372,7 +1475,7 @@ Current test coverage includes:
 This project intentionally does not provide:
 
 - universal visual table extraction from reports,
-- LLM-based financial metric extraction,
+- unsupervised or automatically trusted LLM financial metric extraction,
 - investment advice,
 - legal advice,
 - final regulatory determinations,
@@ -1381,7 +1484,7 @@ This project intentionally does not provide:
 - unrestricted or autonomous tool execution,
 - raw uploaded file persistence.
 
-Structured metrics may be pasted, uploaded, or manually provided. The system validates structure and computes advisory risk signals, but it does not verify that source documents were transcribed correctly.
+Structured metrics may be pasted, uploaded, or manually provided. PDF semantic enrichment can help map fields into the structured contract, but uncertain values require review and the system still does not verify that source documents were transcribed correctly.
 
 ## Safety Notes
 
