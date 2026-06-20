@@ -14,7 +14,9 @@ import type {
 import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
+  applyMetadataCandidateRejection,
   applyProposedMetadataEdit,
+  parseFiniteMetricValue,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
 
@@ -539,7 +541,12 @@ export function FinancialMetricsReviewPanel({
       return;
     }
 
-    const value = valueText.trim().length === 0 ? null : Number(valueText);
+    const value = parseFiniteMetricValue(valueText);
+
+    if (value === undefined) {
+      return;
+    }
+
     setWorkingDraft(applyCandidateEdit(workingDraft, candidateId, { value }));
   }
 
@@ -810,10 +817,11 @@ export function FinancialMetricsReviewPanel({
                           type="button"
                           className="candidateRejectButton"
                           onClick={() =>
-                            updateMetadataCandidate(candidate.id, (current) => ({
-                              ...current,
-                              reviewState: "rejected",
-                            }))
+                            setWorkingDraft((current) =>
+                              current
+                                ? applyMetadataCandidateRejection(current, candidate.id)
+                                : current
+                            )
                           }
                           aria-label={`Rechazar ${formatMetadataFieldName(candidate.fieldName)}`}
                         >

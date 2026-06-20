@@ -23,6 +23,16 @@ export type FinancialMetricCandidateEdit = Pick<
   "value" | "currency" | "unit"
 >;
 
+export function parseFiniteMetricValue(valueText: string): number | null | undefined {
+  if (valueText.trim().length === 0) {
+    return null;
+  }
+
+  const value = Number(valueText);
+
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeMetadataFieldName(fieldName: string) {
   return fieldName.trim().toLowerCase();
 }
@@ -196,6 +206,35 @@ export function applyProposedMetadataEdit(
       ...draft.payload,
       proposedInput,
       missingFields: computeMissingFields(proposedInput),
+    },
+  };
+}
+
+export function applyMetadataCandidateRejection(
+  draft: FinancialMetricsExtractionDraft,
+  candidateId: string,
+): FinancialMetricsExtractionDraft {
+  const rejected = (draft.payload.metadataCandidates ?? []).find(
+    (candidate) => candidate.id === candidateId,
+  );
+  const proposedInput = rejected
+    ? setProposedMetadataValue(draft.payload.proposedInput, rejected.fieldName, null)
+    : draft.payload.proposedInput;
+
+  return {
+    ...draft,
+    payload: {
+      ...draft.payload,
+      proposedInput,
+      missingFields: computeMissingFields(proposedInput),
+      metadataCandidates: (draft.payload.metadataCandidates ?? []).map((candidate) =>
+        candidate.id === candidateId
+          ? {
+              ...candidate,
+              reviewState: "rejected",
+            }
+          : candidate,
+      ),
     },
   };
 }

@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
+  applyMetadataCandidateRejection,
+  parseFiniteMetricValue,
   validateReviewDraft,
 } from "../src/utils/financialMetricsReview.ts";
 
@@ -187,4 +189,38 @@ test("applyMetadataCandidateEdit marks edited metadata as human corrected and up
   assert.equal(updated.payload.metadataCandidates[0].sourceKind, "human_corrected");
   assert.equal(updated.payload.metadataCandidates[0].reviewState, "human_corrected");
   assert.equal(updated.payload.proposedInput.currency, "ARS");
+});
+
+test("applyMetadataCandidateRejection clears the proposed metadata value and keeps confirmation blocked", () => {
+  const draft = createDraft([{ id: "accepted-metric", reviewState: "accepted" }], {
+    metadataCandidates: [
+      {
+        id: "metadata-currency",
+        fieldName: "currency",
+        value: "USD",
+        sourceKind: "inferred",
+        confidence: 0.7,
+        sourcePage: 1,
+        evidence: "$ symbol",
+        extractionStrategy: "semantic",
+        reviewState: "inferred",
+        inferenceExplanation: "Currency inferred from symbol.",
+      },
+    ],
+  });
+
+  const updated = applyMetadataCandidateRejection(draft, "metadata-currency");
+  const validation = validateReviewDraft(updated);
+
+  assert.equal(updated.payload.metadataCandidates[0].reviewState, "rejected");
+  assert.equal(updated.payload.proposedInput.currency, null);
+  assert.deepEqual(validation.missingFields, ["currency"]);
+  assert.equal(validation.canConfirm, false);
+});
+
+test("parseFiniteMetricValue rejects non-finite candidate edits", () => {
+  assert.equal(parseFiniteMetricValue(""), null);
+  assert.equal(parseFiniteMetricValue("123.45"), 123.45);
+  assert.equal(parseFiniteMetricValue("1e999"), undefined);
+  assert.equal(parseFiniteMetricValue("not-a-number"), undefined);
 });
