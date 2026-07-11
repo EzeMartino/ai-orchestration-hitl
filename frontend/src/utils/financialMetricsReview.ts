@@ -1,6 +1,7 @@
 import type {
   FinancialMetricCandidate,
   FinancialMetricsExtractionDraft,
+  StructuredFinancialMetricInput,
   StructuredFinancialMetricsInput,
 } from "../types/domain.types";
 
@@ -22,6 +23,51 @@ export type FinancialMetricCandidateEdit = Pick<
   FinancialMetricCandidate,
   "value" | "currency" | "unit"
 >;
+
+export function mapCandidateToStructuredMetric(
+  candidate: FinancialMetricCandidate,
+): StructuredFinancialMetricInput {
+  const source =
+    candidate.sourceKind === "human_corrected"
+      ? "human_corrected"
+      : candidate.extractionStrategy === "deterministic_pdf_parser"
+        ? candidate.evidence || null
+        : candidate.extractionStrategy || candidate.evidence || null;
+
+  return {
+    name: candidate.name,
+    period: candidate.period,
+    value: candidate.value ?? null,
+    unit: candidate.unit ?? null,
+    currency: candidate.currency ?? null,
+    source,
+    sourcePage: candidate.sourcePage ?? null,
+    confidence: candidate.sourceKind === "human_corrected" ? 1 : candidate.confidence,
+  };
+}
+
+export function isCurrentSessionRequest(
+  requestSessionId: string,
+  requestGeneration: number,
+  currentSessionId: string | null,
+  currentGeneration: number,
+) {
+  return (
+    requestSessionId === currentSessionId &&
+    requestGeneration === currentGeneration
+  );
+}
+
+export function shouldLoadFinancialMetricsReview(
+  requestSessionId: string,
+  activeSessionId: string | null,
+  uploadSessionId: string | null,
+) {
+  return (
+    requestSessionId === activeSessionId &&
+    requestSessionId !== uploadSessionId
+  );
+}
 
 export function parseFiniteMetricValue(valueText: string): number | null | undefined {
   if (valueText.trim().length === 0) {

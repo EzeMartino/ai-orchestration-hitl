@@ -899,7 +899,8 @@ public sealed class FinancialMetricCandidateReconcilerTests
         result.ProposedInput.Currency.Should().Be("USD");
         result.ProposedInput.Unit.Should().Be("USD_million");
         result.MissingFields.Should().BeEmpty();
-        result.CanAutoAccept.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+        result.RequiresReview.Should().BeTrue();
     }
 
     [Fact]
@@ -1006,6 +1007,29 @@ public sealed class FinancialMetricCandidateReconcilerTests
 
         result.ProposedInput.Company.Should().Be("Acme");
         result.Conflicts.Should().BeEmpty();
+        result.RequiresReview.Should().BeTrue();
+        result.CanAutoAccept.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Reconcile_Should_require_review_when_semantic_metadata_is_the_only_authority()
+    {
+        var reconciler = CreateReconciler();
+        var semanticMetadata = new[]
+        {
+            Metadata("company", "Acme", 0.99m),
+            Metadata("currency", "USD", 0.99m),
+            Metadata("unit", "USD_million", 0.99m)
+        };
+
+        var result = reconciler.Reconcile(
+            Input(company: null, currency: null, unit: null),
+            Extraction(metadata: semanticMetadata),
+            AutoAcceptOptions());
+
+        result.ProposedInput.Company.Should().Be("Acme");
+        result.ProposedInput.Currency.Should().Be("USD");
+        result.ProposedInput.Unit.Should().Be("USD_million");
         result.RequiresReview.Should().BeTrue();
         result.CanAutoAccept.Should().BeFalse();
     }
@@ -1198,7 +1222,7 @@ public sealed class FinancialMetricCandidateReconcilerTests
     }
 
     private static StructuredFinancialMetricsInput Input(
-        string company = "Acme",
+        string? company = "Acme",
         string? currency = "USD",
         string? unit = "USD_million",
         IReadOnlyList<StructuredFinancialMetricInput>? metrics = null)

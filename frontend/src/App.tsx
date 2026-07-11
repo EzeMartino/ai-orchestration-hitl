@@ -125,6 +125,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
     saveJsonMetrics,
     saveCsvMetrics,
     uploadFinancialMetricsFile,
+    loadFinancialMetricsReview,
     updateFinancialMetricsReview,
     confirmFinancialMetricsReview,
     discardFinancialMetricsReview,
@@ -323,6 +324,11 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
             onUpdate={updateFinancialMetricsReview}
             onConfirm={confirmFinancialMetricsReview}
             onDiscard={discardFinancialMetricsReview}
+            onRetry={() => {
+              if (session) {
+                void loadFinancialMetricsReview(session.id);
+              }
+            }}
           />
 
           <PlannerPanel planner={planner} />

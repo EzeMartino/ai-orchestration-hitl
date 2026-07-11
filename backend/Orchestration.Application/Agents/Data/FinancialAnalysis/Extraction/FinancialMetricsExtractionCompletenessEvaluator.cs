@@ -3,6 +3,7 @@ namespace Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 public sealed class FinancialMetricsExtractionCompletenessEvaluator
     : IFinancialMetricsExtractionCompletenessEvaluator
 {
+    private const string CompanyMissing = "company_missing";
     private const string CurrencyMissing = "currency_missing";
     private const string UnitMissing = "unit_missing";
     private const string RequiredRatioInputsMissing = "required_ratio_inputs_missing";
@@ -43,6 +44,11 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluator
     {
         var reasons = new List<string>();
         var input = result.Input;
+
+        if (string.IsNullOrWhiteSpace(input?.Company))
+        {
+            reasons.Add(CompanyMissing);
+        }
 
         if (string.IsNullOrWhiteSpace(input?.Currency))
         {

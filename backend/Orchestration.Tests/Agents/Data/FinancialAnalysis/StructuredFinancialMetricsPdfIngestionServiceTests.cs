@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
@@ -33,15 +34,30 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     }
 
     [Fact]
-    public async Task IngestAsync_Should_convert_searchable_pdf_then_run_semantic_agent_when_native_text_exists()
+    public async Task IngestAsync_Should_use_injected_extraction_options_when_request_has_no_options()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
 
-        await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        var result = await fixture.Service.IngestAsync(Request());
+
+        result.Outcome.Should().Be(FinancialMetricsFileOutcome.Accepted);
+        fixture.SessionService.SaveRequests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task IngestAsync_Should_convert_searchable_pdf_then_run_semantic_agent_when_native_text_exists()
+    {
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
+        fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
+        fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
+
+        await fixture.Service.IngestAsync(Request());
 
         fixture.OcrService.Calls.Should().Be(0);
         fixture.MarkdownConverter.Calls.Should().Be(1);
@@ -56,14 +72,14 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_create_searchable_pdf_before_markitdown_for_image_only_pdf()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: false);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["native_text_missing"]);
         fixture.OcrService.Result = new SearchablePdfOcrResult(true, [9, 8, 7], null);
         fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
 
-        await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        await fixture.Service.IngestAsync(Request());
 
         fixture.OcrService.Calls.Should().Be(1);
         fixture.OcrService.SeenPdfBytes.Should().ContainSingle().Which.Should().Equal([1, 2, 3]);
@@ -74,7 +90,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_create_review_from_deterministic_candidates_when_semantic_agent_fails()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions());
         fixture.PdfExtractor.Result = PdfResult(
             input: CompleteInput(currency: null, unit: null),
             isValid: false,
@@ -84,7 +100,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         fixture.SemanticAgent.ParseResult =
             new FinancialDocumentExtractionParseResult(false, null, "model unavailable");
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions()));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
         result.ReviewDraft.Should().NotBeNull();
@@ -101,7 +117,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_not_reconcile_or_save_when_semantic_result_failed_with_payload()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
@@ -112,7 +128,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
                 "invalid_response");
         fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
         fixture.Reconciler.Calls.Should().Be(0);
@@ -123,7 +139,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_return_review_required_for_inferred_candidate()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["unit_missing"]);
@@ -138,7 +154,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             requiresReview: true,
             canAutoAccept: false);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
         fixture.DraftService.Requests.Should().ContainSingle();
@@ -156,7 +172,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             "100",
             [Candidate("revenue")],
             []);
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["conflict"]);
@@ -165,7 +181,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             requiresReview: true,
             canAutoAccept: false);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
         result.ReviewDraft!.Payload.Conflicts.Should().ContainSingle();
@@ -175,13 +191,13 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_never_auto_accept_semantic_candidates_in_review_only_mode()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "ReviewOnly"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "ReviewOnly")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
         fixture.DraftService.Requests.Should().ContainSingle();
@@ -191,13 +207,13 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_auto_accept_only_when_reconciliation_allows_it()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "AutoAccept"));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.Reconciler.Result = Reconciliation(canAutoAccept: true);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "AutoAccept")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.Accepted);
         fixture.SessionService.SaveRequests.Should().ContainSingle();
@@ -209,7 +225,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_record_shadow_diagnostics_but_persist_only_valid_deterministic_input()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(mode: "Shadow"));
         var deterministic = CompleteInput(company: "Deterministic Co");
         var semantic = CompleteInput(company: "Semantic Co");
         fixture.PdfExtractor.Result = PdfResult(input: deterministic, isValid: true, nativeTextAvailable: true);
@@ -217,7 +233,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             new FinancialMetricsExtractionDecision(true, ["shadow_probe"]);
         fixture.Reconciler.Result = Reconciliation(proposedInput: semantic, canAutoAccept: true);
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions(mode: "Shadow")));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.Accepted);
         fixture.SessionService.SaveRequests.Should().ContainSingle();
@@ -230,13 +246,13 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_not_save_when_no_acceptable_path_exists()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions());
         fixture.PdfExtractor.Result = PdfResultWithoutInput(nativeTextAvailable: false);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.OcrService.Result = new SearchablePdfOcrResult(false, [], "ocr unavailable");
 
-        var result = await fixture.Service.IngestAsync(Request(SemanticOptions()));
+        var result = await fixture.Service.IngestAsync(Request());
 
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.Failed);
         result.Errors.Should().Contain(issue => issue.Code == "pdf_ingestion_failed");
@@ -272,38 +288,77 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
     [Fact]
     public async Task IngestAsync_Should_pass_timeout_cancellation_token_to_markitdown()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(
+            mode: "ReviewOnly",
+            conversionTimeoutSeconds: 0));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
 
-        await fixture.Service.IngestAsync(Request(SemanticOptions(
-            mode: "ReviewOnly",
-            conversionTimeoutSeconds: 0)));
+        await fixture.Service.IngestAsync(Request());
 
         fixture.MarkdownConverter.LastCancellationToken.IsCancellationRequested
             .Should().BeTrue();
     }
 
     [Fact]
-    public async Task IngestAsync_Should_propagate_operation_cancellation_from_markitdown()
+    public async Task IngestAsync_Should_return_review_required_when_markitdown_times_out_without_caller_cancellation()
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(SemanticOptions(
+            mode: "ReviewOnly",
+            conversionTimeoutSeconds: 0));
         fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
         fixture.CompletenessEvaluator.Decision =
             new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
         fixture.MarkdownConverter.Exception =
             new OperationCanceledException("conversion canceled");
 
-        var act = () => fixture.Service.IngestAsync(Request(SemanticOptions()));
+        var result = await fixture.Service.IngestAsync(Request());
+
+        result.Outcome.Should().Be(FinancialMetricsFileOutcome.ReviewRequired);
+        result.ReviewDraft!.Payload.FallbackReasons.Should().Contain("markitdown_timeout");
+        fixture.DraftService.Requests.Should().ContainSingle();
+        fixture.SessionService.SaveRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task IngestAsync_Should_propagate_caller_cancellation_from_markitdown()
+    {
+        var fixture = new Fixture(SemanticOptions());
+        fixture.PdfExtractor.Result = PdfResult(isValid: true, nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["metric_coverage_below_threshold"]);
+        fixture.MarkdownConverter.Exception =
+            new OperationCanceledException("conversion canceled");
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = () => fixture.Service.IngestAsync(Request(), cancellation.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         fixture.DraftService.Requests.Should().BeEmpty();
         fixture.SessionService.SaveRequests.Should().BeEmpty();
     }
 
-    private static StructuredFinancialMetricsPdfIngestionRequest Request(
-        FinancialMetricsExtractionOptions? options = null)
+    [Fact]
+    public async Task IngestAsync_Should_not_create_review_draft_for_invalid_deterministic_input_in_shadow_mode()
+    {
+        var fixture = new Fixture(SemanticOptions(mode: "Shadow"));
+        fixture.PdfExtractor.Result = PdfResult(
+            input: CompleteInput(currency: null),
+            isValid: false,
+            nativeTextAvailable: true);
+        fixture.CompletenessEvaluator.Decision =
+            new FinancialMetricsExtractionDecision(true, ["currency_missing"]);
+
+        var result = await fixture.Service.IngestAsync(Request());
+
+        result.Outcome.Should().Be(FinancialMetricsFileOutcome.Failed);
+        fixture.DraftService.Requests.Should().BeEmpty();
+        fixture.SessionService.SaveRequests.Should().BeEmpty();
+    }
+
+    private static StructuredFinancialMetricsPdfIngestionRequest Request()
     {
         return new StructuredFinancialMetricsPdfIngestionRequest(
             SessionId: SessionId,
@@ -315,11 +370,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Unit: "USD_million",
             OriginalFileName: "metrics.pdf",
             FileSizeBytes: 3,
-            ContentHash: "sha256:abc")
-        {
-            ExtractionOptions = options ?? new FinancialMetricsExtractionOptions(),
-            PdfExtractionOptions = new StructuredFinancialMetricsPdfExtractionOptions()
-        };
+            ContentHash: "sha256:abc");
     }
 
     private static FinancialMetricsExtractionOptions SemanticOptions(
@@ -457,7 +508,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
 
         public StructuredFinancialMetricsPdfIngestionService Service { get; }
 
-        public Fixture()
+        public Fixture(
+            FinancialMetricsExtractionOptions? extractionOptions = null,
+            StructuredFinancialMetricsPdfExtractionOptions? pdfExtractionOptions = null)
         {
             Service = new StructuredFinancialMetricsPdfIngestionService(
                 PdfExtractor,
@@ -468,7 +521,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
                 Reconciler,
                 DraftService,
                 SessionService,
-                ActivityPublisher);
+                ActivityPublisher,
+                Options.Create(extractionOptions ?? new FinancialMetricsExtractionOptions()),
+                Options.Create(pdfExtractionOptions ?? new StructuredFinancialMetricsPdfExtractionOptions()));
         }
     }
 

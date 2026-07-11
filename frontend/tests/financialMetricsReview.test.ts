@@ -4,7 +4,10 @@ import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
   applyMetadataCandidateRejection,
+  isCurrentSessionRequest,
+  mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
+  shouldLoadFinancialMetricsReview,
   validateReviewDraft,
 } from "../src/utils/financialMetricsReview.ts";
 
@@ -223,4 +226,36 @@ test("parseFiniteMetricValue rejects non-finite candidate edits", () => {
   assert.equal(parseFiniteMetricValue("123.45"), 123.45);
   assert.equal(parseFiniteMetricValue("1e999"), undefined);
   assert.equal(parseFiniteMetricValue("not-a-number"), undefined);
+});
+
+test("mapCandidateToStructuredMetric uses deterministic parser evidence as the source", () => {
+  const metric = mapCandidateToStructuredMetric(createDraft([{
+    extractionStrategy: "deterministic_pdf_parser",
+    evidence: "Revenue 2025A 1,200",
+    sourceKind: "reported",
+  }]).payload.candidates[0]);
+
+  assert.equal(metric.source, "Revenue 2025A 1,200");
+});
+
+test("mapCandidateToStructuredMetric uses semantic extraction strategy as the source", () => {
+  const metric = mapCandidateToStructuredMetric(createDraft([{
+    extractionStrategy: "semantic",
+    evidence: "Revenue 2025A 1,200",
+    sourceKind: "reported",
+  }]).payload.candidates[0]);
+
+  assert.equal(metric.source, "semantic");
+});
+
+test("isCurrentSessionRequest rejects completions from superseded sessions or generations", () => {
+  assert.equal(isCurrentSessionRequest("session-a", 4, "session-a", 4), true);
+  assert.equal(isCurrentSessionRequest("session-a", 4, "session-b", 4), false);
+  assert.equal(isCurrentSessionRequest("session-a", 4, "session-a", 5), false);
+});
+
+test("shouldLoadFinancialMetricsReview blocks stale sessions and same-session uploads", () => {
+  assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", null), true);
+  assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-b", null), false);
+  assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", "session-a"), false);
 });

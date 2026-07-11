@@ -16,6 +16,7 @@ import {
   applyMetadataCandidateEdit,
   applyMetadataCandidateRejection,
   applyProposedMetadataEdit,
+  mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
@@ -31,6 +32,7 @@ interface FinancialMetricsReviewPanelProps {
   ) => Promise<FinancialMetricsExtractionDraft | null>;
   onConfirm: (draftId: string) => Promise<void>;
   onDiscard: (draftId: string) => Promise<void>;
+  onRetry: () => void;
 }
 
 type ReviewStateCounts = {
@@ -172,23 +174,6 @@ function toReviewDecision(
   }
 }
 
-function candidateToMetric(candidate: FinancialMetricCandidate): StructuredFinancialMetricInput {
-  return {
-    name: candidate.name,
-    period: candidate.period,
-    value: candidate.value ?? null,
-    unit: candidate.unit ?? null,
-    currency: candidate.currency ?? null,
-    source:
-      candidate.sourceKind === "human_corrected"
-        ? "human_corrected"
-        : candidate.extractionStrategy || candidate.evidence || null,
-    sourcePage: candidate.sourcePage ?? null,
-    confidence:
-      candidate.sourceKind === "human_corrected" ? 1 : candidate.confidence,
-  };
-}
-
 function additionToMetric(addition: DraftMetricAddition): StructuredFinancialMetricInput {
   return {
     name: addition.name,
@@ -293,7 +278,7 @@ function createUpdateRequest(
     proposedInput: {
       ...draft.payload.proposedInput,
       metrics: [
-        ...selectedCandidates.map(candidateToMetric),
+        ...selectedCandidates.map(mapCandidateToStructuredMetric),
         ...metricAdditions.map(additionToMetric),
       ],
     },
@@ -350,6 +335,7 @@ export function FinancialMetricsReviewPanel({
   onUpdate,
   onConfirm,
   onDiscard,
+  onRetry,
 }: FinancialMetricsReviewPanelProps) {
   const [workingDraft, setWorkingDraft] = useState<FinancialMetricsExtractionDraft | null>(
     draft ?? null
@@ -397,6 +383,20 @@ export function FinancialMetricsReviewPanel({
   }
 
   if (!workingDraft) {
+    if (error) {
+      return (
+        <section className="financialMetricsReviewPanel" aria-live="polite">
+          <p className="financialMetricsReviewEyebrow">RevisiÃ³n de extracciÃ³n PDF</p>
+          <div className="financialMetricsReviewNotice financialMetricsReviewNotice-danger" role="alert">
+            {error}
+          </div>
+          <button type="button" onClick={onRetry}>
+            Reintentar
+          </button>
+        </section>
+      );
+    }
+
     return null;
   }
 
@@ -652,6 +652,7 @@ export function FinancialMetricsReviewPanel({
                 onChange={(event) =>
                   handleProposedMetadataChange(fieldName, event.target.value)
                 }
+                disabled={isSaving}
               />
             </label>
           ))}
@@ -668,6 +669,7 @@ export function FinancialMetricsReviewPanel({
               onChange={(event) =>
                 handleMetricAdditionFormChange("name", event.target.value)
               }
+              disabled={isSaving}
               placeholder="Revenue"
             />
           </label>
@@ -678,6 +680,7 @@ export function FinancialMetricsReviewPanel({
               onChange={(event) =>
                 handleMetricAdditionFormChange("period", event.target.value)
               }
+              disabled={isSaving}
               placeholder="2025A"
             />
           </label>
@@ -689,6 +692,7 @@ export function FinancialMetricsReviewPanel({
               onChange={(event) =>
                 handleMetricAdditionFormChange("value", event.target.value)
               }
+              disabled={isSaving}
             />
           </label>
           <label>
@@ -698,6 +702,7 @@ export function FinancialMetricsReviewPanel({
               onChange={(event) =>
                 handleMetricAdditionFormChange("currency", event.target.value)
               }
+              disabled={isSaving}
             />
           </label>
           <label>
@@ -707,12 +712,14 @@ export function FinancialMetricsReviewPanel({
               onChange={(event) =>
                 handleMetricAdditionFormChange("unit", event.target.value)
               }
+              disabled={isSaving}
             />
           </label>
           <button
             type="button"
             onClick={handleAddMetric}
             disabled={
+              isSaving ||
               metricAdditionForm.name.trim().length === 0 ||
               metricAdditionForm.period.trim().length === 0 ||
               metricAdditionForm.value.trim().length === 0 ||
@@ -737,6 +744,7 @@ export function FinancialMetricsReviewPanel({
                   className="metricAdditionRemove"
                   onClick={() => handleRemoveMetricAddition(addition.localId)}
                   aria-label={`Quitar ${addition.name} ${addition.period}`}
+                  disabled={isSaving}
                 >
                   Quitar
                 </button>
@@ -783,6 +791,7 @@ export function FinancialMetricsReviewPanel({
                               : current
                           )
                         }
+                        disabled={isSaving}
                       />
                     </td>
                     <td>
@@ -810,6 +819,7 @@ export function FinancialMetricsReviewPanel({
                             )
                           }
                           aria-label={`Aceptar ${formatMetadataFieldName(candidate.fieldName)}`}
+                          disabled={isSaving}
                         >
                           Aceptar
                         </button>
@@ -824,6 +834,7 @@ export function FinancialMetricsReviewPanel({
                             )
                           }
                           aria-label={`Rechazar ${formatMetadataFieldName(candidate.fieldName)}`}
+                          disabled={isSaving}
                         >
                           Rechazar
                         </button>
@@ -881,6 +892,7 @@ export function FinancialMetricsReviewPanel({
                       onChange={(event) =>
                         handleValueEdit(candidate.id, event.target.value)
                       }
+                      disabled={isSaving}
                     />
                   </td>
                   <td>
@@ -899,6 +911,7 @@ export function FinancialMetricsReviewPanel({
                             : current
                         )
                       }
+                      disabled={isSaving}
                     />
                   </td>
                   <td>
@@ -917,6 +930,7 @@ export function FinancialMetricsReviewPanel({
                             : current
                         )
                       }
+                      disabled={isSaving}
                     />
                   </td>
                   <td>
@@ -940,6 +954,7 @@ export function FinancialMetricsReviewPanel({
                           }))
                         }
                         aria-label={`Aceptar ${candidate.name} ${candidate.period}`}
+                        disabled={isSaving}
                       >
                         Aceptar
                       </button>
@@ -953,6 +968,7 @@ export function FinancialMetricsReviewPanel({
                           }))
                         }
                         aria-label={`Rechazar ${candidate.name} ${candidate.period}`}
+                        disabled={isSaving}
                       >
                         Rechazar
                       </button>

@@ -19,13 +19,7 @@ public sealed record StructuredFinancialMetricsPdfIngestionRequest(
     string? Unit,
     string OriginalFileName,
     long FileSizeBytes,
-    string ContentHash)
-{
-    public FinancialMetricsExtractionOptions ExtractionOptions { get; init; } = new();
-
-    public StructuredFinancialMetricsPdfExtractionOptions PdfExtractionOptions { get; init; } =
-        new();
-}
+    string ContentHash);
 
 public sealed record StructuredFinancialMetricsPdfIngestionResult(
     FinancialMetricsFileOutcome Outcome,

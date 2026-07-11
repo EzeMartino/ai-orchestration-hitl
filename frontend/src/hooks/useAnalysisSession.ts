@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   ActivityEvent,
   AnalysisSessionResponse,
@@ -13,8 +13,16 @@ import type {
   UpdateFinancialMetricsExtractionDraftRequest,
 } from "../types/domain.types";
 import * as api from "../services/api";
+import {
+  isCurrentSessionRequest,
+  shouldLoadFinancialMetricsReview,
+} from "../utils/financialMetricsReview";
 
 export function useAnalysisSession() {
+  const activeSessionId = useRef<string | null>(null);
+  const financialMetricsReviewGeneration = useRef(0);
+  const financialMetricsUploadSessionId = useRef<string | null>(null);
+  const financialMetricsUploadGeneration = useRef(0);
   const [session, setSession] = useState<AnalysisSessionResponse | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -37,6 +45,20 @@ export function useAnalysisSession() {
   const [startPreflight, setStartPreflight] = useState<AnalysisSessionStartPreflightResult | null>(null);
   const [isCheckingStartPreflight, setIsCheckingStartPreflight] = useState(false);
   const [startPreflightError, setStartPreflightError] = useState<string | null>(null);
+
+  const invalidateFinancialMetricsReviewWork = () => {
+    activeSessionId.current = null;
+    financialMetricsReviewGeneration.current += 1;
+    financialMetricsUploadSessionId.current = null;
+    financialMetricsUploadGeneration.current += 1;
+    setFinancialMetricsReview(null);
+    setFinancialMetricsReviewError(null);
+    setIsLoadingFinancialMetricsReview(false);
+    setIsSavingFinancialMetricsReview(false);
+    setIsLoadingStructuredMetrics(false);
+    setIsSavingStructuredMetrics(false);
+    setIsCheckingStartPreflight(false);
+  };
 
   // Helper to add activity events from SignalR
   const addActivityEvent = useCallback((event: ActivityEvent) => {
@@ -82,65 +104,120 @@ export function useAnalysisSession() {
   };
 
   const loadStructuredFinancialMetrics = async (sessionId: string) => {
+    if (activeSessionId.current !== sessionId) {
+      return;
+    }
     setIsLoadingStructuredMetrics(true);
     try {
       const payload = await api.loadStructuredFinancialMetrics(sessionId);
-      setStructuredMetrics(payload.context ?? null);
+      if (activeSessionId.current === sessionId) {
+        setStructuredMetrics(payload.context ?? null);
+      }
     } finally {
-      setIsLoadingStructuredMetrics(false);
+      if (activeSessionId.current === sessionId) {
+        setIsLoadingStructuredMetrics(false);
+      }
     }
   };
 
   const refreshStartPreflight = async (sessionId: string) => {
+    if (activeSessionId.current !== sessionId) {
+      return;
+    }
     setIsCheckingStartPreflight(true);
     setStartPreflightError(null);
     try {
       const preflight = await api.getStartPreflight(sessionId);
-      setStartPreflight(preflight);
+      if (activeSessionId.current === sessionId) {
+        setStartPreflight(preflight);
+      }
     } catch (error) {
       console.error(error);
-      setStartPreflight(null);
-      setStartPreflightError(
-        "No se pudo verificar la preparación de inicio. La validación previa del servidor se ejecutará al iniciar de todos modos."
-      );
+      if (activeSessionId.current === sessionId) {
+        setStartPreflight(null);
+        setStartPreflightError(
+          "No se pudo verificar la preparación de inicio. La validación previa del servidor se ejecutará al iniciar de todos modos."
+        );
+      }
     } finally {
-      setIsCheckingStartPreflight(false);
+      if (activeSessionId.current === sessionId) {
+        setIsCheckingStartPreflight(false);
+      }
     }
   };
 
   const loadFinancialMetricsReview = async (sessionId: string) => {
+    if (!shouldLoadFinancialMetricsReview(
+      sessionId,
+      activeSessionId.current,
+      financialMetricsUploadSessionId.current,
+    )) {
+      return null;
+    }
+    const requestGeneration = financialMetricsReviewGeneration.current + 1;
+    financialMetricsReviewGeneration.current = requestGeneration;
     setIsLoadingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
       const draft = await api.getFinancialMetricsReview(sessionId);
-      setFinancialMetricsReview(draft);
+      if (isCurrentSessionRequest(
+        sessionId,
+        requestGeneration,
+        activeSessionId.current,
+        financialMetricsReviewGeneration.current,
+      )) {
+        setFinancialMetricsReview(draft);
+      }
       return draft;
     } catch (error) {
       console.error(error);
-      setFinancialMetricsReview(null);
-      setFinancialMetricsReviewError(
-        error instanceof Error
-          ? error.message
+      if (isCurrentSessionRequest(
+        sessionId,
+        requestGeneration,
+        activeSessionId.current,
+        financialMetricsReviewGeneration.current,
+      )) {
+        setFinancialMetricsReview(null);
+        setFinancialMetricsReviewError(
+          error instanceof Error
+            ? error.message
           : "No se pudo cargar el borrador de revisión de métricas financieras."
-      );
+        );
+      }
       return null;
     } finally {
-      setIsLoadingFinancialMetricsReview(false);
+      if (isCurrentSessionRequest(
+        sessionId,
+        requestGeneration,
+        activeSessionId.current,
+        financialMetricsReviewGeneration.current,
+      )) {
+        setIsLoadingFinancialMetricsReview(false);
+      }
     }
   };
 
   const refreshAfterFinancialMetricsReview = async (sessionId: string) => {
     await loadStructuredFinancialMetrics(sessionId);
+    if (activeSessionId.current !== sessionId) {
+      return;
+    }
     const updated = await api.loadSessionDetails(sessionId);
+    if (activeSessionId.current !== sessionId) {
+      return;
+    }
     setSession(updated);
     await refreshStartPreflight(sessionId);
   };
 
   const createSession = async () => {
+    const previousSessionId = activeSessionId.current;
+    invalidateFinancialMetricsReviewWork();
     setIsCreating(true);
     setErrorMessage(null);
     try {
       const createdSession = await api.createSession();
+      activeSessionId.current = createdSession.id;
       setSession(createdSession);
       setEvents([]);
       setStructuredMetrics(null);
@@ -156,6 +233,12 @@ export function useAnalysisSession() {
       console.error(error);
       setErrorMessage("No se pudo crear la sesión de análisis.");
     } finally {
+      if (activeSessionId.current === null && previousSessionId) {
+        activeSessionId.current = previousSessionId;
+        void loadStructuredFinancialMetrics(previousSessionId);
+        void loadFinancialMetricsReview(previousSessionId);
+        void refreshStartPreflight(previousSessionId);
+      }
       setIsCreating(false);
     }
   };
@@ -253,61 +336,101 @@ export function useAnalysisSession() {
   const loadExistingSession = async (sessionId?: string) => {
     const idToLoad = sessionId ?? selectedSessionId;
     if (!idToLoad) return;
+    const previousSessionId = activeSessionId.current;
+    invalidateFinancialMetricsReviewWork();
     setErrorMessage(null);
     try {
       const loadedSession = await api.loadSessionDetails(idToLoad);
+      activeSessionId.current = loadedSession.id;
       setSession(loadedSession);
       await loadSessionEvents(loadedSession.id);
       await refreshStartPreflight(loadedSession.id);
     } catch (error) {
       console.error(error);
       setErrorMessage("No se pudo cargar la sesión de análisis.");
+    } finally {
+      if (activeSessionId.current === null && previousSessionId) {
+        activeSessionId.current = previousSessionId;
+        void loadStructuredFinancialMetrics(previousSessionId);
+        void loadFinancialMetricsReview(previousSessionId);
+        void refreshStartPreflight(previousSessionId);
+      }
     }
   };
 
   const saveJsonMetrics = async (input: StructuredFinancialMetricsInput) => {
     if (!session) return;
+    const saveSessionId = session.id;
+    const isCurrentSave = () => activeSessionId.current === saveSessionId;
     setIsSavingStructuredMetrics(true);
     setMetricsSaveError(null);
     setMetricsSaveResult(null);
     try {
-      const result = await api.saveJsonMetrics(session.id, input);
+      const result = await api.saveJsonMetrics(saveSessionId, input);
+      if (!isCurrentSave()) {
+        return;
+      }
       setMetricsSaveResult(result);
       if (result.isValid) {
         setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(session.id);
-        const updated = await api.loadSessionDetails(session.id);
+        await loadStructuredFinancialMetrics(saveSessionId);
+        if (!isCurrentSave()) {
+          return;
+        }
+        const updated = await api.loadSessionDetails(saveSessionId);
+        if (!isCurrentSave()) {
+          return;
+        }
         setSession(updated);
       }
-      await refreshStartPreflight(session.id);
+      await refreshStartPreflight(saveSessionId);
     } catch (error) {
       console.error(error);
-      setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
+      if (isCurrentSave()) {
+        setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
+      }
     } finally {
-      setIsSavingStructuredMetrics(false);
+      if (isCurrentSave()) {
+        setIsSavingStructuredMetrics(false);
+      }
     }
   };
 
   const saveCsvMetrics = async (input: StructuredFinancialMetricsCsvInput) => {
     if (!session) return;
+    const saveSessionId = session.id;
+    const isCurrentSave = () => activeSessionId.current === saveSessionId;
     setIsSavingStructuredMetrics(true);
     setMetricsSaveError(null);
     setMetricsSaveResult(null);
     try {
-      const result = await api.saveCsvMetrics(session.id, input);
+      const result = await api.saveCsvMetrics(saveSessionId, input);
+      if (!isCurrentSave()) {
+        return;
+      }
       setMetricsSaveResult(result);
       if (result.isValid) {
         setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(session.id);
-        const updated = await api.loadSessionDetails(session.id);
+        await loadStructuredFinancialMetrics(saveSessionId);
+        if (!isCurrentSave()) {
+          return;
+        }
+        const updated = await api.loadSessionDetails(saveSessionId);
+        if (!isCurrentSave()) {
+          return;
+        }
         setSession(updated);
       }
-      await refreshStartPreflight(session.id);
+      await refreshStartPreflight(saveSessionId);
     } catch (error) {
       console.error(error);
-      setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
+      if (isCurrentSave()) {
+        setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
+      }
     } finally {
-      setIsSavingStructuredMetrics(false);
+      if (isCurrentSave()) {
+        setIsSavingStructuredMetrics(false);
+      }
     }
   };
 
@@ -316,12 +439,27 @@ export function useAnalysisSession() {
     metadata: StructuredFinancialMetricsFileMetadata
   ) => {
     if (!session) return;
+    const uploadSessionId = session.id;
+    const uploadGeneration = financialMetricsUploadGeneration.current + 1;
+    financialMetricsUploadGeneration.current = uploadGeneration;
+    const isCurrentUpload = () => isCurrentSessionRequest(
+      uploadSessionId,
+      uploadGeneration,
+      activeSessionId.current,
+      financialMetricsUploadGeneration.current,
+    );
+    financialMetricsReviewGeneration.current += 1;
+    financialMetricsUploadSessionId.current = uploadSessionId;
+    setIsLoadingFinancialMetricsReview(false);
     setIsSavingStructuredMetrics(true);
     setMetricsSaveError(null);
     setMetricsSaveResult(null);
     setFinancialMetricsReviewError(null);
     try {
-      const result = await api.uploadFinancialMetricsFile(session.id, file, metadata);
+      const result = await api.uploadFinancialMetricsFile(uploadSessionId, file, metadata);
+      if (!isCurrentUpload()) {
+        return;
+      }
       setMetricsSaveResult(result);
       const outcome = result.outcome ?? (result.isValid ? "accepted" : "failed");
 
@@ -329,22 +467,33 @@ export function useAnalysisSession() {
         setFinancialMetricsReview(result.reviewDraft ?? null);
       } else if (outcome === "accepted" && result.isValid) {
         setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(session.id);
-        const updated = await api.loadSessionDetails(session.id);
+        await loadStructuredFinancialMetrics(uploadSessionId);
+        if (!isCurrentUpload()) {
+          return;
+        }
+        const updated = await api.loadSessionDetails(uploadSessionId);
+        if (!isCurrentUpload()) {
+          return;
+        }
         setSession(updated);
       } else if (outcome === "failed") {
         setFinancialMetricsReview(null);
       }
-      await refreshStartPreflight(session.id);
+      await refreshStartPreflight(uploadSessionId);
     } catch (error) {
       console.error(error);
-      setMetricsSaveError(
-        error instanceof Error
-          ? error.message
-          : "La carga del archivo falló. Por favor, compruebe el formato del archivo e intente de nuevo."
-      );
+      if (isCurrentUpload()) {
+        setMetricsSaveError(
+          error instanceof Error
+            ? error.message
+            : "La carga del archivo falló. Por favor, compruebe el formato del archivo e intente de nuevo."
+        );
+      }
     } finally {
-      setIsSavingStructuredMetrics(false);
+      if (isCurrentUpload()) {
+        financialMetricsUploadSessionId.current = null;
+        setIsSavingStructuredMetrics(false);
+      }
     }
   };
 
@@ -353,65 +502,86 @@ export function useAnalysisSession() {
     request: UpdateFinancialMetricsExtractionDraftRequest
   ) => {
     if (!session) return null;
+    const reviewSessionId = session.id;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
-      const draft = await api.updateFinancialMetricsReview(session.id, draftId, request);
-      setFinancialMetricsReview(draft);
-      await refreshStartPreflight(session.id);
+      const draft = await api.updateFinancialMetricsReview(reviewSessionId, draftId, request);
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReview(draft);
+        await refreshStartPreflight(reviewSessionId);
+      }
       return draft;
     } catch (error) {
       console.error(error);
-      setFinancialMetricsReviewError(
-        error instanceof Error
-          ? error.message
-          : "No se pudieron guardar los cambios del borrador de revisión."
-      );
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReviewError(
+          error instanceof Error
+            ? error.message
+            : "No se pudieron guardar los cambios del borrador de revisión."
+        );
+      }
       return null;
     } finally {
-      setIsSavingFinancialMetricsReview(false);
+      if (activeSessionId.current === reviewSessionId) {
+        setIsSavingFinancialMetricsReview(false);
+      }
     }
   };
 
   const confirmFinancialMetricsReview = async (draftId: string) => {
     if (!session) return;
+    const reviewSessionId = session.id;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
-      await api.confirmFinancialMetricsReview(session.id, draftId);
-      setFinancialMetricsReview(null);
-      setMetricsSaveResult(null);
-      await refreshAfterFinancialMetricsReview(session.id);
+      await api.confirmFinancialMetricsReview(reviewSessionId, draftId);
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReview(null);
+        setMetricsSaveResult(null);
+        await refreshAfterFinancialMetricsReview(reviewSessionId);
+      }
     } catch (error) {
       console.error(error);
-      setFinancialMetricsReviewError(
-        error instanceof Error
-          ? error.message
-          : "No se pudo confirmar el borrador de revisión."
-      );
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReviewError(
+          error instanceof Error
+            ? error.message
+            : "No se pudo confirmar el borrador de revisión."
+        );
+      }
     } finally {
-      setIsSavingFinancialMetricsReview(false);
+      if (activeSessionId.current === reviewSessionId) {
+        setIsSavingFinancialMetricsReview(false);
+      }
     }
   };
 
   const discardFinancialMetricsReview = async (draftId: string) => {
     if (!session) return;
+    const reviewSessionId = session.id;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
-      await api.discardFinancialMetricsReview(session.id, draftId);
-      setFinancialMetricsReview(null);
-      setMetricsSaveResult(null);
-      await refreshAfterFinancialMetricsReview(session.id);
+      await api.discardFinancialMetricsReview(reviewSessionId, draftId);
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReview(null);
+        setMetricsSaveResult(null);
+        await refreshAfterFinancialMetricsReview(reviewSessionId);
+      }
     } catch (error) {
       console.error(error);
-      setFinancialMetricsReviewError(
-        error instanceof Error
-          ? error.message
-          : "No se pudo descartar el borrador de revisión."
-      );
+      if (activeSessionId.current === reviewSessionId) {
+        setFinancialMetricsReviewError(
+          error instanceof Error
+            ? error.message
+            : "No se pudo descartar el borrador de revisión."
+        );
+      }
     } finally {
-      setIsSavingFinancialMetricsReview(false);
+      if (activeSessionId.current === reviewSessionId) {
+        setIsSavingFinancialMetricsReview(false);
+      }
     }
   };
 
@@ -428,6 +598,7 @@ export function useAnalysisSession() {
     setMetricsSaveError(null);
 
     if (!session?.id) {
+      activeSessionId.current = null;
       setStructuredMetrics(null);
       setFinancialMetricsReview(null);
       setFinancialMetricsReviewError(null);
@@ -439,12 +610,15 @@ export function useAnalysisSession() {
       return;
     }
 
+    activeSessionId.current = session.id;
     setStartPreflight(null);
     setStartPreflightError(null);
 
     loadStructuredFinancialMetrics(session.id).catch((error) => {
       console.error("Failed to load structured financial metrics:", error);
-      setStructuredMetrics(null);
+      if (activeSessionId.current === session.id) {
+        setStructuredMetrics(null);
+      }
     });
 
     loadFinancialMetricsReview(session.id).catch((error) => {

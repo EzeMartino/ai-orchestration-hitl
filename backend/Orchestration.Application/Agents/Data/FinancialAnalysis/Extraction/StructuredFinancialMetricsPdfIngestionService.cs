@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
@@ -20,6 +21,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
     private readonly IFinancialMetricsExtractionDraftService _draftService;
     private readonly IStructuredFinancialMetricsSessionService _sessionService;
     private readonly IActivityEventPublisher _activityPublisher;
+    private readonly FinancialMetricsExtractionOptions _extractionOptions;
+    private readonly StructuredFinancialMetricsPdfExtractionOptions
+        _pdfExtractionOptions;
 
     public StructuredFinancialMetricsPdfIngestionService(
         IStructuredFinancialMetricsPdfExtractor pdfExtractor,
@@ -30,7 +34,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         IFinancialMetricCandidateReconciler reconciler,
         IFinancialMetricsExtractionDraftService draftService,
         IStructuredFinancialMetricsSessionService sessionService,
-        IActivityEventPublisher activityPublisher)
+        IActivityEventPublisher activityPublisher,
+        IOptions<FinancialMetricsExtractionOptions> extractionOptions,
+        IOptions<StructuredFinancialMetricsPdfExtractionOptions> pdfExtractionOptions)
     {
         _pdfExtractor = pdfExtractor;
         _completenessEvaluator = completenessEvaluator;
@@ -41,6 +47,10 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         _draftService = draftService;
         _sessionService = sessionService;
         _activityPublisher = activityPublisher;
+        _extractionOptions = (extractionOptions ?? throw new ArgumentNullException(
+            nameof(extractionOptions))).Value;
+        _pdfExtractionOptions = (pdfExtractionOptions ?? throw new ArgumentNullException(
+            nameof(pdfExtractionOptions))).Value;
     }
 
     public async Task<StructuredFinancialMetricsPdfIngestionResult> IngestAsync(
@@ -77,7 +87,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         diagnostics.NativeTextAvailable = deterministicResult.NativeTextAvailable;
         var decision = _completenessEvaluator.Evaluate(
             deterministicResult,
-            request.ExtractionOptions);
+            _extractionOptions);
         reasonCodes.AddRange(decision.ReasonCodes);
 
         if (!decision.RequiresSemanticFallback)
@@ -107,8 +117,19 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
 
         await PublishFallbackReasonsAsync(request.SessionId, reasonCodes, cancellationToken);
 
-        if (!request.ExtractionOptions.SemanticEnrichmentEnabled)
+        if (!_extractionOptions.SemanticEnrichmentEnabled)
         {
+            if (IsShadowMode(_extractionOptions))
+            {
+                return await CreateShadowSaveOrFailureAsync(
+                    request,
+                    deterministicResult,
+                    diagnostics,
+                    total,
+                    reasonCodes,
+                    cancellationToken);
+            }
+
             return await CreateDeterministicReviewOrFailureAsync(
                 request,
                 deterministicResult,
@@ -129,15 +150,11 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
 
         if (semantic.Result is null)
         {
-            if (IsShadowMode(request.ExtractionOptions)
-                && deterministicResult is { IsValid: true, Input: not null })
+            if (IsShadowMode(_extractionOptions))
             {
-                return await SaveAcceptedAsync(
+                return await CreateShadowSaveOrFailureAsync(
                     request,
-                    deterministicResult.Input,
-                    "pdf_file",
-                    deterministicResult.Errors,
-                    deterministicResult.Warnings,
+                    deterministicResult,
                     diagnostics,
                     total,
                     reasonCodes,
@@ -174,27 +191,13 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         var reconciliation = _reconciler.Reconcile(
             deterministicInput,
             semantic.Result,
-            request.ExtractionOptions);
+            _extractionOptions);
         diagnostics.CandidateCount = reconciliation.Candidates.Count;
         diagnostics.ConflictCount = reconciliation.Conflicts.Count;
 
-        if (IsShadowMode(request.ExtractionOptions))
+        if (IsShadowMode(_extractionOptions))
         {
-            if (deterministicResult is { IsValid: true, Input: not null })
-            {
-                return await SaveAcceptedAsync(
-                    request,
-                    deterministicResult.Input,
-                    "pdf_file",
-                    deterministicResult.Errors,
-                    deterministicResult.Warnings,
-                    diagnostics,
-                    total,
-                    reasonCodes,
-                    cancellationToken);
-            }
-
-            return await CreateDeterministicReviewOrFailureAsync(
+            return await CreateShadowSaveOrFailureAsync(
                 request,
                 deterministicResult,
                 diagnostics,
@@ -203,7 +206,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
                 cancellationToken);
         }
 
-        if (IsAutoAcceptMode(request.ExtractionOptions)
+        if (IsAutoAcceptMode(_extractionOptions)
             && reconciliation.CanAutoAccept
             && !reconciliation.RequiresReview)
         {
@@ -251,7 +254,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
                 using var ocrPdf = CreatePdfStream(request.PdfBytes);
                 ocr = await _ocrService.CreateSearchablePdfAsync(
                     ocrPdf,
-                    request.PdfExtractionOptions,
+                    _pdfExtractionOptions,
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -285,11 +288,17 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             using var conversionTimeout =
                 CreateTimeoutTokenSource(
                     cancellationToken,
-                    request.ExtractionOptions.ConversionTimeoutSeconds);
+                    _extractionOptions.ConversionTimeoutSeconds);
             markdown = await _markdownConverter.ConvertPdfAsync(
                 markdownPdf,
-                request.ExtractionOptions.MaxMarkdownCharacters,
+                _extractionOptions.MaxMarkdownCharacters,
                 conversionTimeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            reasonCodes.Add("markitdown_timeout");
+
+            return new SemanticFallbackResult(null, "markitdown_timeout");
         }
         catch (OperationCanceledException)
         {
@@ -319,9 +328,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             semantic = await _semanticAgent.ExtractAsync(
                 new FinancialDocumentExtractionRequest(
                     markdown.Markdown,
-                    request.ExtractionOptions.MaxEvidenceExcerptCharacters,
-                    request.ExtractionOptions.MaxMarkdownChunks,
-                    GetMaxSourcePage(request.PdfExtractionOptions)),
+                    _extractionOptions.MaxEvidenceExcerptCharacters,
+                    _extractionOptions.MaxMarkdownChunks,
+                    GetMaxSourcePage(_pdfExtractionOptions)),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -428,6 +437,40 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             total,
             reasonCodes,
             cancellationToken);
+    }
+
+    private async Task<StructuredFinancialMetricsPdfIngestionResult>
+        CreateShadowSaveOrFailureAsync(
+            StructuredFinancialMetricsPdfIngestionRequest request,
+            StructuredFinancialMetricsPdfExtractionResult deterministicResult,
+            MutableDiagnostics diagnostics,
+            Stopwatch total,
+            IReadOnlyList<string> reasonCodes,
+            CancellationToken cancellationToken)
+    {
+        if (deterministicResult is { IsValid: true, Input: not null })
+        {
+            return await SaveAcceptedAsync(
+                request,
+                deterministicResult.Input,
+                "pdf_file",
+                deterministicResult.Errors,
+                deterministicResult.Warnings,
+                diagnostics,
+                total,
+                reasonCodes,
+                cancellationToken);
+        }
+
+        return await FailAsync(
+            request,
+            diagnostics,
+            total,
+            "pdf_ingestion_failed",
+            "Deterministic financial metrics are incomplete in shadow mode.",
+            reasonCodes,
+            cancellationToken,
+            deterministicResult.Errors);
     }
 
     private async Task<StructuredFinancialMetricsPdfIngestionResult>

@@ -49,6 +49,20 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
     }
 
     [Fact]
+    public void Evaluate_Should_add_company_missing_before_currency_and_unit_reasons()
+    {
+        var result = CreateResult(company: null, currency: null, unit: null);
+
+        var decision = _evaluator.Evaluate(result, new FinancialMetricsExtractionOptions());
+
+        decision.RequiresSemanticFallback.Should().BeTrue();
+        decision.ReasonCodes.Should().StartWith(
+            "company_missing",
+            "currency_missing",
+            "unit_missing");
+    }
+
+    [Fact]
     public void Evaluate_Should_require_fallback_when_unit_is_missing()
     {
         var result = CreateResult(unit: null);
@@ -176,6 +190,7 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
 
         decision.RequiresSemanticFallback.Should().BeTrue();
         decision.ReasonCodes.Should().Equal(
+            "company_missing",
             "currency_missing",
             "unit_missing",
             "required_ratio_inputs_missing",
@@ -303,6 +318,7 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
     }
 
     private static StructuredFinancialMetricsPdfExtractionResult CreateResult(
+        string? company = "Vista Energy",
         string? currency = "USD",
         string? unit = "USD_thousand",
         IReadOnlyList<StructuredFinancialMetricInput>? metrics = null,
@@ -312,7 +328,7 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
             IsValid: isValid,
             Input: new StructuredFinancialMetricsInput(
                 DocumentId: "report-1",
-                Company: "Vista Energy",
+                Company: company,
                 Currency: currency,
                 Unit: unit,
                 Metrics: metrics ?? CreateCompleteMetrics()),

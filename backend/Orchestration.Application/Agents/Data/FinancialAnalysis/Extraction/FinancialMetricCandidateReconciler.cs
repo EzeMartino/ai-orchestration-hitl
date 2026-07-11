@@ -64,7 +64,7 @@ public sealed class FinancialMetricCandidateReconciler(
             metadataCandidates.Any(RequiresCandidateReview);
         var allAcceptedCandidatesAreExplicit =
             acceptedMetricCandidates.All(IsExplicit) &&
-            acceptedMetadataCandidates.All(IsExplicit);
+            acceptedMetadataCandidates.All(IsAuthoritativeMetadata);
         var allAcceptedCandidatesMeetConfidence =
             acceptedMetricCandidates.All(candidate =>
                 candidate.Confidence >= options.AutomaticAcceptanceConfidence) &&
@@ -777,6 +777,16 @@ public sealed class FinancialMetricCandidateReconciler(
                 candidate.ReviewState,
                 FinancialMetricCandidateReviewStates.Explicit,
                 StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAuthoritativeMetadata(
+        FinancialDocumentMetadataCandidate candidate)
+    {
+        return IsExplicit(candidate) &&
+            string.Equals(
+                candidate.ExtractionStrategy,
+                DeterministicExtractionStrategy,
+                StringComparison.Ordinal);
     }
 
     private static bool RequiresCandidateReview(
