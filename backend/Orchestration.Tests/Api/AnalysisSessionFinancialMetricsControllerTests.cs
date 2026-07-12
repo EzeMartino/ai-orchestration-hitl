@@ -9,6 +9,7 @@ using Orchestration.Api.Controllers;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
@@ -26,6 +27,18 @@ namespace Orchestration.Tests.Api;
 
 public sealed class AnalysisSessionFinancialMetricsControllerTests
 {
+    private static FinancialReportSummaryInput ApiReportSummaryInput => new(
+        "  balance-sheet-2025.pdf  ",
+        842350.75m,
+        187,
+        new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+
+    private static FinancialReportSummary ApiReportSummary => new(
+        "balance-sheet-2025.pdf",
+        842350.75m,
+        187,
+        new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+
     [Fact]
     public void AnalysisSessionsController_Should_expose_only_review_ingestion_constructor()
     {
@@ -54,7 +67,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
 
         var result = await controller.SaveFinancialMetrics(
             session.Id,
-            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
             CancellationToken.None
         );
 
@@ -66,6 +82,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context!.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
         response.Context.Provenance.Should().NotBeNull();
         response.Context.Provenance!.IngestionMethod.Should().Be("json_paste");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -152,6 +169,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Company.Should().Be("Manual Test Co");
         response.Context.Provenance.Should().NotBeNull();
         response.Context.Provenance!.IngestionMethod.Should().Be("csv_paste");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         response.Context.Metrics.Should().Contain(metric =>
             metric.Name == "revenue" &&
             metric.Period == "2024A" &&
@@ -230,7 +248,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var controller = CreateController(dbContext);
         await controller.SaveFinancialMetrics(
             session.Id,
-            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
             CancellationToken.None
         );
 
@@ -245,6 +266,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.SessionId.Should().Be(session.Id);
         response.Context.Should().NotBeNull();
         response.Context!.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
     }
 
     [Fact]
@@ -276,10 +298,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
               "currency": "USD",
               "unit": "USD_thousand",
               "reportSummary": {
-                "reportName": "Test financial report",
-                "totalAmount": 1250.50,
-                "transactionCount": 7,
-                "submittedAt": "2026-07-12T12:00:00Z"
+                "reportName": "  balance-sheet-2025.pdf  ",
+                "totalAmount": 842350.75,
+                "transactionCount": 187,
+                "submittedAt": "2026-07-12T18:30:00Z"
               },
               "metrics": [
                 {
@@ -324,6 +346,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance.ContentHash.Should().Be(ComputeSha256(content));
         response.Context.Provenance.MetricCount.Should().Be(1);
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -375,6 +398,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Company.Should().Be("Form Metadata Co");
         response.Context.Currency.Should().Be("USD");
         response.Context.Unit.Should().Be("USD_thousand");
+        response.ReportSummary.Should().Be(new FinancialReportSummary(
+            "Test financial report",
+            1250.50m,
+            7,
+            new DateTimeOffset(2026, 7, 12, 12, 0, 0, TimeSpan.Zero)));
     }
 
     [Fact]
@@ -519,11 +547,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             metric.Source == "pdf_extraction" &&
             metric.SourcePage == 18
         );
+        response.ReportSummary.Should().Be(ApiReportSummary);
         ingestion.LastRequest.Should().NotBeNull();
         ingestion.LastRequest!.SessionId.Should().Be(session.Id);
         ingestion.LastRequest.UserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
-        ingestion.LastRequest.ReportSummary.Should().BeEquivalentTo(TestReportSummary.Input);
+        ingestion.LastRequest.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
     }
 
     [Fact]
@@ -807,8 +836,9 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance.FileSizeBytes.Should().Be(response.FileSizeBytes);
         response.Context.Provenance.ContentHash.Should().NotBeNullOrWhiteSpace();
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         csvParser.LastInput.Should().NotBeNull();
-        csvParser.LastInput!.ReportSummary.Should().BeEquivalentTo(TestReportSummary.Input);
+        csvParser.LastInput!.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -1514,7 +1544,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Currency: "USD",
             Unit: "USD_thousand",
             Csv: csv,
-            ReportSummary: TestReportSummary.Input
+            ReportSummary: ApiReportSummaryInput
         );
     }
 
@@ -1559,10 +1589,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Company = company,
             Currency = currency,
             Unit = unit,
-            ReportName = TestReportSummary.Input.ReportName,
-            TotalAmount = TestReportSummary.Input.TotalAmount,
-            TransactionCount = TestReportSummary.Input.TransactionCount,
-            SubmittedAt = TestReportSummary.Input.SubmittedAt
+            ReportName = ApiReportSummaryInput.ReportName,
+            TotalAmount = ApiReportSummaryInput.TotalAmount,
+            TransactionCount = ApiReportSummaryInput.TransactionCount,
+            SubmittedAt = ApiReportSummaryInput.SubmittedAt
         };
     }
 
@@ -1603,7 +1633,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                     Confidence: 0.9m
                 )
             ],
-            ReportSummary: TestReportSummary.Input
+            ReportSummary: ApiReportSummaryInput
         );
         var context = new StructuredFinancialMetricsContext(
             DocumentId: input.DocumentId,
@@ -1641,7 +1671,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             IsValid: true,
             context,
             Errors: [],
-            Warnings: []
+            Warnings: [],
+            ReportSummary: ApiReportSummary
         );
     }
 

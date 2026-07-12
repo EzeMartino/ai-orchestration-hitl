@@ -347,7 +347,8 @@ public class AnalysisSessionsController(
             result.IsValid,
             result.Context,
             result.Errors,
-            result.Warnings
+            result.Warnings,
+            result.ReportSummary
         ));
     }
 
@@ -426,10 +427,15 @@ public class AnalysisSessionsController(
             id,
             cancellationToken
         );
+        var reportSummary = await _financialMetricsSessionService.GetReportSummaryAsync(
+            id,
+            cancellationToken
+        );
 
         return Ok(new GetFinancialMetricsResponse(
             SessionId: id,
-            Context: context
+            Context: context,
+            ReportSummary: reportSummary
         ));
     }
 
@@ -686,7 +692,8 @@ public class AnalysisSessionsController(
                     invalidResult.IsValid,
                     invalidResult.Context,
                     invalidResult.Errors,
-                    invalidResult.Warnings
+                    invalidResult.Warnings,
+                    invalidResult.ReportSummary
                 )),
                 invalidResult
             );
@@ -712,7 +719,8 @@ public class AnalysisSessionsController(
                 saveResult.IsValid,
                 saveResult.Context,
                 saveResult.Errors,
-                saveResult.Warnings
+                saveResult.Warnings,
+                saveResult.ReportSummary
             )),
             saveResult
         );
@@ -823,7 +831,8 @@ public class AnalysisSessionsController(
             FileType: fileType,
             FileSizeBytes: file.Length,
             Outcome: "accepted",
-            ReviewDraft: null
+            ReviewDraft: null,
+            ReportSummary: result.ReportSummary
         );
     }
 
@@ -844,7 +853,8 @@ public class AnalysisSessionsController(
                 FileType: "pdf",
                 FileSizeBytes: file.Length,
                 Outcome: "accepted",
-                ReviewDraft: null
+                ReviewDraft: null,
+                ReportSummary: result.SaveResult?.ReportSummary
             ),
             FinancialMetricsFileOutcome.ReviewRequired => new SaveFinancialMetricsFileResponse(
                 SessionId: sessionId,
@@ -856,7 +866,8 @@ public class AnalysisSessionsController(
                 FileType: "pdf",
                 FileSizeBytes: file.Length,
                 Outcome: "review_required",
-                ReviewDraft: result.ReviewDraft
+                ReviewDraft: result.ReviewDraft,
+                ReportSummary: null
             ),
             _ => new SaveFinancialMetricsFileResponse(
                 SessionId: sessionId,
@@ -868,7 +879,8 @@ public class AnalysisSessionsController(
                 FileType: "pdf",
                 FileSizeBytes: file.Length,
                 Outcome: "failed",
-                ReviewDraft: null
+                ReviewDraft: null,
+                ReportSummary: null
             )
         };
     }
@@ -980,7 +992,8 @@ public sealed record SaveFinancialMetricsFileResponse(
     string FileType,
     long FileSizeBytes,
     string Outcome = "accepted",
-    FinancialMetricsExtractionDraftDto? ReviewDraft = null
+    FinancialMetricsExtractionDraftDto? ReviewDraft = null,
+    FinancialReportSummary? ReportSummary = null
 );
 
 public sealed record FileUploadErrorResponse(
@@ -992,12 +1005,14 @@ public sealed record SaveFinancialMetricsResponse(
     bool IsValid,
     StructuredFinancialMetricsContext? Context,
     IReadOnlyList<FinancialMetricsValidationIssue> Errors,
-    IReadOnlyList<FinancialMetricsValidationIssue> Warnings
+    IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
+    FinancialReportSummary? ReportSummary = null
 );
 
 public sealed record GetFinancialMetricsResponse(
     Guid SessionId,
-    StructuredFinancialMetricsContext? Context
+    StructuredFinancialMetricsContext? Context,
+    FinancialReportSummary? ReportSummary = null
 );
 
 public sealed record FinancialMetricsExtractionDraftErrorResponse(
