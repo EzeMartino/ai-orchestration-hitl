@@ -1,0 +1,155 @@
+namespace Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+
+public sealed class FinancialMetricsExtractionCompletenessEvaluator
+    : IFinancialMetricsExtractionCompletenessEvaluator
+{
+    private const string CompanyMissing = "company_missing";
+    private const string CurrencyMissing = "currency_missing";
+    private const string UnitMissing = "unit_missing";
+    private const string RequiredRatioInputsMissing = "required_ratio_inputs_missing";
+    private const string MetricCoverageBelowThreshold = "metric_coverage_below_threshold";
+
+    private static readonly string[] CanonicalBaseMetrics =
+    [
+        "revenue",
+        "gross_profit",
+        "ebitda",
+        "net_income",
+        "cash",
+        "total_debt",
+        "equity",
+        "free_cash_flow"
+    ];
+
+    private static readonly RatioRequirement[] RequiredRatios =
+    [
+        new("gross_margin", ["gross_profit"], "revenue"),
+        new("ebitda_margin", ["ebitda"], "revenue"),
+        new("net_margin", ["net_income"], "revenue"),
+        new("current_ratio", ["current_assets"], "current_liabilities"),
+        new(
+            "quick_ratio",
+            ["cash", "short_term_investments", "receivables"],
+            "current_liabilities"),
+        new("debt_to_equity", ["total_debt"], "equity"),
+        new("net_debt_to_ebitda", ["net_debt"], "ebitda"),
+        new("interest_coverage", ["ebit"], "interest_expense"),
+        new("fcf_margin", ["free_cash_flow"], "revenue"),
+        new("capex_to_revenue", ["capex"], "revenue")
+    ];
+
+    public FinancialMetricsExtractionDecision Evaluate(
+        StructuredFinancialMetricsPdfExtractionResult result,
+        FinancialMetricsExtractionOptions options)
+    {
+        var reasons = new List<string>();
+        var input = result.Input;
+
+        if (string.IsNullOrWhiteSpace(input?.Company))
+        {
+            reasons.Add(CompanyMissing);
+        }
+
+        if (string.IsNullOrWhiteSpace(input?.Currency))
+        {
+            reasons.Add(CurrencyMissing);
+        }
+
+        if (string.IsNullOrWhiteSpace(input?.Unit))
+        {
+            reasons.Add(UnitMissing);
+        }
+
+        var metricsByPeriod = BuildMetricLookup(input?.Metrics ?? []);
+
+        if (RequiredRatios.Any(requirement =>
+                !metricsByPeriod.Values.Any(requirement.CanBeSupportedBy)))
+        {
+            reasons.Add(RequiredRatioInputsMissing);
+        }
+
+        var threshold = Math.Clamp(options.DeterministicCoverageThreshold, 0m, 1m);
+        var periodsMeetingCoverage = metricsByPeriod.Values.Count(
+            metrics => CalculateCoverage(metrics) >= threshold);
+
+        if (!result.IsValid || periodsMeetingCoverage < 2)
+        {
+            reasons.Add(MetricCoverageBelowThreshold);
+        }
+
+        return new FinancialMetricsExtractionDecision(
+            RequiresSemanticFallback: reasons.Count > 0,
+            ReasonCodes: reasons);
+    }
+
+    private static Dictionary<string, Dictionary<string, decimal?>> BuildMetricLookup(
+        IReadOnlyList<StructuredFinancialMetricInput> metrics)
+    {
+        var metricsByPeriod = new Dictionary<string, Dictionary<string, decimal?>>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var metric in metrics)
+        {
+            if (string.IsNullOrWhiteSpace(metric.Period))
+            {
+                continue;
+            }
+
+            var period = metric.Period.Trim();
+
+            if (!metricsByPeriod.TryGetValue(period, out var periodMetrics))
+            {
+                periodMetrics = new Dictionary<string, decimal?>(
+                    StringComparer.OrdinalIgnoreCase);
+                metricsByPeriod.Add(period, periodMetrics);
+            }
+
+            if (!string.IsNullOrWhiteSpace(metric.Name))
+            {
+                periodMetrics[metric.Name.Trim()] = metric.Value;
+            }
+        }
+
+        return metricsByPeriod;
+    }
+
+    private static decimal CalculateCoverage(
+        IReadOnlyDictionary<string, decimal?> metrics)
+    {
+        var presentMetrics = CanonicalBaseMetrics.Count(
+            name => HasValue(metrics, name));
+
+        return presentMetrics / (decimal)CanonicalBaseMetrics.Length;
+    }
+
+    private static bool HasValue(
+        IReadOnlyDictionary<string, decimal?> metrics,
+        string name)
+    {
+        return metrics.TryGetValue(name, out var value) && value.HasValue;
+    }
+
+    private sealed record RatioRequirement(
+        string ReportedMetricName,
+        IReadOnlyList<string> NumeratorMetricNames,
+        string DenominatorMetricName)
+    {
+        public bool CanBeSupportedBy(
+            IReadOnlyDictionary<string, decimal?> metrics)
+        {
+            if (HasValue(metrics, ReportedMetricName))
+            {
+                return true;
+            }
+
+            if (!metrics.TryGetValue(DenominatorMetricName, out var denominator)
+                || !denominator.HasValue
+                || denominator.Value == 0m)
+            {
+                return false;
+            }
+
+            return NumeratorMetricNames.Any(name => HasValue(metrics, name));
+        }
+    }
+}

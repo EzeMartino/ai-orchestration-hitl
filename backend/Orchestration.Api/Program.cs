@@ -5,6 +5,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Application.FinancialAnalysis.Thresholds;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Regulations;
@@ -19,6 +20,7 @@ using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.AiReview;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
@@ -70,6 +72,9 @@ builder.Services.Configure<StructuredFinancialMetricsFileUploadOptions>(
 builder.Services.Configure<StructuredFinancialMetricsPdfExtractionOptions>(
     builder.Configuration.GetSection(StructuredFinancialMetricsPdfExtractionOptions.SectionName)
 );
+builder.Services.Configure<FinancialMetricsExtractionOptions>(
+    builder.Configuration.GetSection(FinancialMetricsExtractionOptions.SectionName)
+);
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
 builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
@@ -84,6 +89,16 @@ builder.Services.AddScoped<IStructuredFinancialMetricsTextParser, StructuredFina
 builder.Services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
 builder.Services.AddScoped<IOcrTextExtractor, LocalOcrTextExtractor>();
 builder.Services.AddScoped<IStructuredFinancialMetricsPdfExtractor, StructuredFinancialMetricsPdfExtractor>();
+builder.Services.AddHostedService<LocalPdfTemporaryDirectorySweeper>();
+builder.Services.AddScoped<
+    IFinancialMetricsExtractionCompletenessEvaluator,
+    FinancialMetricsExtractionCompletenessEvaluator>();
+builder.Services.AddScoped<IFinancialMetricCandidateReconciler, FinancialMetricCandidateReconciler>();
+builder.Services.AddScoped<IFinancialMetricsExtractionDraftService, FinancialMetricsExtractionDraftService>();
+builder.Services.AddScoped<
+    IStructuredFinancialMetricsPdfIngestionService,
+    StructuredFinancialMetricsPdfIngestionService>();
+builder.Services.AddFinancialDocumentExtraction(builder.Configuration);
 builder.Services.AddScoped<IStructuredFinancialMetricsSessionService, StructuredFinancialMetricsSessionService>();
 builder.Services.AddScoped<SessionStructuredFinancialMetricsProvider>();
 builder.Services.AddScoped<FixtureStructuredFinancialMetricsProvider>();
@@ -112,10 +127,54 @@ if (string.IsNullOrWhiteSpace(pythonHome) || !Directory.Exists(pythonHome))
         $"Python:Home configuration is missing or points to a directory that does not exist. Resolved value: '{pythonHome}'.");
 }
 
+var pythonVirtualEnvironment = Path.Combine(pythonHome, ".venv");
+var pythonLockFile = Path.Combine(pythonHome, "requirements.lock");
+
+if (!File.Exists(pythonLockFile))
+{
+    throw new InvalidOperationException(
+        $"Python dependency lock file was not found at '{pythonLockFile}'. "
+        + "Generate requirements.lock from requirements.txt before starting the API.");
+}
+
+var financialMetricsExtractionWorkerOptions = builder.Configuration
+    .GetSection(FinancialMetricsExtractionOptions.SectionName)
+    .Get<FinancialMetricsExtractionOptions>() ?? new FinancialMetricsExtractionOptions();
+builder.Services.AddSingleton(new FinancialDocumentConversionGate(
+    financialMetricsExtractionWorkerOptions.MaxConcurrentConversions));
+builder.Services.AddSingleton<IFinancialDocumentProcessingGate>(provider =>
+    provider.GetRequiredService<FinancialDocumentConversionGate>());
+builder.Services.AddScoped<ISearchablePdfOcrService>(_ =>
+    new LocalSearchablePdfOcrService(
+        pythonHome,
+        financialMetricsExtractionWorkerOptions.MaxWorkerMemoryBytes));
+builder.Services.AddScoped<IFinancialDocumentMarkdownConverter>(provider =>
+{
+    var fileOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            StructuredFinancialMetricsFileUploadOptions>>()
+        .Value;
+    var pdfOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            StructuredFinancialMetricsPdfExtractionOptions>>()
+        .Value;
+    var extractionOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            FinancialMetricsExtractionOptions>>()
+        .Value;
+
+    return new IsolatedFinancialDocumentMarkdownConverter(
+        pythonHome,
+        Math.Max(fileOptions.MaxFileSizeBytes, pdfOptions.MaxSearchablePdfBytes),
+        extractionOptions.MaxWorkerMemoryBytes);
+});
+
 builder.Services
     .WithPython()
     .WithHome(pythonHome)
-    .FromRedistributable();
+    .FromRedistributable()
+    .WithVirtualEnvironment(pythonVirtualEnvironment)
+    .WithPipInstaller(pythonLockFile);
 
 // Legal agent and regulatory knowledge source configuration
 builder.Services.Configure<CnvRegulationMcpOptions>(

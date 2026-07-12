@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing `StructuredFinancialMetricsPdfExtractor` as the first strategy. Add a higher-level PDF ingestion orchestrator that evaluates extraction completeness, invokes local searchable-PDF OCR and MarkItDown when needed, asks a tool-free Semantic Kernel agent for strict field candidates, reconciles candidates deterministically, and either persists approved metrics through `StructuredFinancialMetricsSessionService` or creates a separate review draft. JSON/CSV paths remain unchanged.
 
-**Tech Stack:** .NET 10, ASP.NET Core controllers, EF Core/PostgreSQL JSONB, Semantic Kernel 1.75, OpenAI chat completion, CSnakes 1.2.1, Python, `markitdown[pdf]==0.1.6`, `pypdf==6.6.0`, Poppler, Tesseract, React 19, TypeScript 6, Vite 8, xUnit/FluentAssertions, Node test runner.
+**Tech Stack:** .NET 10, ASP.NET Core controllers, EF Core/PostgreSQL JSONB, Semantic Kernel 1.75, OpenAI chat completion, CSnakes 1.2.1, Python, `markitdown[pdf]==0.1.6`, `pypdf==6.13.1`, Poppler, Tesseract, React 19, TypeScript 6, Vite 8, xUnit/FluentAssertions, Node test runner.
 
 ---
 
@@ -169,7 +169,7 @@ Create `python-agents/data_agent/requirements.txt`:
 
 ```text
 markitdown[pdf]==0.1.6
-pypdf==6.6.0
+pypdf==6.13.1
 ```
 
 - [ ] **Step 4: Implement the MarkItDown wrapper**
@@ -1470,7 +1470,7 @@ git commit -m "Wire semantic PDF extraction workflow"
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/App.css`
 
-- [ ] **Step 1: Write RED review helper tests**
+- [x] **Step 1: Write RED review helper tests**
 
 Create Node tests:
 
@@ -1494,14 +1494,14 @@ test("marks edited candidates as human_corrected", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```powershell
 cd frontend
 node --test --experimental-strip-types tests/financialMetricsReview.test.ts
 ```
 
-- [ ] **Step 3: Add frontend contracts**
+- [x] **Step 3: Add frontend contracts**
 
 Add types matching API JSON:
 
@@ -1523,7 +1523,7 @@ export type FinancialMetricCandidateReviewState =
 
 Extend upload response with `outcome` and `reviewDraft`.
 
-- [ ] **Step 4: Add API methods**
+- [x] **Step 4: Add API methods**
 
 Implement:
 
@@ -1536,7 +1536,7 @@ discardFinancialMetricsReview(sessionId, draftId)
 
 Use `authenticatedFetch`. Surface backend validation messages.
 
-- [ ] **Step 5: Add hook state**
+- [x] **Step 5: Add hook state**
 
 `useAnalysisSession` owns:
 
@@ -1565,7 +1565,7 @@ case "pdf_file_semantic":
   return "PDF con extracción semántica";
 ```
 
-- [ ] **Step 6: Build review editor**
+- [x] **Step 6: Build review editor**
 
 Create `FinancialMetricsReviewPanel` with:
 
@@ -1582,12 +1582,12 @@ Create `FinancialMetricsReviewPanel` with:
 Use semantic table markup, labels, accessible buttons, and existing visual
 language. Do not nest cards.
 
-- [ ] **Step 7: Integrate panel**
+- [x] **Step 7: Integrate panel**
 
 Render review panel immediately below the structured metrics upload panel when
 a draft exists. Update upload result copy to distinguish accepted/review/failed.
 
-- [ ] **Step 8: Run helper tests and frontend build**
+- [x] **Step 8: Run helper tests and frontend build**
 
 ```powershell
 cd frontend
@@ -1599,7 +1599,7 @@ npm run build
 
 Expected: tests and build PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add -- `
@@ -1621,7 +1621,7 @@ git commit -m "Add financial metrics review UI"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-06-09-markitdown-pdf-financial-extraction.md` only to mark completed checkboxes during execution
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Document:
 
@@ -1636,7 +1636,7 @@ Document:
 - configuration keys;
 - troubleshooting for missing Python dependencies, OCR, and timeouts.
 
-- [ ] **Step 2: Run Python tests**
+- [x] **Step 2: Run Python tests**
 
 ```powershell
 & python-agents/data_agent/.venv/Scripts/python.exe `
@@ -1645,7 +1645,7 @@ Document:
 
 Expected: all Python tests PASS.
 
-- [ ] **Step 3: Run targeted backend tests**
+- [x] **Step 3: Run targeted backend tests**
 
 ```powershell
 $env:ORCHESTRATION_TEST_PYTHON_HOME = `
@@ -1657,7 +1657,7 @@ dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj `
 
 Expected: PASS.
 
-- [ ] **Step 4: Run full backend suite**
+- [x] **Step 4: Run full backend suite**
 
 ```powershell
 dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj `
@@ -1667,7 +1667,7 @@ dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj `
 If DLLs are locked, build to temporary output and run `dotnet vstest`. Report
 only genuine pre-existing failures separately.
 
-- [ ] **Step 5: Run frontend tests and build**
+- [x] **Step 5: Run frontend tests and build**
 
 ```powershell
 cd frontend
@@ -1677,7 +1677,7 @@ npm run build
 
 Expected: PASS.
 
-- [ ] **Step 6: Start Aspire**
+- [x] **Step 6: Start Aspire**
 
 Start AppHost with hidden window or existing development workflow. Enable:
 
@@ -1688,7 +1688,7 @@ FinancialMetricsExtraction:Mode=ReviewOnly
 
 Reuse existing `Llm:*` user secrets. Do not print the API key.
 
-- [ ] **Step 7: Verify migration and health**
+- [x] **Step 7: Verify migration and health**
 
 Confirm:
 
@@ -1735,14 +1735,14 @@ viewport:
 - start readiness shows pending-review block;
 - accepted upload refreshes active metrics.
 
-- [ ] **Step 11: Commit docs**
+- [x] **Step 11: Commit docs**
 
 ```powershell
 git add -- README.md
 git commit -m "Document semantic PDF extraction workflow"
 ```
 
-- [ ] **Step 12: Final repository check**
+- [x] **Step 12: Final repository check**
 
 ```powershell
 git status --short

@@ -1,0 +1,2 @@
+markitdown[pdf]==0.1.6
+pypdf==6.13.1

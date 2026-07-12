@@ -13,6 +13,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
@@ -46,7 +47,8 @@ public class AnalysisSessionControllerIsolationTests
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             new StructuredFinancialMetricsCsvParser(),
-            new FakeStructuredFinancialMetricsPdfExtractor(),
+            new FakeStructuredFinancialMetricsPdfIngestionService(),
+            new FakeFinancialMetricsExtractionDraftService(),
             Options.Create(new StructuredFinancialMetricsFileUploadOptions())
         );
 
@@ -64,30 +66,61 @@ public class AnalysisSessionControllerIsolationTests
         return controller;
     }
 
-    private sealed class FakeStructuredFinancialMetricsPdfExtractor
-        : IStructuredFinancialMetricsPdfExtractor
+    private sealed class FakeStructuredFinancialMetricsPdfIngestionService
+        : IStructuredFinancialMetricsPdfIngestionService
     {
-        public Task<StructuredFinancialMetricsPdfExtractionResult> ExtractAsync(
-            Stream pdf,
-            StructuredFinancialMetricsPdfExtractionRequest request,
+        public Task<StructuredFinancialMetricsPdfIngestionResult> IngestAsync(
+            StructuredFinancialMetricsPdfIngestionRequest request,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(new StructuredFinancialMetricsPdfExtractionResult(
-                IsValid: false,
-                Input: null,
-                Errors:
-                [
-                    new FinancialMetricsValidationIssue(
-                        Code: "PDF_NOT_CONFIGURED",
-                        Message: "PDF extraction is not configured for this test.",
-                        MetricName: null,
-                        Period: null,
-                        Severity: "error"
-                    )
-                ],
-                Warnings: [],
-                UsedOcr: false
+            return Task.FromResult(new StructuredFinancialMetricsPdfIngestionResult(
+                FinancialMetricsFileOutcome.Failed,
+                SaveResult: null,
+                ReviewDraft: null,
+                Errors: [],
+                Warnings: []
             ));
+        }
+    }
+
+    private sealed class FakeFinancialMetricsExtractionDraftService
+        : IFinancialMetricsExtractionDraftService
+    {
+        public Task<FinancialMetricsExtractionDraftServiceResult> CreateOrReplaceAsync(
+            Guid sessionId,
+            Guid userId,
+            CreateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken) => NotFound();
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> GetPendingAsync(
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken) => NotFound();
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> UpdateAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            UpdateFinancialMetricsExtractionDraftRequest request,
+            CancellationToken cancellationToken) => NotFound();
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> ConfirmAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken) => NotFound();
+
+        public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(
+            Guid draftId,
+            Guid sessionId,
+            Guid userId,
+            CancellationToken cancellationToken) => NotFound();
+
+        private static Task<FinancialMetricsExtractionDraftServiceResult> NotFound()
+        {
+            return Task.FromResult(
+                FinancialMetricsExtractionDraftServiceResult.NotFound("Draft not found.")
+            );
         }
     }
 

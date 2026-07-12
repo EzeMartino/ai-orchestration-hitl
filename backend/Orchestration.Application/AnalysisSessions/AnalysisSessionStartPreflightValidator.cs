@@ -1,9 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Domain.FinancialMetricsExtraction;
 
 namespace Orchestration.Application.AnalysisSessions;
 
@@ -16,6 +19,12 @@ public sealed class AnalysisSessionStartPreflightValidator
     public const string StructuredFinancialMetricsRequiredMessage =
         "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a esta sesión.";
 
+    public const string FinancialMetricsReviewRequiredCode =
+        "FINANCIAL_METRICS_REVIEW_REQUIRED";
+
+    public const string FinancialMetricsReviewRequiredMessage =
+        "Financial metrics extracted from PDF require review before starting this session.";
+
     private const string ContextPropertyName = "structuredFinancialMetrics";
 
     private static readonly JsonSerializerOptions JsonOptions =
@@ -25,6 +34,7 @@ public sealed class AnalysisSessionStartPreflightValidator
         };
 
     private readonly DataAgentOptions _options;
+    private readonly IOrchestrationDbContext? _dbContext;
 
     public AnalysisSessionStartPreflightValidator(
         IOptions<DataAgentOptions> options)
@@ -32,22 +42,53 @@ public sealed class AnalysisSessionStartPreflightValidator
         _options = options.Value;
     }
 
-    public Task<AnalysisSessionStartPreflightResult> ValidateAsync(
+    public AnalysisSessionStartPreflightValidator(
+        IOptions<DataAgentOptions> options,
+        IOrchestrationDbContext dbContext)
+        : this(options)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<AnalysisSessionStartPreflightResult> ValidateAsync(
         AnalysisSession session,
         CancellationToken cancellationToken)
     {
+        var hasPendingFinancialMetricsReview = _dbContext is not null &&
+            await _dbContext.FinancialMetricsExtractionDrafts.AnyAsync(
+                draft => draft.SessionId == session.Id
+                    && draft.Status ==
+                        FinancialMetricsExtractionDraftStatus.PendingReview,
+                cancellationToken);
+
+        if (hasPendingFinancialMetricsReview)
+        {
+            return new AnalysisSessionStartPreflightResult(
+                CanStart: false,
+                Errors:
+                [
+                    new AnalysisSessionStartPreflightIssue(
+                        Code: FinancialMetricsReviewRequiredCode,
+                        Message: FinancialMetricsReviewRequiredMessage,
+                        Severity: "Error"
+                    )
+                ],
+                Warnings: []
+            );
+        }
+
         if (!_options.FinancialAnalysisToolsEnabled ||
             !_options.RequireSessionFinancialMetrics)
         {
-            return Task.FromResult(AnalysisSessionStartPreflightResult.Allowed);
+            return AnalysisSessionStartPreflightResult.Allowed;
         }
 
         if (HasStructuredFinancialMetrics(session.ContextJson))
         {
-            return Task.FromResult(AnalysisSessionStartPreflightResult.Allowed);
+            return AnalysisSessionStartPreflightResult.Allowed;
         }
 
-        return Task.FromResult(new AnalysisSessionStartPreflightResult(
+        return new AnalysisSessionStartPreflightResult(
             CanStart: false,
             Errors:
             [
@@ -58,7 +99,7 @@ public sealed class AnalysisSessionStartPreflightValidator
                 )
             ],
             Warnings: []
-        ));
+        );
     }
 
     private static bool HasStructuredFinancialMetrics(

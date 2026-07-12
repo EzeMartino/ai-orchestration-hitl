@@ -23,7 +23,9 @@
 
   <ItemGroup>
 	  <AdditionalFiles Include="..\..\python-agents\data_agent\anomaly_detection.py" />
+	  <AdditionalFiles Include="..\..\python-agents\data_agent\document_markdown.py" />
 	  <AdditionalFiles Include="..\..\python-agents\data_agent\financial_analysis.py" />
+	  <AdditionalFiles Include="..\..\python-agents\data_agent\searchable_pdf.py" />
   </ItemGroup>    
 
   <PropertyGroup>

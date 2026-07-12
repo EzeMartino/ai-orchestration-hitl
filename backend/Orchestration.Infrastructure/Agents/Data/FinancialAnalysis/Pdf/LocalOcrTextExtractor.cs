@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
@@ -9,6 +7,19 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
     private const string DependencyMessage = "Las dependencias de OCR para PDF no están configuradas.";
     private const string FailedMessage = "Falló el procesamiento OCR del PDF.";
     private const string TimeoutMessage = "Se agotó el tiempo de procesamiento OCR del PDF.";
+
+    private readonly ILocalPdfToolRunner _runner;
+
+    public LocalOcrTextExtractor()
+        : this(new LocalPdfToolRunner())
+    {
+    }
+
+    internal LocalOcrTextExtractor(ILocalPdfToolRunner runner)
+    {
+        ArgumentNullException.ThrowIfNull(runner);
+        _runner = runner;
+    }
 
     public async Task<IReadOnlyList<StructuredFinancialMetricsExtractedPage>> ExtractTextAsync(
         Stream pdf,
@@ -102,102 +113,30 @@ public sealed class LocalOcrTextExtractor : IOcrTextExtractor
         }
     }
 
-    private static async Task RunProcessAsync(
+    private async Task RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            throw new PdfOcrDependencyException(DependencyMessage);
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = new Process
-        {
-            StartInfo = startInfo,
-            EnableRaisingEvents = true
-        };
-
         try
         {
-            if (!process.Start())
-            {
-                throw new PdfOcrDependencyException(DependencyMessage);
-            }
+            await _runner.RunAsync(
+                fileName,
+                arguments,
+                timeout,
+                cancellationToken);
         }
-        catch (Win32Exception)
+        catch (LocalPdfToolException exception)
         {
-            throw new PdfOcrDependencyException(DependencyMessage);
-        }
-        catch (FileNotFoundException)
-        {
-            throw new PdfOcrDependencyException(DependencyMessage);
-        }
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        using var timeoutCts = new CancellationTokenSource(timeout);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            timeoutCts.Token);
-
-        try
-        {
-            await process.WaitForExitAsync(linkedCts.Token);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            await KillProcessTreeAndWaitForExitAsync(process);
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            await KillProcessTreeAndWaitForExitAsync(process);
-            throw new PdfOcrDependencyException(TimeoutMessage);
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0)
-        {
-            _ = stdout;
-
             throw new PdfOcrDependencyException(
-                string.IsNullOrWhiteSpace(stderr)
-                    ? DependencyMessage
-                    : FailedMessage);
-        }
-    }
-
-    private static async Task KillProcessTreeAndWaitForExitAsync(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync(CancellationToken.None);
-            }
-        }
-        catch (InvalidOperationException)
-        {
+                exception.Failure switch
+                {
+                    LocalPdfToolFailure.DependencyMissing => DependencyMessage,
+                    LocalPdfToolFailure.ToolFailed => FailedMessage,
+                    LocalPdfToolFailure.Timeout => TimeoutMessage,
+                    _ => FailedMessage
+                });
         }
     }
 

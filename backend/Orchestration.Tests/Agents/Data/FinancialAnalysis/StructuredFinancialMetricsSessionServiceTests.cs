@@ -74,6 +74,42 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
     }
 
     [Fact]
+    public async Task StageAsync_Should_mutate_tracked_session_without_saving_or_publishing()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        session.SetContext("{\"planner\":{\"summary\":\"keep\"}}");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        dbContext.ResetSaveChangesCount();
+        var publisher = new FakeActivityEventPublisher();
+        var service = CreateService(dbContext, publisher);
+
+        var result = await service.StageAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: "pdf_file_reviewed",
+                    OriginalFileName: "report.pdf",
+                    FileSizeBytes: 2048,
+                    ContentHash: "abc123")),
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.IsValid.Should().BeTrue();
+        dbContext.SaveChangesCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
+        using var document = JsonDocument.Parse(session.ContextJson);
+        document.RootElement.GetProperty("planner").GetProperty("summary")
+            .GetString().Should().Be("keep");
+        document.RootElement.GetProperty("structuredFinancialMetrics")
+            .GetProperty("provenance")
+            .GetProperty("ingestionMethod")
+            .GetString().Should().Be("pdf_file_reviewed");
+    }
+
+    [Fact]
     public async Task SaveAsync_Should_store_json_paste_provenance()
     {
         await using var dbContext = CreateDbContext();
@@ -168,6 +204,36 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         result.Context.Provenance.OriginalFileName.Should().Be("report.pdf");
         result.Context.Provenance.FileSizeBytes.Should().Be(2048);
         result.Context.Provenance.ContentHash.Should().Be("abc123");
+    }
+
+    [Theory]
+    [InlineData("pdf_file_reviewed")]
+    [InlineData("pdf_file_semantic")]
+    public async Task SaveAsync_Should_preserve_supported_pdf_ingestion_methods(
+        string ingestionMethod)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create();
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.SaveAsync(
+            new SaveStructuredFinancialMetricsRequest(
+                SessionId: session.Id,
+                Input: CreateInput(),
+                Provenance: new StructuredFinancialMetricsProvenanceInput(
+                    IngestionMethod: ingestionMethod,
+                    OriginalFileName: "report.pdf",
+                    FileSizeBytes: 2048,
+                    ContentHash: "abc123"
+                )
+            ),
+            CancellationToken.None
+        );
+
+        result.Should().NotBeNull();
+        result!.Context!.Provenance!.IngestionMethod.Should().Be(ingestionMethod);
     }
 
     [Fact]
@@ -325,13 +391,13 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         context.Provenance.Should().BeNull();
     }
 
-    internal static OrchestrationDbContext CreateDbContext()
+    internal static CountingOrchestrationDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<OrchestrationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
-        return new OrchestrationDbContext(options);
+        return new CountingOrchestrationDbContext(options);
     }
 
     internal static StructuredFinancialMetricsSessionService CreateService(
@@ -369,5 +435,24 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
                 )
             ]
         );
+    }
+
+    internal sealed class CountingOrchestrationDbContext(
+        DbContextOptions<OrchestrationDbContext> options)
+        : OrchestrationDbContext(options)
+    {
+        public int SaveChangesCount { get; private set; }
+
+        public override Task<int> SaveChangesAsync(
+            CancellationToken cancellationToken = default)
+        {
+            SaveChangesCount++;
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
+        public void ResetSaveChangesCount()
+        {
+            SaveChangesCount = 0;
+        }
     }
 }

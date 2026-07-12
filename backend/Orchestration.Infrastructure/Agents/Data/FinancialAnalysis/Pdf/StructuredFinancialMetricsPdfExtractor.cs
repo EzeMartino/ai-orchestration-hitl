@@ -51,10 +51,16 @@ public sealed class StructuredFinancialMetricsPdfExtractor
             seekablePdf,
             _options.MaxPages,
             cancellationToken);
+        var nativeTextCharacterCount = GetTextLength(nativePages);
+        var nativeTextMinimumCharacters = Math.Max(1, _options.NativeTextMinimumCharacters);
+        var nativeTextAvailable = nativeTextCharacterCount >= nativeTextMinimumCharacters;
 
-        if (GetTextLength(nativePages) >= _options.NativeTextMinimumCharacters)
+        if (nativeTextAvailable)
         {
-            var nativeResult = Parse(request, nativePages, NativePdfSource);
+            var nativeResult = Parse(request, nativePages, NativePdfSource) with
+            {
+                NativeTextAvailable = true
+            };
 
             if (nativeResult.IsValid)
             {
@@ -71,7 +77,10 @@ public sealed class StructuredFinancialMetricsPdfExtractor
                 _options,
                 cancellationToken);
 
-            return Parse(request, ocrPages, OcrPdfSource);
+            return Parse(request, ocrPages, OcrPdfSource) with
+            {
+                NativeTextAvailable = nativeTextAvailable
+            };
         }
         catch (PdfOcrDependencyException exception)
         {
@@ -90,7 +99,8 @@ public sealed class StructuredFinancialMetricsPdfExtractor
                         Severity: "Error")
                 ],
                 Warnings: [],
-                UsedOcr: true);
+                UsedOcr: true,
+                NativeTextAvailable: nativeTextAvailable);
         }
     }
 

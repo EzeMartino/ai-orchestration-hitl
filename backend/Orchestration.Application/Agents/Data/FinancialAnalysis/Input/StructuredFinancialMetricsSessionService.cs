@@ -53,6 +53,33 @@ public sealed class StructuredFinancialMetricsSessionService
         SaveStructuredFinancialMetricsRequest request,
         CancellationToken cancellationToken)
     {
+        var staged = await StageAsync(request, cancellationToken);
+
+        if (staged is null || !staged.IsValid || staged.Context is null)
+        {
+            return staged;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _activityPublisher.PublishAsync(
+            new ActivityEvent(
+                request.SessionId,
+                "structured_financial_metrics_attached",
+                "DataAgent",
+                $"Métricas financieras estructuradas adjuntas: {staged.Context.Metrics.Count} métricas desde {staged.Context.Provenance!.IngestionMethod}.",
+                DateTimeOffset.UtcNow
+            ),
+            cancellationToken
+        );
+
+        return staged;
+    }
+
+    public async Task<FinancialMetricsSessionSaveResult?> StageAsync(
+        SaveStructuredFinancialMetricsRequest request,
+        CancellationToken cancellationToken)
+    {
         var session = await _dbContext.AnalysisSessions
             .FirstOrDefaultAsync(x => x.Id == request.SessionId, cancellationToken);
 
@@ -92,19 +119,6 @@ public sealed class StructuredFinancialMetricsSessionService
         );
 
         session.SetContext(MergeContextJson(session.ContextJson, context));
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        await _activityPublisher.PublishAsync(
-            new ActivityEvent(
-                session.Id,
-                "structured_financial_metrics_attached",
-                "DataAgent",
-                $"Métricas financieras estructuradas adjuntas: {metrics.Count} métricas desde {provenance.IngestionMethod}.",
-                DateTimeOffset.UtcNow
-            ),
-            cancellationToken
-        );
 
         return new FinancialMetricsSessionSaveResult(
             SessionId: request.SessionId,
@@ -203,7 +217,9 @@ public sealed class StructuredFinancialMetricsSessionService
             "csv_paste" or
             "json_file" or
             "csv_file" or
-            "pdf_file"
+            "pdf_file" or
+            "pdf_file_reviewed" or
+            "pdf_file_semantic"
             ? ingestionMethod
             : "unknown";
     }

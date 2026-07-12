@@ -80,6 +80,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         result.IsValid.Should().BeTrue();
         result.UsedOcr.Should().BeFalse();
+        result.NativeTextAvailable.Should().BeTrue();
         ocrExtractor.CallCount.Should().Be(0);
         result.Input!.Metrics.Should().Contain(metric =>
             metric.Name == "revenue" &&
@@ -116,6 +117,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         result.IsValid.Should().BeTrue();
         result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeFalse();
         ocrExtractor.CallCount.Should().Be(1);
         result.Warnings.Should().ContainSingle(issue =>
             issue.Code == "PDF_OCR_USED" &&
@@ -128,6 +130,44 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
             metric.Name == "interest_expense" &&
             metric.Source == "pdf_ocr" &&
             metric.Confidence == 0.64m);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-10)]
+    public async Task ExtractAsync_Should_not_report_native_text_for_nonpositive_threshold(
+        int nativeTextMinimumCharacters)
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: "   ")
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 4,
+                Text: """
+                    Metric 2024A
+                    Revenue 3,500
+                    """,
+                OcrConfidence: 0.82m)
+        ]);
+        var extractor = CreateExtractor(
+            nativeExtractor,
+            ocrExtractor,
+            nativeTextMinimumCharacters: nativeTextMinimumCharacters);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeTrue();
+        result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeFalse();
+        ocrExtractor.CallCount.Should().Be(1);
     }
 
     [Fact]
@@ -162,6 +202,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         result.IsValid.Should().BeTrue();
         result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeTrue();
         ocrExtractor.CallCount.Should().Be(1);
         result.Input!.Metrics.Should().ContainSingle(metric =>
             metric.Name == "revenue" &&
@@ -311,6 +352,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         result.IsValid.Should().BeTrue();
         result.UsedOcr.Should().BeFalse();
+        result.NativeTextAvailable.Should().BeTrue();
         ocrExtractor.CallCount.Should().Be(0);
         result.Input!.Metrics.Should().Contain(metric =>
             metric.Name == "revenue" &&
@@ -338,6 +380,7 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
 
         result.IsValid.Should().BeFalse();
         result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeFalse();
         result.Input.Should().BeNull();
         result.Errors.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new
@@ -346,6 +389,34 @@ public sealed class StructuredFinancialMetricsPdfExtractorTests
                 Message = "Las dependencias de OCR para PDF no están configuradas.",
                 Severity = "Error"
             });
+    }
+
+    [Fact]
+    public async Task ExtractAsync_Should_preserve_native_text_availability_when_ocr_is_not_configured()
+    {
+        var nativeExtractor = new FakePdfTextExtractor(
+        [
+            new StructuredFinancialMetricsExtractedPage(
+                PageNumber: 1,
+                Text: """
+                    This searchable annual report narrative is long enough to satisfy
+                    the native text threshold but contains no supported metric rows.
+                    """)
+        ]);
+        var ocrExtractor = new FakeOcrTextExtractor(
+            new PdfOcrDependencyException("PDF OCR dependencies are not configured."));
+        var extractor = CreateExtractor(nativeExtractor, ocrExtractor);
+
+        var result = await extractor.ExtractAsync(
+            CreatePdfStream(),
+            CreateRequest(),
+            CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        result.UsedOcr.Should().BeTrue();
+        result.NativeTextAvailable.Should().BeTrue();
+        result.Errors.Should().ContainSingle(issue =>
+            issue.Code == "PDF_OCR_NOT_CONFIGURED");
     }
 
     [Fact]

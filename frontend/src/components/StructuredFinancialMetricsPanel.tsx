@@ -95,9 +95,42 @@ function formatIngestionMethod(ingestionMethod?: string | null) {
       return "Archivo CSV";
     case "pdf_file":
       return "Archivo PDF";
+    case "pdf_file_reviewed":
+      return "PDF revisado";
+    case "pdf_file_semantic":
+      return "PDF con extracción semántica";
     default:
       return "Desconocido";
   }
+}
+
+function getSaveResultTone(saveResult: SaveFinancialMetricsResponse) {
+  if (saveResult.outcome === "review_required") {
+    return "metricsResult-warning";
+  }
+
+  return saveResult.isValid ? "metricsResult-success" : "metricsResult-danger";
+}
+
+function getSaveResultTitle(
+  saveResult: SaveFinancialMetricsResponse,
+  mode: "json" | "csv" | "file"
+) {
+  if (saveResult.outcome === "review_required") {
+    return "El PDF requiere revisión antes de guardar métricas activas.";
+  }
+
+  if (saveResult.outcome === "failed") {
+    return "La extracción del archivo falló. Revise los errores.";
+  }
+
+  if (saveResult.isValid) {
+    return mode === "file"
+      ? "Métricas del archivo guardadas con éxito"
+      : "Guardadas con éxito";
+  }
+
+  return "Las métricas no fueron persistidas.";
 }
 
 export function IssueList({
@@ -531,17 +564,9 @@ export function StructuredFinancialMetricsPanel({
 
       {saveResult && (
         <div
-          className={`metricsResult ${
-            saveResult.isValid ? "metricsResult-success" : "metricsResult-danger"
-          }`}
+          className={`metricsResult ${getSaveResultTone(saveResult)}`}
         >
-          <strong>
-            {saveResult.isValid
-              ? mode === "file"
-                ? "Métricas del archivo guardadas con éxito"
-                : "Guardadas con éxito"
-              : "Las métricas no fueron persistidas."}
-          </strong>
+          <strong>{getSaveResultTitle(saveResult, mode)}</strong>
 
           <IssueList title="Errores" issues={saveResult.errors} />
           <IssueList title="Advertencias" issues={saveResult.warnings} />

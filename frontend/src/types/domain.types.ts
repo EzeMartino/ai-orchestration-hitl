@@ -278,6 +278,152 @@ export type FinancialMetricsValidationIssue = {
   severity: string;
 };
 
+export type FinancialMetricsFileOutcome =
+  | "accepted"
+  | "review_required"
+  | "failed";
+
+export type FinancialMetricCandidateReviewState =
+  | "explicit"
+  | "inferred"
+  | "conflict"
+  | "missing"
+  | "accepted"
+  | "rejected"
+  | "human_corrected";
+
+export type FinancialMetricCandidateSourceKind =
+  | "reported"
+  | "inferred"
+  | "computed"
+  | "human_corrected";
+
+export type FinancialMetricCandidate = {
+  id: string;
+  name: string;
+  period: string;
+  value?: number | null;
+  currency?: string | null;
+  unit?: string | null;
+  sourceKind: FinancialMetricCandidateSourceKind | string;
+  confidence: number;
+  sourcePage?: number | null;
+  evidence: string;
+  extractionStrategy: string;
+  reviewState: FinancialMetricCandidateReviewState;
+  inferenceExplanation?: string | null;
+};
+
+export type FinancialDocumentMetadataCandidate = {
+  id: string;
+  fieldName: string;
+  value: string;
+  sourceKind: FinancialMetricCandidateSourceKind | string;
+  confidence: number;
+  sourcePage?: number | null;
+  evidence: string;
+  extractionStrategy: string;
+  reviewState: FinancialMetricCandidateReviewState;
+  inferenceExplanation?: string | null;
+};
+
+export type FinancialMetricCandidateConflict = {
+  kind: string;
+  fieldName: string;
+  metricName?: string | null;
+  period?: string | null;
+  proposedValue?: string | null;
+  metricCandidates: FinancialMetricCandidate[];
+  metadataCandidates: FinancialDocumentMetadataCandidate[];
+  isResolved: boolean;
+  selectedCandidateId?: string | null;
+  resolutionDecision?: string | null;
+};
+
+export type FinancialMetricsExtractionDiagnostics = {
+  nativeTextAvailable: boolean;
+  ocrAttempted: boolean;
+  ocrSucceeded: boolean;
+  markItDownAttempted: boolean;
+  markItDownSucceeded: boolean;
+  semanticAttempted: boolean;
+  semanticSucceeded: boolean;
+  pageCount?: number | null;
+  markdownCharacterCount?: number | null;
+  candidateCount?: number | null;
+  conflictCount?: number | null;
+  nativeTextDurationMilliseconds?: number | null;
+  ocrDurationMilliseconds?: number | null;
+  markItDownDurationMilliseconds?: number | null;
+  semanticDurationMilliseconds?: number | null;
+  totalDurationMilliseconds?: number | null;
+  reasonCodes: string[];
+};
+
+export type FinancialMetricsExtractionDraftPayload = {
+  schemaVersion: number;
+  proposedInput: StructuredFinancialMetricsInput;
+  candidates: FinancialMetricCandidate[];
+  conflicts: FinancialMetricCandidateConflict[];
+  missingFields: string[];
+  fallbackReasons: string[];
+  validationIssues: FinancialMetricsValidationIssue[];
+  diagnostics: FinancialMetricsExtractionDiagnostics;
+  metadataCandidates?: FinancialDocumentMetadataCandidate[];
+};
+
+export type FinancialMetricsExtractionDraft = {
+  id: string;
+  sessionId: string;
+  status: string;
+  originalFileName: string;
+  fileSizeBytes: number;
+  contentHash: string;
+  payload: FinancialMetricsExtractionDraftPayload;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+
+export type FinancialMetricsExtractionDraftIdentity = Omit<
+  FinancialMetricsExtractionDraft,
+  "payload"
+>;
+
+export type FinancialMetricCandidateReviewDecision =
+  | "accepted"
+  | "rejected"
+  | "human_corrected";
+
+export type FinancialMetricCandidateReviewUpdate = {
+  candidateId: string;
+  decision: FinancialMetricCandidateReviewDecision;
+  value?: number | null;
+  currency?: string | null;
+  unit?: string | null;
+  metadataValue?: string | null;
+};
+
+export type FinancialMetricCandidateAddition = {
+  name: string;
+  period: string;
+  value?: number | null;
+  currency?: string | null;
+  unit?: string | null;
+};
+
+export type FinancialDocumentMetadataCandidateAddition = {
+  fieldName: string;
+  value: string;
+};
+
+export type UpdateFinancialMetricsExtractionDraftRequest = {
+  candidates: FinancialMetricCandidateReviewUpdate[];
+  proposedInput: StructuredFinancialMetricsInput;
+  metricAdditions?: FinancialMetricCandidateAddition[];
+  metadataAdditions?: FinancialDocumentMetadataCandidateAddition[];
+};
+
 export type StructuredFinancialMetricContext = {
   name: string;
   period: string;
@@ -316,6 +462,11 @@ export type SaveFinancialMetricsResponse = {
   context?: StructuredFinancialMetricsContext | null;
   errors: FinancialMetricsValidationIssue[];
   warnings: FinancialMetricsValidationIssue[];
+  fileName?: string;
+  fileType?: string;
+  fileSizeBytes?: number;
+  outcome?: FinancialMetricsFileOutcome;
+  reviewDraft?: FinancialMetricsExtractionDraft | null;
 };
 
 export type GetFinancialMetricsResponse = {
