@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
@@ -10,6 +11,103 @@ public sealed class StructuredFinancialMetricsValidatorTests
     {
         PropertyNameCaseInsensitive = true
     };
+
+    [Fact]
+    public void FinancialReportSummaryValidator_Valid_input_Should_normalize_report_name_and_accept_zero_values()
+    {
+        var submittedAt = new DateTimeOffset(2026, 7, 12, 10, 30, 0, TimeSpan.Zero);
+        var input = new FinancialReportSummaryInput("  July report  ", 0m, 0, submittedAt);
+
+        var result = FinancialReportSummaryValidator.Validate(input);
+
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+        result.Summary.Should().Be(new FinancialReportSummary(
+            "July report",
+            0m,
+            0,
+            submittedAt));
+    }
+
+    [Fact]
+    public void FinancialReportSummaryValidator_Null_input_Should_return_required_issue()
+    {
+        var result = FinancialReportSummaryValidator.Validate(null);
+
+        result.IsValid.Should().BeFalse();
+        result.Summary.Should().BeNull();
+        result.Errors.Should().ContainSingle()
+            .Which.Code.Should().Be("REPORT_SUMMARY_REQUIRED");
+    }
+
+    [Fact]
+    public void FinancialReportSummaryValidator_Missing_fields_Should_return_required_issues()
+    {
+        var input = new FinancialReportSummaryInput(" ", null, null, null);
+
+        var result = FinancialReportSummaryValidator.Validate(input);
+
+        result.IsValid.Should().BeFalse();
+        result.Summary.Should().BeNull();
+        result.Errors.Select(issue => issue.Code).Should().BeEquivalentTo(
+        [
+            "REPORT_NAME_REQUIRED",
+            "TOTAL_AMOUNT_REQUIRED",
+            "TRANSACTION_COUNT_REQUIRED",
+            "SUBMITTED_AT_REQUIRED"
+        ]);
+    }
+
+    [Fact]
+    public void FinancialReportSummaryValidator_Invalid_values_Should_return_invalid_issues()
+    {
+        var input = new FinancialReportSummaryInput(
+            "Report",
+            -0.01m,
+            -1,
+            default(DateTimeOffset));
+
+        var result = FinancialReportSummaryValidator.Validate(input);
+
+        result.IsValid.Should().BeFalse();
+        result.Summary.Should().BeNull();
+        result.Errors.Select(issue => issue.Code).Should().BeEquivalentTo(
+        [
+            "TOTAL_AMOUNT_INVALID",
+            "TRANSACTION_COUNT_INVALID",
+            "SUBMITTED_AT_INVALID"
+        ]);
+    }
+
+    [Fact]
+    public void Validate_Invalid_report_summary_Should_map_summary_issues()
+    {
+        var input = CreateInput() with
+        {
+            ReportSummary = new FinancialReportSummaryInput("Report", -1m, 1, DateTimeOffset.UtcNow)
+        };
+
+        var result = Validate(input);
+
+        result.IsValid.Should().BeFalse();
+        result.ReportSummary.Should().BeNull();
+        result.Errors.Should().Contain(issue =>
+            issue.Code == "TOTAL_AMOUNT_INVALID" &&
+            issue.Severity == "Error");
+    }
+
+    [Fact]
+    public void Validate_Valid_report_summary_Should_include_normalized_summary()
+    {
+        var result = Validate(CreateInput());
+
+        result.IsValid.Should().BeTrue();
+        result.ReportSummary.Should().Be(new FinancialReportSummary(
+            "Test report",
+            1000m,
+            2,
+            new DateTimeOffset(2026, 7, 12, 10, 30, 0, TimeSpan.Zero)));
+    }
 
     [Fact]
     public void Validate_Should_reject_empty_document_id()
@@ -228,7 +326,10 @@ public sealed class StructuredFinancialMetricsValidatorTests
     [Fact]
     public void Fixtures_Should_deserialize_and_validate_expected_results()
     {
-        var valid = LoadFixture("structured_financial_metrics_input_valid.json");
+        var valid = LoadFixture("structured_financial_metrics_input_valid.json") with
+        {
+            ReportSummary = CreateReportSummary()
+        };
         var invalid = LoadFixture("structured_financial_metrics_input_invalid.json");
 
         var validResult = Validate(valid);
@@ -267,8 +368,18 @@ public sealed class StructuredFinancialMetricsValidatorTests
             Company: "Vista Energy",
             Currency: "USD",
             Unit: "USD_thousand",
-            Metrics: metrics ?? [CreateMetric()]
+            Metrics: metrics ?? [CreateMetric()],
+            ReportSummary: CreateReportSummary()
         );
+    }
+
+    private static FinancialReportSummaryInput CreateReportSummary()
+    {
+        return new FinancialReportSummaryInput(
+            ReportName: "  Test report  ",
+            TotalAmount: 1000m,
+            TransactionCount: 2,
+            SubmittedAt: new DateTimeOffset(2026, 7, 12, 10, 30, 0, TimeSpan.Zero));
     }
 
     private static StructuredFinancialMetricInput CreateMetric(

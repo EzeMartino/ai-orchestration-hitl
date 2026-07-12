@@ -1,10 +1,29 @@
 using FluentAssertions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 public sealed class StructuredFinancialMetricsCsvParserTests
 {
+    [Fact]
+    public void Parse_Report_summary_Should_copy_it_to_structured_input()
+    {
+        var summary = new FinancialReportSummaryInput(
+            "CSV report",
+            250m,
+            3,
+            new DateTimeOffset(2026, 7, 12, 11, 0, 0, TimeSpan.Zero));
+
+        var result = Parse("""
+            name,period,value
+            Revenue,2024A,100
+            """, summary);
+
+        result.IsValid.Should().BeTrue();
+        result.Input!.ReportSummary.Should().BeSameAs(summary);
+    }
+
     [Fact]
     public void Parse_Should_convert_simple_csv_to_structured_input()
     {
@@ -97,7 +116,8 @@ public sealed class StructuredFinancialMetricsCsvParserTests
     }
 
     private static StructuredFinancialMetricsCsvParseResult Parse(
-        string csv)
+        string csv,
+        FinancialReportSummaryInput? reportSummary = null)
     {
         return new StructuredFinancialMetricsCsvParser().Parse(
             new StructuredFinancialMetricsCsvInput(
@@ -105,7 +125,8 @@ public sealed class StructuredFinancialMetricsCsvParserTests
                 Company: "Manual Test Co",
                 Currency: "USD",
                 Unit: "USD_thousand",
-                Csv: csv
+                Csv: csv,
+                ReportSummary: reportSummary
             )
         );
     }

@@ -1,10 +1,13 @@
+using Orchestration.Application.Agents.Shared;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public sealed record FinancialMetricsValidationResult(
     bool IsValid,
     IReadOnlyList<ValidatedFinancialMetric> Metrics,
     IReadOnlyList<FinancialMetricsValidationIssue> Errors,
-    IReadOnlyList<FinancialMetricsValidationIssue> Warnings
+    IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
+    FinancialReportSummary? ReportSummary = null
 );
 
 public sealed record ValidatedFinancialMetric(

@@ -115,7 +115,8 @@ public sealed class StructuredFinancialMetricsCsvParser
                 Company: input.Company,
                 Currency: input.Currency,
                 Unit: input.Unit,
-                Metrics: metrics
+                Metrics: metrics,
+                ReportSummary: input.ReportSummary
             ),
             Errors: [],
             Warnings: warnings
