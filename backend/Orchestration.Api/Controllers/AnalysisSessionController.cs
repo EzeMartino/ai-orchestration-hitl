@@ -11,6 +11,7 @@ using Orchestration.Application.Activity;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Persistence;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
 using UglyToad.PdfPig.Core;
@@ -567,7 +568,8 @@ public class AnalysisSessionsController(
                 Company: request.Company,
                 Currency: request.Currency,
                 Unit: request.Unit,
-                Csv: content
+                Csv: content,
+                ReportSummary: CreateReportSummaryInput(request)
             ),
             cancellationToken,
             CreateFileProvenance(
@@ -603,7 +605,8 @@ public class AnalysisSessionsController(
                     Unit: request.Unit,
                     OriginalFileName: Path.GetFileName(request.File!.FileName),
                     FileSizeBytes: request.File.Length,
-                    ContentHash: ComputeSha256(pdfBytes)
+                    ContentHash: ComputeSha256(pdfBytes),
+                    ReportSummary: CreateReportSummaryInput(request)
                 ),
                 cancellationToken
             );
@@ -795,6 +798,16 @@ public class AnalysisSessionsController(
         };
     }
 
+    private static FinancialReportSummaryInput CreateReportSummaryInput(
+        StructuredFinancialMetricsFileUploadRequest request)
+    {
+        return new FinancialReportSummaryInput(
+            request.ReportName,
+            request.TotalAmount,
+            request.TransactionCount,
+            request.SubmittedAt);
+    }
+
     private static SaveFinancialMetricsFileResponse CreateFileResponse(
         IFormFile file,
         string fileType,
@@ -947,6 +960,14 @@ public sealed class StructuredFinancialMetricsFileUploadRequest
     public string? Currency { get; init; }
 
     public string? Unit { get; init; }
+
+    public string? ReportName { get; init; }
+
+    public decimal? TotalAmount { get; init; }
+
+    public int? TransactionCount { get; init; }
+
+    public DateTimeOffset? SubmittedAt { get; init; }
 }
 
 public sealed record SaveFinancialMetricsFileResponse(

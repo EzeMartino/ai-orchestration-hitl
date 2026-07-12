@@ -3447,7 +3447,8 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                     Source: metricSource,
                     SourcePage: 7,
                     Confidence: 0.95m)
-            ]);
+            ],
+            ReportSummary: TestReportSummary.Input);
     }
 
     private static StructuredFinancialMetricsInput CreateNonCanonicalInput(
@@ -3594,7 +3595,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 MetadataCandidates: [])
             : null;
 
-        return reconciler.Reconcile(
+        var reconciliation = reconciler.Reconcile(
             deterministicInput,
             semanticResult,
             new FinancialMetricsExtractionOptions
@@ -3602,6 +3603,8 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 Mode = "ReviewOnly",
                 AutomaticAcceptanceConfidence = 0.9m
             });
+
+        return WithTestReportSummary(reconciliation);
     }
 
     private static FinancialMetricReconciliationResult
@@ -3646,7 +3649,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         var reconciler = new FinancialMetricCandidateReconciler(
             new StructuredFinancialMetricsValidator());
 
-        return reconciler.Reconcile(
+        var reconciliation = reconciler.Reconcile(
             CreateInput(metrics: [primary]),
             new FinancialDocumentExtractionResult(
                 Company: null,
@@ -3659,6 +3662,20 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 Mode = "ReviewOnly",
                 AutomaticAcceptanceConfidence = 0.9m
             });
+
+        return WithTestReportSummary(reconciliation);
+    }
+
+    private static FinancialMetricReconciliationResult WithTestReportSummary(
+        FinancialMetricReconciliationResult reconciliation)
+    {
+        return reconciliation with
+        {
+            ProposedInput = reconciliation.ProposedInput with
+            {
+                ReportSummary = TestReportSummary.Input
+            }
+        };
     }
 
     private static FinancialMetricCandidate CompositeSupporter(

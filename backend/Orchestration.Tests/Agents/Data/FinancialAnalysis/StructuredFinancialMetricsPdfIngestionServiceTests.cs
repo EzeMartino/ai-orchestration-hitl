@@ -23,6 +23,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.Accepted);
         result.SaveResult.Should().NotBeNull();
         fixture.SessionService.SaveRequests.Should().ContainSingle();
+        fixture.SessionService.SaveRequests.Single().Input.ReportSummary
+            .Should().BeSameAs(TestReportSummary.Input);
         fixture.SessionService.SaveRequests.Single().Provenance.Should().Be(
             new StructuredFinancialMetricsProvenanceInput(
                 "pdf_file",
@@ -109,6 +111,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         result.ReviewDraft.Should().NotBeNull();
         fixture.SessionService.SaveRequests.Should().BeEmpty();
         fixture.DraftService.Requests.Should().ContainSingle();
+        fixture.DraftService.Requests.Single().Payload.ProposedInput.ReportSummary
+            .Should().BeSameAs(TestReportSummary.Input);
         fixture.DraftService.Requests.Single().Payload.Candidates
             .Should().Contain(candidate => candidate.ExtractionStrategy == "deterministic_pdf_parser");
         fixture.DraftService.Requests.Single().Payload.MissingFields
@@ -373,7 +377,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Unit: "USD_million",
             OriginalFileName: "metrics.pdf",
             FileSizeBytes: 3,
-            ContentHash: "sha256:abc");
+            ContentHash: "sha256:abc",
+            ReportSummary: TestReportSummary.Input);
     }
 
     private static FinancialMetricsExtractionOptions SemanticOptions(

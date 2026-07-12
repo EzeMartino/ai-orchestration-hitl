@@ -433,7 +433,8 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
                     SourcePage: 18,
                     Confidence: 0.9m
                 )
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
     }
 

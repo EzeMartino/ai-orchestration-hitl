@@ -333,7 +333,8 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
                 Company: company,
                 Currency: currency,
                 Unit: unit,
-                Metrics: metrics ?? CreateCompleteMetrics()),
+                Metrics: metrics ?? CreateCompleteMetrics(),
+                ReportSummary: TestReportSummary.Input),
             Errors: [],
             Warnings: [],
             UsedOcr: false);

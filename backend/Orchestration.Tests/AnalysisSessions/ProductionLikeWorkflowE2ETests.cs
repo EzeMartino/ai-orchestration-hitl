@@ -411,7 +411,8 @@ public sealed class ProductionLikeWorkflowE2ETests
                 Metric("Cash", "2025E", 150000m),
                 Metric("Net Debt", "2025E", 1300000m),
                 Metric("Equity", "2025E", 899000m)
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
     }
 

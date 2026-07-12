@@ -28,7 +28,8 @@ public sealed class FinancialMetricsControllerTests
                     SourcePage: 18,
                     Confidence: null
                 )
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
 
         var actionResult = controller.Validate(input);
@@ -77,7 +78,8 @@ public sealed class FinancialMetricsControllerTests
                     SourcePage: null,
                     Confidence: null
                 )
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
 
         var actionResult = controller.Validate(input);

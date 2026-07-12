@@ -275,6 +275,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
               "company": "JSON File Co",
               "currency": "USD",
               "unit": "USD_thousand",
+              "reportSummary": {
+                "reportName": "Test financial report",
+                "totalAmount": 1250.50,
+                "transactionCount": 7,
+                "submittedAt": "2026-07-12T12:00:00Z"
+              },
               "metrics": [
                 {
                   "name": "Revenue",
@@ -337,6 +343,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 """
                 {
                   "documentId": "",
+                  "reportSummary": {
+                    "reportName": "Test financial report",
+                    "totalAmount": 1250.50,
+                    "transactionCount": 7,
+                    "submittedAt": "2026-07-12T12:00:00Z"
+                  },
                   "metrics": [
                     {
                       "name": "Revenue",
@@ -511,6 +523,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         ingestion.LastRequest!.SessionId.Should().Be(session.Id);
         ingestion.LastRequest.UserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
+        ingestion.LastRequest.ReportSummary.Should().BeEquivalentTo(TestReportSummary.Input);
     }
 
     [Fact]
@@ -758,7 +771,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var controller = CreateController(dbContext);
+        var csvParser = new CapturingStructuredFinancialMetricsCsvParser();
+        var controller = CreateController(dbContext, csvParser: csvParser);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -793,6 +807,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance.FileSizeBytes.Should().Be(response.FileSizeBytes);
         response.Context.Provenance.ContentHash.Should().NotBeNullOrWhiteSpace();
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        csvParser.LastInput.Should().NotBeNull();
+        csvParser.LastInput!.ReportSummary.Should().BeEquivalentTo(TestReportSummary.Input);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -1013,6 +1029,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 """
                 {
                   "documentId": "uppercase-json-file",
+                  "reportSummary": {
+                    "reportName": "Test financial report",
+                    "totalAmount": 1250.50,
+                    "transactionCount": 7,
+                    "submittedAt": "2026-07-12T12:00:00Z"
+                  },
                   "metrics": [
                     {
                       "name": "Revenue",
@@ -1401,7 +1423,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         DataAgentOptions? dataAgentOptions = null,
         AnalysisOrchestratorService? orchestrator = null,
         IStructuredFinancialMetricsPdfIngestionService? pdfIngestionService = null,
-        IFinancialMetricsExtractionDraftService? draftService = null)
+        IFinancialMetricsExtractionDraftService? draftService = null,
+        IStructuredFinancialMetricsCsvParser? csvParser = null)
     {
         publisher ??= new FakeActivityEventPublisher();
 
@@ -1413,7 +1436,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             ),
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
-            new StructuredFinancialMetricsCsvParser(),
+            csvParser ?? new StructuredFinancialMetricsCsvParser(),
             pdfIngestionService ?? new FakeStructuredFinancialMetricsPdfIngestionService(
                 new StructuredFinancialMetricsPdfIngestionResult(
                     FinancialMetricsFileOutcome.Failed,
@@ -1490,7 +1513,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Company: "Manual Test Co",
             Currency: "USD",
             Unit: "USD_thousand",
-            Csv: csv
+            Csv: csv,
+            ReportSummary: TestReportSummary.Input
         );
     }
 
@@ -1534,7 +1558,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             DocumentId = documentId,
             Company = company,
             Currency = currency,
-            Unit = unit
+            Unit = unit,
+            ReportName = TestReportSummary.Input.ReportName,
+            TotalAmount = TestReportSummary.Input.TotalAmount,
+            TransactionCount = TestReportSummary.Input.TransactionCount,
+            SubmittedAt = TestReportSummary.Input.SubmittedAt
         };
     }
 
@@ -1574,7 +1602,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                     SourcePage: 18,
                     Confidence: 0.9m
                 )
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
         var context = new StructuredFinancialMetricsContext(
             DocumentId: input.DocumentId,
@@ -1761,6 +1790,21 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 Errors: [],
                 Warnings: []
             ));
+        }
+    }
+
+    private sealed class CapturingStructuredFinancialMetricsCsvParser
+        : IStructuredFinancialMetricsCsvParser
+    {
+        private readonly StructuredFinancialMetricsCsvParser _inner = new();
+
+        public StructuredFinancialMetricsCsvInput? LastInput { get; private set; }
+
+        public StructuredFinancialMetricsCsvParseResult Parse(
+            StructuredFinancialMetricsCsvInput input)
+        {
+            LastInput = input;
+            return _inner.Parse(input);
         }
     }
 
