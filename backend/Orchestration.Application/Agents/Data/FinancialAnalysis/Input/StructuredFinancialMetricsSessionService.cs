@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Activity;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Persistence;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
@@ -9,7 +10,8 @@ namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 public sealed class StructuredFinancialMetricsSessionService
     : IStructuredFinancialMetricsSessionService
 {
-    private const string ContextPropertyName = "structuredFinancialMetrics";
+    private const string FinancialReportContextPropertyName = "financialReport";
+    private const string MetricsContextPropertyName = "structuredFinancialMetrics";
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web)
@@ -97,9 +99,14 @@ public sealed class StructuredFinancialMetricsSessionService
                 IsValid: false,
                 Context: null,
                 Errors: validationResult.Errors,
-                Warnings: validationResult.Warnings
+                Warnings: validationResult.Warnings,
+                ReportSummary: null
             );
         }
+
+        var reportSummary = validationResult.ReportSummary
+            ?? throw new InvalidOperationException(
+                "A valid financial metrics result must include a report summary.");
 
         var metrics = _mapper.MapToFinancialMetrics(validationResult);
         var provenance = BuildProvenance(
@@ -118,14 +125,18 @@ public sealed class StructuredFinancialMetricsSessionService
             Provenance: provenance
         );
 
-        session.SetContext(MergeContextJson(session.ContextJson, context));
+        session.SetContext(MergeContextJson(
+            session.ContextJson,
+            reportSummary,
+            context));
 
         return new FinancialMetricsSessionSaveResult(
             SessionId: request.SessionId,
             IsValid: true,
             Context: context,
             Errors: validationResult.Errors,
-            Warnings: validationResult.Warnings
+            Warnings: validationResult.Warnings,
+            ReportSummary: reportSummary
         );
     }
 
@@ -147,7 +158,7 @@ public sealed class StructuredFinancialMetricsSessionService
         {
             var root = JsonNode.Parse(contextJson) as JsonObject;
 
-            return root?[ContextPropertyName]?.Deserialize<StructuredFinancialMetricsContext>(
+            return root?[MetricsContextPropertyName]?.Deserialize<StructuredFinancialMetricsContext>(
                 JsonOptions
             );
         }
@@ -157,12 +168,57 @@ public sealed class StructuredFinancialMetricsSessionService
         }
     }
 
+    public async Task<FinancialReportSummary?> GetReportSummaryAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var contextJson = await _dbContext.AnalysisSessions
+            .Where(x => x.Id == sessionId)
+            .Select(x => x.ContextJson)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(contextJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(contextJson) as JsonObject;
+            var reportNode = root?[FinancialReportContextPropertyName];
+
+            if (reportNode is null)
+            {
+                return null;
+            }
+
+            var input = reportNode.Deserialize<FinancialReportSummaryInput>(JsonOptions);
+            var validation = FinancialReportSummaryValidator.Validate(input);
+
+            return validation.IsValid
+                ? validation.Summary
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     private static string MergeContextJson(
         string? existingContextJson,
+        FinancialReportSummary reportSummary,
         StructuredFinancialMetricsContext context)
     {
         var root = ParseRoot(existingContextJson);
-        root[ContextPropertyName] = JsonSerializer.SerializeToNode(context, JsonOptions);
+        root[FinancialReportContextPropertyName] =
+            JsonSerializer.SerializeToNode(reportSummary, JsonOptions);
+        root[MetricsContextPropertyName] =
+            JsonSerializer.SerializeToNode(context, JsonOptions);
 
         return root.ToJsonString(JsonOptions);
     }

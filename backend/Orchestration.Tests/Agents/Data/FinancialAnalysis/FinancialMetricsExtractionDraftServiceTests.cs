@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Domain.FinancialMetricsExtraction;
 using Orchestration.Infrastructure.Persistence;
@@ -4027,6 +4028,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
         }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<FinancialReportSummary?>(null);
+        }
     }
 
     private sealed class StagingSessionService(
@@ -4100,6 +4108,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
         }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<FinancialReportSummary?>(null);
+        }
     }
 
     private sealed class DirtyThenThrowSessionService
@@ -4165,6 +4180,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken cancellationToken)
         {
             return _inner.GetAsync(sessionId, cancellationToken);
+        }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.GetReportSummaryAsync(sessionId, cancellationToken);
         }
     }
 

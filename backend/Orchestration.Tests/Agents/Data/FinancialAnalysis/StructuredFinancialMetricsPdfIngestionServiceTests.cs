@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
@@ -765,6 +766,11 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Guid sessionId,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<FinancialReportSummary?>(null);
     }
 
     private sealed class FakeActivityPublisher : IActivityEventPublisher
