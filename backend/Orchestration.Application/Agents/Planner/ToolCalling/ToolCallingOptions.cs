@@ -9,8 +9,6 @@ public sealed class ToolCallingOptions
     public ToolCallingExecutionMode ExecutionMode { get; init; } =
         ToolCallingExecutionMode.Shadow;
 
-    public bool FinancialAnalysisToolsEnabled { get; init; }
-
     public int MaxToolCalls { get; init; } = 3;
 
     public string[] AllowedTools { get; init; } =

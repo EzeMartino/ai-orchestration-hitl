@@ -59,6 +59,26 @@ public class DeterministicToolPlanProposalServiceTests
         legalCall.Reason.Should().Be("Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados.");
     }
 
+    [Fact]
+    public async Task ProposeAsync_Should_only_propose_catalog_tools_allowed_by_configuration()
+    {
+        var service = new DeterministicToolPlanProposalService(
+            new ToolCallingOptions
+            {
+                Enabled = true,
+                AllowedTools = [PlannerToolCatalog.SearchCnvRegulationName]
+            }
+        );
+
+        var result = await service.ProposeAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        result.ProposedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
+    }
+
     private static ToolPlanProposalInput CreateInput(
         Guid? sessionId = null)
     {

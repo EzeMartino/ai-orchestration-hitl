@@ -285,8 +285,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         var toolCallingOptions = new ToolCallingOptions
         {
             Enabled = true,
-            ExecutionMode = executionMode,
-            FinancialAnalysisToolsEnabled = true
+            ExecutionMode = executionMode
         };
         var metricsSessionService = CreateMetricsSessionService(dbContext, activityPublisher);
         var metricsProvider = new SessionStructuredFinancialMetricsProvider(metricsSessionService);
@@ -335,7 +334,6 @@ public sealed class ProductionLikeWorkflowE2ETests
             executionMode == ToolCallingExecutionMode.PlanDriven
                 ? new ControlledToolExecutor(
                     dataAgent,
-                    pythonService,
                     cnvClient,
                     NullLogger<ControlledToolExecutor>.Instance
                 )

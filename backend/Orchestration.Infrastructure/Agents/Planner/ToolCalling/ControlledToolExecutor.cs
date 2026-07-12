@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Orchestration.Application.Agents.Data;
-using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -12,13 +11,6 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 public sealed class ControlledToolExecutor : IControlledToolExecutor
 {
     private const string EngineName = "Controlled Tool Executor";
-    private const string FinancialAnalysisEngineName = "Semantic Kernel + CSnakes + Python/Pandas";
-    private const string DataToolName = "data.analyze_transactions";
-    private const string LegalToolName = "legal.search_cnv_regulation";
-    private const string ComputeFinancialRatiosToolName = "data.compute_financial_ratios";
-    private const string ComparePeriodsToolName = "data.compare_periods";
-    private const string DetectFinancialRiskSignalsToolName = "data.detect_financial_risk_signals";
-    private const string SummarizeQuantitativeEvidenceToolName = "data.summarize_quantitative_evidence";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -26,18 +18,15 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     };
 
     private readonly IDataAgent _dataAgent;
-    private readonly IPythonFinancialAnalysisService _financialAnalysisService;
     private readonly ICnvRegulationMcpClient _mcpClient;
     private readonly ILogger<ControlledToolExecutor> _logger;
 
     public ControlledToolExecutor(
         IDataAgent dataAgent,
-        IPythonFinancialAnalysisService financialAnalysisService,
         ICnvRegulationMcpClient mcpClient,
         ILogger<ControlledToolExecutor> logger)
     {
         _dataAgent = dataAgent;
-        _financialAnalysisService = financialAnalysisService;
         _mcpClient = mcpClient;
         _logger = logger;
     }
@@ -66,14 +55,12 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     {
         try
         {
-            return call.ToolName switch
+            return PlannerToolCatalog.Find(call.ToolName)?.Handler switch
             {
-                DataToolName => await ExecuteDataAnalysisAsync(call, cancellationToken),
-                LegalToolName => await ExecuteLegalSearchAsync(call, cancellationToken),
-                ComputeFinancialRatiosToolName => await ExecuteComputeFinancialRatiosAsync(call, cancellationToken),
-                ComparePeriodsToolName => await ExecuteComparePeriodsAsync(call, cancellationToken),
-                DetectFinancialRiskSignalsToolName => await ExecuteDetectFinancialRiskSignalsAsync(call, cancellationToken),
-                SummarizeQuantitativeEvidenceToolName => await ExecuteSummarizeQuantitativeEvidenceAsync(call, cancellationToken),
+                PlannerToolHandler.AnalyzeTransactions =>
+                    await ExecuteDataAnalysisAsync(call, cancellationToken),
+                PlannerToolHandler.SearchCnvRegulation =>
+                    await ExecuteLegalSearchAsync(call, cancellationToken),
                 _ => Failed(call.ToolName, "Tool is not executable.")
             };
         }
@@ -121,106 +108,6 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
             result.Summary,
             result.Engine,
             result
-        );
-    }
-
-    private async Task<ToolExecutionResult> ExecuteComputeFinancialRatiosAsync(
-        ApprovedToolCall call,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetRequest(
-                call,
-                out ComputeFinancialRatiosRequest request,
-                out var error))
-        {
-            return Failed(call.ToolName, error);
-        }
-
-        var response = await _financialAnalysisService.ComputeFinancialRatiosAsync(
-            request,
-            cancellationToken
-        );
-
-        return Succeeded(
-            call.ToolName,
-            $"Computed {response.Ratios.Count} financial ratio(s).",
-            FinancialAnalysisEngineName,
-            response
-        );
-    }
-
-    private async Task<ToolExecutionResult> ExecuteComparePeriodsAsync(
-        ApprovedToolCall call,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetRequest(
-                call,
-                out ComparePeriodsRequest request,
-                out var error))
-        {
-            return Failed(call.ToolName, error);
-        }
-
-        var response = await _financialAnalysisService.ComparePeriodsAsync(
-            request,
-            cancellationToken
-        );
-
-        return Succeeded(
-            call.ToolName,
-            $"Computed {response.Comparisons.Count} period comparison(s).",
-            FinancialAnalysisEngineName,
-            response
-        );
-    }
-
-    private async Task<ToolExecutionResult> ExecuteDetectFinancialRiskSignalsAsync(
-        ApprovedToolCall call,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetRequest(
-                call,
-                out DetectFinancialRiskSignalsRequest request,
-                out var error))
-        {
-            return Failed(call.ToolName, error);
-        }
-
-        var response = await _financialAnalysisService.DetectFinancialRiskSignalsAsync(
-            request,
-            cancellationToken
-        );
-
-        return Succeeded(
-            call.ToolName,
-            $"Detected {response.Signals.Count} financial risk signal(s).",
-            FinancialAnalysisEngineName,
-            response
-        );
-    }
-
-    private async Task<ToolExecutionResult> ExecuteSummarizeQuantitativeEvidenceAsync(
-        ApprovedToolCall call,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetRequest(
-                call,
-                out SummarizeQuantitativeEvidenceRequest request,
-                out var error))
-        {
-            return Failed(call.ToolName, error);
-        }
-
-        var response = await _financialAnalysisService.SummarizeQuantitativeEvidenceAsync(
-            request,
-            cancellationToken
-        );
-
-        return Succeeded(
-            call.ToolName,
-            response.Narrative,
-            FinancialAnalysisEngineName,
-            response
         );
     }
 
@@ -325,48 +212,6 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         error = "";
 
         return true;
-    }
-
-    private static bool TryGetRequest<TRequest>(
-        ApprovedToolCall call,
-        out TRequest request,
-        out string error)
-        where TRequest : class
-    {
-        if (!TryGetString(call.Arguments, "requestJson", out var requestJson, out error))
-        {
-            request = default!;
-
-            return false;
-        }
-
-        try
-        {
-            var parsedRequest = JsonSerializer.Deserialize<TRequest>(
-                requestJson,
-                JsonOptions
-            );
-
-            if (parsedRequest is null)
-            {
-                request = default!;
-                error = "Argumento JSON no válido: requestJson.";
-
-                return false;
-            }
-
-            request = parsedRequest;
-            error = "";
-
-            return true;
-        }
-        catch (JsonException)
-        {
-            request = default!;
-            error = "Argumento JSON no válido: requestJson.";
-
-            return false;
-        }
     }
 
     private static bool TryGetGuid(

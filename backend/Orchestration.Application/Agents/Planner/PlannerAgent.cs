@@ -469,12 +469,15 @@ public sealed class PlannerAgent : IPlannerAgent
 
         foreach (var executionAudit in toolPlan.ExecutedCalls)
         {
+            var auditActor = PlannerToolCatalog.Find(executionAudit.ToolName)?.AuditActor
+                ?? "PlannerAgent";
+
             if (executionAudit.Status is ToolExecutionStatus.SkippedAlreadySatisfied or ToolExecutionStatus.SkippedDisabled)
             {
                 await PublishAsync(
                     sessionId,
                     "tool_call_skipped",
-                    "PlannerAgent",
+                    auditActor,
                     $"Llamada a herramienta aprobada '{executionAudit.ToolName}' omitida: {executionAudit.Summary}",
                     cancellationToken
                 );
@@ -485,7 +488,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 await PublishAsync(
                     sessionId,
                     "tool_call_executed",
-                    "PlannerAgent",
+                    auditActor,
                     $"Llamada a herramienta aprobada '{executionAudit.ToolName}' ejecutada usando {executionAudit.Engine}.",
                     cancellationToken
                 );
@@ -496,7 +499,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 await PublishAsync(
                     sessionId,
                     "tool_call_failed",
-                    "PlannerAgent",
+                    auditActor,
                     $"Llamada a herramienta aprobada '{executionAudit.ToolName}' falló: {executionAudit.Error ?? executionAudit.Summary}",
                     cancellationToken
                 );

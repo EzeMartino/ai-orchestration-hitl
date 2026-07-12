@@ -113,7 +113,6 @@ builder.Services.AddScoped<IStructuredFinancialMetricsProvider>(provider =>
 builder.Services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
 builder.Services.AddScoped<IDataAgent, ConfigurableDataAgent>();
 builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
-builder.Services.AddScoped<FinancialAnalysisPlugin>();
 
 // Python environment configuration for CSnakes
 var defaultPythonHome = Path.GetFullPath(

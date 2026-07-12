@@ -443,7 +443,11 @@ public class PlannerAgentTests
                     " data.analyze_transactions ",
                     new Dictionary<string, string>
                     {
-                        [" sessionId "] = "session-1"
+                        [" sessionId "] = Guid.Empty.ToString(),
+                        [" reportName "] = "normalized-report",
+                        [" totalAmount "] = "125000",
+                        [" transactionCount "] = "42",
+                        [" submittedAt "] = DateTimeOffset.UnixEpoch.ToString("O")
                     },
                     " Analyze data. "
                 ),
@@ -451,7 +455,11 @@ public class PlannerAgentTests
                     "data.analyze_transactions",
                     new Dictionary<string, string>
                     {
-                        ["sessionId"] = "session-1"
+                        ["sessionId"] = Guid.Empty.ToString(),
+                        ["reportName"] = "normalized-report",
+                        ["totalAmount"] = "125000",
+                        ["transactionCount"] = "42",
+                        ["submittedAt"] = DateTimeOffset.UnixEpoch.ToString("O")
                     },
                     "Duplicate data call."
                 ),
@@ -540,10 +548,12 @@ public class PlannerAgentTests
             .OnlyContain(call => call.Status == ToolExecutionStatus.Executed);
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_executed" &&
+            x.Agent == "DataAgent" &&
             x.Message == "Llamada a herramienta aprobada 'data.analyze_transactions' ejecutada usando Fake Controlled Tool Executor."
         );
         publisher.PublishedEvents.Should().Contain(x =>
             x.Type == "tool_call_executed" &&
+            x.Agent == "LegalAgent" &&
             x.Message == "Llamada a herramienta aprobada 'legal.search_cnv_regulation' ejecutada usando Fake Controlled Tool Executor."
         );
     }
@@ -811,9 +821,36 @@ public class PlannerAgentTests
         IReadOnlyDictionary<string, string>? arguments = null,
         string reason = "Planner proposed read-only evidence collection.")
     {
+        var resolvedArguments = arguments;
+
+        if (resolvedArguments is null && string.Equals(
+                toolName,
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedArguments = new Dictionary<string, string>
+            {
+                ["sessionId"] = Guid.Empty.ToString(),
+                ["reportName"] = "planner-test-report",
+                ["totalAmount"] = "125000",
+                ["transactionCount"] = "42",
+                ["submittedAt"] = DateTimeOffset.UnixEpoch.ToString("O")
+            };
+        }
+        else if (resolvedArguments is null && string.Equals(
+                     toolName,
+                     PlannerToolCatalog.SearchCnvRegulationName,
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedArguments = new Dictionary<string, string>
+            {
+                ["query"] = "agentes"
+            };
+        }
+
         return new ProposedToolCall(
             ToolName: toolName,
-            Arguments: arguments ?? new Dictionary<string, string>
+            Arguments: resolvedArguments ?? new Dictionary<string, string>
             {
                 ["sessionId"] = Guid.NewGuid().ToString()
             },

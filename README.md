@@ -90,14 +90,7 @@ Current core allowlist:
 - `data.analyze_transactions`: read-only statistical anomaly analysis owned by `DataAgent`.
 - `legal.search_cnv_regulation`: read-only CNV regulatory retrieval owned by `LegalAgent` / MCP.
 
-Optional financial-analysis tools are available for controlled execution when `ToolCalling__FinancialAnalysisToolsEnabled=true`:
-
-- `data.compute_financial_ratios`
-- `data.compare_periods`
-- `data.detect_financial_risk_signals`
-- `data.summarize_quantitative_evidence`
-
-These tools are read-only, auditable, and cannot modify workflow state, approve sessions, reject sessions, move money, or block accounts.
+This typed production catalog is the source for proposal metadata, allowlist validation, controlled dispatch, result mapping, policy, and audit ownership. Structured ratio, comparison, signal, and evidence operations remain internal to the aggregate `DataAgent` workflow rather than separate Planner-callable tools.
 
 Tool-calling pipeline:
 
@@ -681,14 +674,9 @@ When `DataAgent__AiReviewEnabled=false`, the persisted AI review uses determinis
 
 When `DataAgent__AiReviewEnabled=true` and `Llm__Enabled=true`, Semantic Kernel attempts a JSON-only advisory review. Provider failures, empty output, invalid JSON, schema issues, or unsafe content fall back to the deterministic review with a safe `failureReason`.
 
-### Financial Analysis Tools
+### Financial Analysis Operations
 
-- `data.compute_financial_ratios`
-- `data.compare_periods`
-- `data.detect_financial_risk_signals`
-- `data.summarize_quantitative_evidence`
-
-These tools are read-only, auditable, and cannot modify workflow state, approve sessions, reject sessions, move money, block accounts, or make legal conclusions.
+Ratio calculation, period comparison, financial-risk detection, and quantitative-evidence summarization execute as deterministic internal `DataAgent` operations. The Planner receives their aggregate, traceable `DataAgentResult`; it does not call these operations independently.
 
 ### Current Limitations
 
@@ -1389,9 +1377,7 @@ Example:
 }
 ```
 
-The diagnostic endpoint is for development validation. It does not create sessions, transition workflow state, approve, or reject anything.
-
-Financial analysis tools can also be validated through this endpoint when `ToolCalling__FinancialAnalysisToolsEnabled=true`. They still require validated `requestJson` payloads and remain read-only.
+The diagnostic endpoint is for development validation. It does not create sessions, transition workflow state, approve, or reject anything. Planner tool validation uses the same typed catalog and configured allowlist as production execution.
 
 ### CNV Regulation Ingestion
 

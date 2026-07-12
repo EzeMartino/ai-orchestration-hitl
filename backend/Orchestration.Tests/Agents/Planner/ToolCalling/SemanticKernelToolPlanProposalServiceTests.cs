@@ -3,6 +3,7 @@ using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
+using System.Text.Json;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
@@ -94,7 +95,42 @@ public class SemanticKernelToolPlanProposalServiceTests
             .Should()
             .Contain(message => message != null && message.Contains("Write the reason field in Spanish."))
             .And
-            .Contain(message => message != null && message.Contains("Propose at most 2 tool calls."));
+            .Contain(message => message != null && message.Contains("Do not exceed maxToolCalls."));
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_serialize_only_allowlisted_catalog_definitions()
+    {
+        var chatCompletionService = new FakeChatCompletionService(
+            """
+            { "proposedCalls": [] }
+            """
+        );
+        var options = new ToolCallingOptions
+        {
+            Enabled = true,
+            AllowedTools = [PlannerToolCatalog.SearchCnvRegulationName]
+        };
+        var service = new SemanticKernelToolPlanProposalService(
+            options,
+            new DeterministicToolPlanProposalService(options),
+            new SemanticKernelToolPlanResponseParser(),
+            chatCompletionService
+        );
+
+        await service.ProposeAsync(CreateInput(), CancellationToken.None);
+
+        var userMessage = chatCompletionService.LastChatHistory!
+            .Single(message => message.Role == AuthorRole.User)
+            .Content!;
+        using var payload = JsonDocument.Parse(userMessage);
+        var availableTools = payload.RootElement.GetProperty("availableTools");
+
+        availableTools.GetArrayLength().Should().Be(1);
+        availableTools[0].GetProperty("name").GetString()
+            .Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
+        availableTools[0].GetProperty("arguments")[0].GetProperty("name").GetString()
+            .Should().Be("query");
     }
 
     private static SemanticKernelToolPlanProposalService CreateService(
