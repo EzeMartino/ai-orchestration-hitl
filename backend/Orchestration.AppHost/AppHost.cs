@@ -8,8 +8,6 @@ var llmServiceId = builder.Configuration["Llm:ServiceId"];
 
 var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
 var toolCallingExecutionMode = builder.Configuration["ToolCalling:ExecutionMode"];
-var toolCallingFinancialAnalysisToolsEnabled =
-    builder.Configuration["ToolCalling:FinancialAnalysisToolsEnabled"];
 
 var dataAgentFinancialAnalysisToolsEnabled =
     builder.Configuration["DataAgent:FinancialAnalysisToolsEnabled"];
@@ -125,7 +123,6 @@ var api = builder
     .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
     .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
     .WithEnvironment("ToolCalling__ExecutionMode", toolCallingExecutionMode ?? "Shadow")
-    .WithEnvironment("ToolCalling__FinancialAnalysisToolsEnabled", toolCallingFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__FinancialAnalysisToolsEnabled", dataAgentFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
     .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")

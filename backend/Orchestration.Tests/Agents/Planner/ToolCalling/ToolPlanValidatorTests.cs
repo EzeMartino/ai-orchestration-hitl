@@ -11,7 +11,6 @@ public class ToolPlanValidatorTests
         var options = new ToolCallingOptions();
 
         options.ExecutionMode.Should().Be(ToolCallingExecutionMode.Shadow);
-        options.FinancialAnalysisToolsEnabled.Should().BeFalse();
     }
 
     [Theory]
@@ -75,15 +74,48 @@ public class ToolPlanValidatorTests
         );
     }
 
+    [Fact]
+    public void Validate_Should_reject_catalog_tool_with_missing_required_argument()
+    {
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                AllowedTools = [PlannerToolCatalog.SearchCnvRegulationName]
+            }
+        );
+
+        var result = validator.Validate(
+            CreatePlan(
+                new ProposedToolCall(
+                    PlannerToolCatalog.SearchCnvRegulationName,
+                    new Dictionary<string, string>(),
+                    "Planner requested cited evidence."))
+        );
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                PlannerToolCatalog.SearchCnvRegulationName,
+                "Falta el argumento obligatorio: query."
+            )
+        );
+    }
+
     [Theory]
     [InlineData("data.compute_financial_ratios")]
     [InlineData("data.compare_periods")]
     [InlineData("data.detect_financial_risk_signals")]
     [InlineData("data.summarize_quantitative_evidence")]
-    public void Validate_Should_reject_financial_tools_when_disabled(
+    public void Validate_Should_reject_removed_granular_tools_even_when_configured(
         string toolName)
     {
-        var validator = new ToolPlanValidator();
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                AllowedTools = [toolName]
+            }
+        );
 
         var result = validator.Validate(
             CreatePlan(CreateFinancialCall(toolName))
@@ -94,89 +126,7 @@ public class ToolPlanValidatorTests
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 toolName,
-                "Las herramientas de análisis financiero están deshabilitadas."
-            )
-        );
-    }
-
-    [Theory]
-    [InlineData("data.compute_financial_ratios")]
-    [InlineData("data.compare_periods")]
-    [InlineData("data.detect_financial_risk_signals")]
-    [InlineData("data.summarize_quantitative_evidence")]
-    public void Validate_Should_allow_financial_tools_when_enabled_and_request_json_exists(
-        string toolName)
-    {
-        var validator = new ToolPlanValidator(
-            new ToolCallingOptions
-            {
-                FinancialAnalysisToolsEnabled = true
-            }
-        );
-
-        var result = validator.Validate(
-            CreatePlan(CreateFinancialCall(toolName))
-        );
-
-        result.IsValid.Should().BeTrue();
-        result.ApprovedCalls.Should().ContainSingle()
-            .Which.ToolName.Should().Be(toolName);
-        result.RejectedCalls.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Validate_Should_reject_financial_tool_with_missing_request_json()
-    {
-        var validator = new ToolPlanValidator(
-            new ToolCallingOptions
-            {
-                FinancialAnalysisToolsEnabled = true
-            }
-        );
-
-        var result = validator.Validate(
-            CreatePlan(CreateCall("data.compute_financial_ratios"))
-        );
-
-        result.IsValid.Should().BeFalse();
-        result.ApprovedCalls.Should().BeEmpty();
-        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
-            new RejectedToolCall(
-                "data.compute_financial_ratios",
-                "Falta el argumento obligatorio: requestJson."
-            )
-        );
-    }
-
-    [Fact]
-    public void Validate_Should_reject_financial_tool_with_empty_request_json()
-    {
-        var validator = new ToolPlanValidator(
-            new ToolCallingOptions
-            {
-                FinancialAnalysisToolsEnabled = true
-            }
-        );
-
-        var result = validator.Validate(
-            CreatePlan(
-                new ProposedToolCall(
-                    ToolName: "data.compute_financial_ratios",
-                    Arguments: new Dictionary<string, string>
-                    {
-                        ["requestJson"] = "   "
-                    },
-                    Reason: "Planner requested financial analysis."
-                )
-            )
-        );
-
-        result.IsValid.Should().BeFalse();
-        result.ApprovedCalls.Should().BeEmpty();
-        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
-            new RejectedToolCall(
-                "data.compute_financial_ratios",
-                "El argumento obligatorio está vacío: requestJson."
+                "La herramienta no está permitida."
             )
         );
     }
@@ -320,12 +270,34 @@ public class ToolPlanValidatorTests
     private static ProposedToolCall CreateCall(
         string? toolName)
     {
+        var arguments = string.Equals(
+            toolName,
+            PlannerToolCatalog.AnalyzeTransactionsName,
+            StringComparison.OrdinalIgnoreCase)
+            ? new Dictionary<string, string>
+            {
+                ["sessionId"] = Guid.NewGuid().ToString(),
+                ["reportName"] = "financial-report",
+                ["totalAmount"] = "125000.50",
+                ["transactionCount"] = "42",
+                ["submittedAt"] = DateTimeOffset.UtcNow.ToString("O")
+            }
+            : string.Equals(
+                toolName,
+                PlannerToolCatalog.SearchCnvRegulationName,
+                StringComparison.OrdinalIgnoreCase)
+                ? new Dictionary<string, string>
+                {
+                    ["query"] = "agentes"
+                }
+                : new Dictionary<string, string>
+                {
+                    ["sessionId"] = Guid.NewGuid().ToString()
+                };
+
         return new ProposedToolCall(
             ToolName: toolName!,
-            Arguments: new Dictionary<string, string>
-            {
-                ["sessionId"] = Guid.NewGuid().ToString()
-            },
+            Arguments: arguments,
             Reason: "Planner requested read-only analysis."
         );
     }

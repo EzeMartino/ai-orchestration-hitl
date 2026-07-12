@@ -107,13 +107,31 @@ public class ToolCallingDiagnosticServiceTests
     private static ProposedToolCall CreateProposedCall(
         string toolName)
     {
+        var arguments = string.Equals(
+            toolName,
+            PlannerToolCatalog.AnalyzeTransactionsName,
+            StringComparison.OrdinalIgnoreCase)
+            ? new Dictionary<string, string>
+            {
+                ["sessionId"] = Guid.Empty.ToString(),
+                ["reportName"] = "diagnostic-report",
+                ["totalAmount"] = "125000",
+                ["transactionCount"] = "42",
+                ["submittedAt"] = DateTimeOffset.UnixEpoch.ToString("O")
+            }
+            : string.Equals(
+                toolName,
+                PlannerToolCatalog.SearchCnvRegulationName,
+                StringComparison.OrdinalIgnoreCase)
+                ? new Dictionary<string, string>
+                {
+                    ["query"] = "agentes"
+                }
+                : new Dictionary<string, string>();
+
         return new ProposedToolCall(
             ToolName: toolName,
-            Arguments: new Dictionary<string, string>
-            {
-                ["query"] = "agentes",
-                ["sessionId"] = Guid.Empty.ToString()
-            },
+            Arguments: arguments,
             Reason: "Diagnostic tool call."
         );
     }

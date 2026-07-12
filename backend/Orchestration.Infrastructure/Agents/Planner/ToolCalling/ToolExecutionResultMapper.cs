@@ -9,8 +9,6 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 {
-    private const string DataToolName = "data.analyze_transactions";
-    private const string LegalToolName = "legal.search_cnv_regulation";
     private const string LegalEngine = "Semantic Kernel + MCP CNV Regulation Server";
     private const string HumanReviewWarning =
         "Recuperación regulatoria automatizada únicamente. Se requiere revisión legal humana antes de tomar decisiones operativas.";
@@ -20,7 +18,9 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     public DataAgentResult? TryMapDataResult(
         IReadOnlyList<ToolExecutionResult> executedCalls)
     {
-        var call = FindSuccessfulExecutedCall(executedCalls, DataToolName);
+        var call = FindSuccessfulExecutedCall(
+            executedCalls,
+            PlannerToolResultKind.DataAgent);
 
         if (call is null)
         {
@@ -43,7 +43,9 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     public LegalAgentResult? TryMapLegalResult(
         IReadOnlyList<ToolExecutionResult> executedCalls)
     {
-        var call = FindSuccessfulExecutedCall(executedCalls, LegalToolName);
+        var call = FindSuccessfulExecutedCall(
+            executedCalls,
+            PlannerToolResultKind.LegalAgent);
 
         if (call is null)
         {
@@ -92,10 +94,15 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
     private static ToolExecutionResult? FindSuccessfulExecutedCall(
         IReadOnlyList<ToolExecutionResult> executedCalls,
-        string toolName)
+        PlannerToolResultKind resultKind)
     {
+        var toolNames = PlannerToolCatalog.All
+            .Where(definition => definition.ResultKind == resultKind)
+            .Select(definition => definition.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         return executedCalls.FirstOrDefault(call =>
-            string.Equals(call.ToolName, toolName, StringComparison.OrdinalIgnoreCase) &&
+            toolNames.Contains(call.ToolName) &&
             call.Status == ToolExecutionStatus.Executed &&
             call.Succeeded
         );

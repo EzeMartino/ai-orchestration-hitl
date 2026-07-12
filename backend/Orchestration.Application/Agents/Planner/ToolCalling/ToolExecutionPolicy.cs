@@ -2,9 +2,6 @@ namespace Orchestration.Application.Agents.Planner.ToolCalling;
 
 public sealed class ToolExecutionPolicy : IToolExecutionPolicy
 {
-    private const string DataToolName = "data.analyze_transactions";
-    private const string LegalToolName = "legal.search_cnv_regulation";
-
     public IReadOnlyList<ToolExecutionPolicyDecision> Decide(
         IReadOnlyList<ApprovedToolCall> approvedCalls,
         ToolExecutionPolicyContext context)
@@ -21,7 +18,9 @@ public sealed class ToolExecutionPolicy : IToolExecutionPolicy
         ApprovedToolCall call,
         ToolExecutionPolicyContext context)
     {
-        if (string.Equals(call.ToolName, DataToolName, StringComparison.OrdinalIgnoreCase) &&
+        var definition = PlannerToolCatalog.Find(call.ToolName);
+
+        if (definition?.SatisfactionKind == PlannerToolSatisfactionKind.DataAnalysis &&
             context.DataAnalysisAlreadyCompleted)
         {
             return new ToolExecutionPolicyDecision(
@@ -31,7 +30,7 @@ public sealed class ToolExecutionPolicy : IToolExecutionPolicy
             );
         }
 
-        if (string.Equals(call.ToolName, LegalToolName, StringComparison.OrdinalIgnoreCase) &&
+        if (definition?.SatisfactionKind == PlannerToolSatisfactionKind.LegalReview &&
             context.LegalReviewAlreadyCompleted)
         {
             return new ToolExecutionPolicyDecision(

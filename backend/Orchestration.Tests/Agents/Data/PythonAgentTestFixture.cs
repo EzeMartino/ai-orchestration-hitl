@@ -48,7 +48,6 @@ public sealed class PythonAgentTestFixture : IDisposable
         services.AddScoped<CSnakesDataAgent>();
         services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
         services.AddScoped<PythonAnomalyDetectionPlugin>();
-        services.AddScoped<FinancialAnalysisPlugin>();
         services.AddSingleton(Options.Create(new DataAgentOptions()));
         services.AddScoped<SemanticKernelDataAgent>();
         services.AddScoped<ILegacyDataAgent>(provider =>

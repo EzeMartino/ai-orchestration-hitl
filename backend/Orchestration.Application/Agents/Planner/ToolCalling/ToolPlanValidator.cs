@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Orchestration.Application.Agents.Planner.ToolCalling;
 
 public sealed class ToolPlanValidator : IToolPlanValidator
@@ -8,23 +10,8 @@ public sealed class ToolPlanValidator : IToolPlanValidator
     private const string OperationalReason = "No se permiten herramientas financieras operativas.";
     private const string LegalConclusionReason = "No se permiten herramientas de conclusión legal.";
     private const string MaxToolCallsReason = "Se excedió la cantidad máxima de llamadas a herramientas.";
-    private const string FinancialToolsDisabledReason = "Las herramientas de análisis financiero están deshabilitadas.";
-    private const string MissingRequestJsonReason = "Falta el argumento obligatorio: requestJson.";
-    private const string EmptyRequestJsonReason = "El argumento obligatorio está vacío: requestJson.";
-
     private readonly HashSet<string> _allowedTools;
     private readonly int _maxToolCalls;
-    private readonly bool _financialAnalysisToolsEnabled;
-
-    private static readonly HashSet<string> FinancialAnalysisTools = new(
-        [
-            "data.compute_financial_ratios",
-            "data.compare_periods",
-            "data.detect_financial_risk_signals",
-            "data.summarize_quantitative_evidence"
-        ],
-        StringComparer.OrdinalIgnoreCase
-    );
 
     public ToolPlanValidator(
         ToolCallingOptions? options = null)
@@ -38,7 +25,6 @@ public sealed class ToolPlanValidator : IToolPlanValidator
         );
 
         _maxToolCalls = Math.Max(0, resolvedOptions.MaxToolCalls);
-        _financialAnalysisToolsEnabled = resolvedOptions.FinancialAnalysisToolsEnabled;
     }
 
     public ToolValidationResult Validate(
@@ -115,26 +101,40 @@ public sealed class ToolPlanValidator : IToolPlanValidator
             return LegalConclusionReason;
         }
 
-        if (FinancialAnalysisTools.Contains(toolName))
+        var definition = PlannerToolCatalog.Find(toolName);
+
+        if (definition is null || !_allowedTools.Contains(definition.Name))
         {
-            if (!_financialAnalysisToolsEnabled)
-            {
-                return FinancialToolsDisabledReason;
-            }
-
-            if (!TryFindArgument(proposedCall.Arguments, "requestJson", out var requestJson))
-            {
-                return MissingRequestJsonReason;
-            }
-
-            return string.IsNullOrWhiteSpace(requestJson)
-                ? EmptyRequestJsonReason
-                : null;
+            return NotAllowlistedReason;
         }
 
-        return _allowedTools.Contains(toolName)
-            ? null
-            : NotAllowlistedReason;
+        foreach (var argument in definition.Arguments.Where(argument => argument.Required))
+        {
+            if (!TryFindArgument(proposedCall.Arguments, argument.Name, out var value) ||
+                string.IsNullOrWhiteSpace(value))
+            {
+                return $"Falta el argumento obligatorio: {argument.Name}.";
+            }
+        }
+
+        foreach (var argument in proposedCall.Arguments)
+        {
+            var argumentDefinition = definition.Arguments.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, argument.Key, StringComparison.OrdinalIgnoreCase));
+
+            if (argumentDefinition is null)
+            {
+                return $"Argumento no permitido: {argument.Key}.";
+            }
+
+            if (!string.IsNullOrWhiteSpace(argument.Value) &&
+                !HasValidType(argument.Value, argumentDefinition.Type))
+            {
+                return $"Argumento con formato no válido: {argumentDefinition.Name}.";
+            }
+        }
+
+        return null;
     }
 
     private static bool TryFindArgument(
@@ -155,5 +155,33 @@ public sealed class ToolPlanValidator : IToolPlanValidator
         value = "";
 
         return false;
+    }
+
+    private static bool HasValidType(
+        string value,
+        PlannerToolArgumentType type)
+    {
+        return type switch
+        {
+            PlannerToolArgumentType.String => true,
+            PlannerToolArgumentType.Guid => Guid.TryParse(value, out _),
+            PlannerToolArgumentType.Decimal => decimal.TryParse(
+                value,
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out _),
+            PlannerToolArgumentType.Integer => int.TryParse(
+                value,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out _),
+            PlannerToolArgumentType.DateTimeOffset => DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _),
+            PlannerToolArgumentType.Boolean => bool.TryParse(value, out _),
+            _ => false
+        };
     }
 }

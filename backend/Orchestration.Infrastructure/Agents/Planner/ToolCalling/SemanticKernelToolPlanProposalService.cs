@@ -17,16 +17,9 @@ You may only propose read-only analysis or retrieval tools.
 
 You must not approve, reject, complete, fail, transition workflow state, move funds, block accounts, freeze accounts, or provide legal conclusions.
 
-Allowed tools:
-- data.analyze_transactions
-- legal.search_cnv_regulation
-
-Propose at most 2 tool calls.
-Prefer:
-1. data.analyze_transactions
-2. legal.search_cnv_regulation
-
-Do not propose multiple legal.search_cnv_regulation calls unless there is a clearly different regulatory search intent.
+Only propose tools listed in the availableTools catalog supplied by the user message.
+Do not exceed maxToolCalls.
+Do not invent tool names or arguments outside the supplied schemas.
 
 Forbidden tools include:
 - workflow.complete
@@ -42,8 +35,6 @@ Forbidden tools include:
 - system.execute_command
 - database.raw_query
 
-For legal.search_cnv_regulation, prefer short Spanish CNV search queries such as "agentes", "fondos comunes", "custodia", "registro" or "regimen informativo". Do not generate long multi-term legal queries.
-
 Write the reason field in Spanish.
 Use concise Spanish suitable for an audit trail.
 Return JSON only.
@@ -54,14 +45,8 @@ Return JSON only with this shape:
 {
   "proposedCalls": [
     {
-      "toolName": "data.analyze_transactions",
-      "arguments": {
-        "sessionId": "...",
-        "reportName": "...",
-        "totalAmount": "...",
-        "transactionCount": "...",
-        "submittedAt": "..."
-      },
+      "toolName": "...",
+      "arguments": {},
       "reason": "..."
     }
   ]
@@ -130,7 +115,7 @@ If no tool is appropriate, return:
         {
             var history = new ChatHistory();
             history.AddSystemMessage(SystemPrompt);
-            history.AddUserMessage(BuildUserPrompt(input));
+            history.AddUserMessage(BuildUserPrompt(input, _toolCallingOptions));
 
             var response = await _chatCompletionService.GetChatMessageContentAsync(
                 history,
@@ -163,7 +148,8 @@ If no tool is appropriate, return:
     }
 
     private static string BuildUserPrompt(
-        ToolPlanProposalInput input)
+        ToolPlanProposalInput input,
+        ToolCallingOptions options)
     {
         var payload = new
         {
@@ -177,11 +163,20 @@ If no tool is appropriate, return:
                 riskFactors = input.RiskFactors,
                 limitations = input.Limitations
             },
-            allowedTools = new[]
-            {
-                "data.analyze_transactions",
-                "legal.search_cnv_regulation"
-            },
+            maxToolCalls = Math.Max(0, options.MaxToolCalls),
+            availableTools = PlannerToolCatalog.GetAllowed(options)
+                .Select(tool => new
+                {
+                    name = tool.Name,
+                    description = tool.PromptDescription,
+                    arguments = tool.Arguments.Select(argument => new
+                    {
+                        name = argument.Name,
+                        type = argument.Type.ToString(),
+                        required = argument.Required,
+                        description = argument.Description
+                    })
+                }),
             forbiddenTools = new[]
             {
                 "workflow.complete",

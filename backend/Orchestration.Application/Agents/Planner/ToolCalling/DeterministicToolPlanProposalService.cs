@@ -21,10 +21,16 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
             return Task.FromResult(new ToolPlan([]));
         }
 
-        var plan = new ToolPlan(
-            [
+        var allowedHandlers = PlannerToolCatalog.GetAllowed(_options)
+            .Select(definition => definition.Handler)
+            .ToHashSet();
+        var calls = new List<ProposedToolCall>();
+
+        if (allowedHandlers.Contains(PlannerToolHandler.AnalyzeTransactions))
+        {
+            calls.Add(
                 new ProposedToolCall(
-                    ToolName: "data.analyze_transactions",
+                    ToolName: PlannerToolCatalog.AnalyzeTransactionsName,
                     Arguments: new Dictionary<string, string>
                     {
                         ["sessionId"] = input.SessionId.ToString(),
@@ -34,9 +40,14 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                         ["submittedAt"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                     },
                     Reason: "Analizar senales cuantitativas del reporte financiero para detectar anomalias."
-                ),
+                ));
+        }
+
+        if (allowedHandlers.Contains(PlannerToolHandler.SearchCnvRegulation))
+        {
+            calls.Add(
                 new ProposedToolCall(
-                    ToolName: "legal.search_cnv_regulation",
+                    ToolName: PlannerToolCatalog.SearchCnvRegulationName,
                     Arguments: new Dictionary<string, string>
                     {
                         ["query"] = "agentes",
@@ -45,10 +56,9 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                         ["requiresReview"] = "true"
                     },
                     Reason: "Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados."
-                )
-            ]
-        );
+                ));
+        }
 
-        return Task.FromResult(plan);
+        return Task.FromResult(new ToolPlan(calls));
     }
 }
