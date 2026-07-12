@@ -144,31 +144,21 @@ public sealed class StructuredFinancialMetricsSessionService
         Guid sessionId,
         CancellationToken cancellationToken)
     {
-        var contextJson = await _dbContext.AnalysisSessions
-            .Where(x => x.Id == sessionId)
-            .Select(x => x.ContextJson)
-            .FirstOrDefaultAsync(cancellationToken);
+        var sessionContext = await GetSessionContextAsync(sessionId, cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(contextJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            var root = JsonNode.Parse(contextJson) as JsonObject;
-
-            return root?[MetricsContextPropertyName]?.Deserialize<StructuredFinancialMetricsContext>(
-                JsonOptions
-            );
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
+        return sessionContext.Metrics;
     }
 
     public async Task<FinancialReportSummary?> GetReportSummaryAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var sessionContext = await GetSessionContextAsync(sessionId, cancellationToken);
+
+        return sessionContext.ReportSummary;
+    }
+
+    public async Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
         Guid sessionId,
         CancellationToken cancellationToken)
     {
@@ -179,20 +169,51 @@ public sealed class StructuredFinancialMetricsSessionService
 
         if (string.IsNullOrWhiteSpace(contextJson))
         {
-            return null;
+            return EmptySessionContext();
         }
 
         try
         {
             var root = JsonNode.Parse(contextJson) as JsonObject;
-            var reportNode = root?[FinancialReportContextPropertyName];
 
-            if (reportNode is null)
+            if (root is null)
             {
-                return null;
+                return EmptySessionContext();
             }
 
-            var input = reportNode.Deserialize<FinancialReportSummaryInput>(JsonOptions);
+            return new StructuredFinancialMetricsSessionContext(
+                DeserializeMetrics(root[MetricsContextPropertyName]),
+                DeserializeReportSummary(root[FinancialReportContextPropertyName]));
+        }
+        catch (JsonException)
+        {
+            return EmptySessionContext();
+        }
+    }
+
+    private static StructuredFinancialMetricsContext? DeserializeMetrics(
+        JsonNode? node)
+    {
+        try
+        {
+            return node?.Deserialize<StructuredFinancialMetricsContext>(JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static FinancialReportSummary? DeserializeReportSummary(
+        JsonNode? node)
+    {
+        try
+        {
+            var input = node?.Deserialize<FinancialReportSummaryInput>(JsonOptions);
             var validation = FinancialReportSummaryValidator.Validate(input);
 
             return validation.IsValid
@@ -207,6 +228,11 @@ public sealed class StructuredFinancialMetricsSessionService
         {
             return null;
         }
+    }
+
+    private static StructuredFinancialMetricsSessionContext EmptySessionContext()
+    {
+        return new StructuredFinancialMetricsSessionContext(null, null);
     }
 
     private static string MergeContextJson(

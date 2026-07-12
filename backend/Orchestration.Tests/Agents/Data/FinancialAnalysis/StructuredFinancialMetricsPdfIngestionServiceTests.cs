@@ -771,6 +771,11 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Guid sessionId,
             CancellationToken cancellationToken) =>
             Task.FromResult<FinancialReportSummary?>(null);
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
     }
 
     private sealed class FakeActivityPublisher : IActivityEventPublisher

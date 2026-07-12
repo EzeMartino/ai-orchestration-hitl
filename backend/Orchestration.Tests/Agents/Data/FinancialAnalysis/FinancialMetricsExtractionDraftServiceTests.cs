@@ -4035,6 +4035,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<FinancialReportSummary?>(null);
         }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
+        }
     }
 
     private sealed class StagingSessionService(
@@ -4115,6 +4122,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<FinancialReportSummary?>(null);
         }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
+        }
     }
 
     private sealed class DirtyThenThrowSessionService
@@ -4187,6 +4201,13 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
             CancellationToken cancellationToken)
         {
             return _inner.GetReportSummaryAsync(sessionId, cancellationToken);
+        }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.GetSessionContextAsync(sessionId, cancellationToken);
         }
     }
 

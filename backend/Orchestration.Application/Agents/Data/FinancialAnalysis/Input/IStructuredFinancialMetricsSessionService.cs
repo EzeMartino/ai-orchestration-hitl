@@ -24,4 +24,8 @@ public interface IStructuredFinancialMetricsSessionService
     Task<FinancialReportSummary?> GetReportSummaryAsync(
         Guid sessionId,
         CancellationToken cancellationToken);
+
+    Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken);
 }

@@ -270,6 +270,38 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
+    public async Task GetFinancialMetrics_ShouldReadMetricsAndSummaryFromOneCombinedSnapshot()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var inner = StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext);
+        await inner.SaveAsync(
+            session.Id,
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
+            CancellationToken.None);
+        var snapshotService = new CombinedSnapshotOnlySessionService(inner);
+        var controller = CreateController(
+            dbContext,
+            financialMetricsSessionService: snapshotService);
+
+        var result = await controller.GetFinancialMetrics(
+            session.Id,
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<GetFinancialMetricsResponse>().Subject;
+        snapshotService.CombinedGetCalls.Should().Be(1);
+        response.Context.Should().NotBeNull();
+        response.Context!.DocumentId.Should().Be("vista-energy-structured-input");
+        response.ReportSummary.Should().Be(ApiReportSummary);
+    }
+
+    [Fact]
     public async Task GetFinancialMetrics_Should_return_not_found_for_unknown_session()
     {
         await using var dbContext = CreateDbContext();
@@ -1454,7 +1486,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         AnalysisOrchestratorService? orchestrator = null,
         IStructuredFinancialMetricsPdfIngestionService? pdfIngestionService = null,
         IFinancialMetricsExtractionDraftService? draftService = null,
-        IStructuredFinancialMetricsCsvParser? csvParser = null)
+        IStructuredFinancialMetricsCsvParser? csvParser = null,
+        IStructuredFinancialMetricsSessionService? financialMetricsSessionService = null)
     {
         publisher ??= new FakeActivityEventPublisher();
 
@@ -1465,7 +1498,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 Options.Create(dataAgentOptions ?? new DataAgentOptions())
             ),
             publisher,
-            StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
+            financialMetricsSessionService ??
+                StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
             csvParser ?? new StructuredFinancialMetricsCsvParser(),
             pdfIngestionService ?? new FakeStructuredFinancialMetricsPdfIngestionService(
                 new StructuredFinancialMetricsPdfIngestionResult(
@@ -1836,6 +1870,47 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         {
             LastInput = input;
             return _inner.Parse(input);
+        }
+    }
+
+    private sealed class CombinedSnapshotOnlySessionService(
+        IStructuredFinancialMetricsSessionService inner)
+        : IStructuredFinancialMetricsSessionService
+    {
+        public int CombinedGetCalls { get; private set; }
+
+        public Task<FinancialMetricsSessionSaveResult?> StageAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken) =>
+            inner.StageAsync(request, cancellationToken);
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            Guid sessionId,
+            StructuredFinancialMetricsInput input,
+            CancellationToken cancellationToken) =>
+            inner.SaveAsync(sessionId, input, cancellationToken);
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken) =>
+            inner.SaveAsync(request, cancellationToken);
+
+        public Task<StructuredFinancialMetricsContext?> GetAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Split metrics read must not be used.");
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Split report read must not be used.");
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            CombinedGetCalls++;
+            return inner.GetSessionContextAsync(sessionId, cancellationToken);
         }
     }
 

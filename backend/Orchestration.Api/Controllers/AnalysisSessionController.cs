@@ -423,19 +423,15 @@ public class AnalysisSessionsController(
             return NotFound();
         }
 
-        var context = await _financialMetricsSessionService.GetAsync(
-            id,
-            cancellationToken
-        );
-        var reportSummary = await _financialMetricsSessionService.GetReportSummaryAsync(
+        var sessionContext = await _financialMetricsSessionService.GetSessionContextAsync(
             id,
             cancellationToken
         );
 
         return Ok(new GetFinancialMetricsResponse(
             SessionId: id,
-            Context: context,
-            ReportSummary: reportSummary
+            Context: sessionContext.Metrics,
+            ReportSummary: sessionContext.ReportSummary
         ));
     }
 

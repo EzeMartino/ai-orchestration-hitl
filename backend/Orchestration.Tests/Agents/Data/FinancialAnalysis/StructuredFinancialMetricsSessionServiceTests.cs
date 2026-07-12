@@ -430,6 +430,49 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
     }
 
     [Fact]
+    public async Task GetSessionContextAsync_PersistedInput_ShouldReturnCoherentExactPair()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        await service.SaveAsync(session.Id, CreateInput(), CancellationToken.None);
+
+        var snapshot = await service.GetSessionContextAsync(
+            session.Id,
+            CancellationToken.None);
+
+        snapshot.Metrics.Should().NotBeNull();
+        snapshot.Metrics!.DocumentId.Should().Be("vista-energy-structured-input");
+        snapshot.Metrics.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        snapshot.ReportSummary.Should().Be(NormalizedReportSummary);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("{not-json")]
+    [InlineData("{\"financialReport\":\"invalid\",\"structuredFinancialMetrics\":\"invalid\"}")]
+    public async Task GetSessionContextAsync_MissingOrMalformedContext_ShouldReturnNullPair(
+        string contextJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(contextJson);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var snapshot = await service.GetSessionContextAsync(
+            session.Id,
+            CancellationToken.None);
+
+        snapshot.Metrics.Should().BeNull();
+        snapshot.ReportSummary.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetReportSummaryAsync_ShouldReturnExactPersistedSummary()
     {
         await using var dbContext = CreateDbContext();
