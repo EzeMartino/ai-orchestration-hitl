@@ -1,5 +1,6 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
-using CSnakes.Runtime;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis.Pdf;
@@ -28,10 +29,14 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
     private readonly ISearchablePdfMerger _merger;
     private readonly Func<string> _createdWorkingDirectoryFactory;
 
-    public LocalSearchablePdfOcrService(IPythonEnvironment pythonEnvironment)
+    public LocalSearchablePdfOcrService(
+        string pythonHome,
+        long maxWorkerMemoryBytes)
         : this(
             new LocalPdfToolRunner(),
-            new CSnakesSearchablePdfMerger(pythonEnvironment),
+            new IsolatedSearchablePdfMerger(
+                pythonHome,
+                maxWorkerMemoryBytes),
             CreateWorkingDirectory)
     {
     }
@@ -80,11 +85,18 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             var inputPath = Path.Combine(workingDirectory, "input.pdf");
             try
             {
-                await using var output = File.Create(inputPath);
-                await pdf.CopyToAsync(output, cancellationToken);
+                await CopyInputWithinTemporaryLimitAsync(
+                    pdf,
+                    inputPath,
+                    options,
+                    cancellationToken);
             }
             catch (OperationCanceledException) when (
                 cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (ResourceLimitExceededException)
             {
                 throw;
             }
@@ -119,10 +131,11 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
 
             var outputPath = Path.Combine(workingDirectory, "searchable.pdf");
             cancellationToken.ThrowIfCancellationRequested();
-            var mergeResult = MergePages(
+            var mergeResult = await MergePagesAsync(
                 workingDirectory,
                 pagePaths,
                 outputPath,
+                options,
                 cancellationToken);
             if (!mergeResult.Succeeded)
             {
@@ -197,13 +210,17 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 imagePrefix
             ],
             GetTimeout(options),
-            cancellationToken);
+            cancellationToken,
+            GetMaximumTemporaryBytes(options),
+            workingDirectory,
+            GetMaximumToolOutputBytes(options));
 
         EnsureWithinTemporaryLimit(workingDirectory, options);
 
         var imagePaths = Directory
             .EnumerateFiles(workingDirectory, "page-*.png")
             .OrderBy(GetGeneratedPageSortKey)
+            .Take(GetMaxPages(options))
             .ToArray();
         var pagePaths = new List<string>(imagePaths.Length);
 
@@ -224,7 +241,10 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                     "pdf"
                 ],
                 GetTimeout(options),
-                cancellationToken);
+                cancellationToken,
+                GetMaximumTemporaryBytes(options),
+                workingDirectory,
+                GetMaximumToolOutputBytes(options));
 
             EnsureWithinTemporaryLimit(workingDirectory, options);
             pagePaths.Add(outputPrefix + ".pdf");
@@ -234,10 +254,11 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         return pagePaths;
     }
 
-    private SearchablePdfMergeResponse MergePages(
+    private async Task<SearchablePdfMergeResponse> MergePagesAsync(
         string workingDirectory,
         IReadOnlyList<string> pagePaths,
         string outputPath,
+        StructuredFinancialMetricsPdfExtractionOptions options,
         CancellationToken cancellationToken)
     {
         try
@@ -246,9 +267,15 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 new SearchablePdfMergeRequest(
                     workingDirectory,
                     pagePaths,
-                    outputPath),
+                    outputPath,
+                    GetMaximumTemporaryBytes(options),
+                    GetMaximumSearchablePdfBytes(options)),
                 JsonOptions);
-            var responseJson = _merger.MergePdfPages(requestJson);
+            var responseJson = await _merger.MergePdfPagesAsync(
+                requestJson,
+                GetTimeout(options),
+                GetMaximumMergerOutputBytes(options),
+                cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             var response = JsonSerializer.Deserialize<SearchablePdfMergeResponse>(
@@ -282,6 +309,7 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             LocalPdfToolFailure.DependencyMissing => DependencyFailure,
             LocalPdfToolFailure.ToolFailed => ToolFailure,
             LocalPdfToolFailure.Timeout => TimeoutFailure,
+            LocalPdfToolFailure.ResourceLimitExceeded => ResourceLimitFailure,
             _ => ToolFailure
         };
     }
@@ -291,7 +319,9 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         return failureReason switch
         {
             MergeFailure => MergeFailure,
+            TimeoutFailure => TimeoutFailure,
             PathOutsideWorkingDirectoryFailure => PathOutsideWorkingDirectoryFailure,
+            ResourceLimitFailure => ResourceLimitFailure,
             _ => MergeFailure
         };
     }
@@ -305,7 +335,7 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
         string workingDirectory,
         StructuredFinancialMetricsPdfExtractionOptions options)
     {
-        var limit = Math.Max(1, options.MaxTemporaryBytes);
+        var limit = GetMaximumTemporaryBytes(options);
         long totalBytes = 0;
 
         foreach (var filePath in Directory.EnumerateFiles(
@@ -332,11 +362,76 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             return;
         }
 
-        var limit = Math.Max(1, options.MaxSearchablePdfBytes);
+        var limit = GetMaximumSearchablePdfBytes(options);
         if (new FileInfo(outputPath).Length > limit)
         {
             throw new ResourceLimitExceededException();
         }
+    }
+
+    private static async Task CopyInputWithinTemporaryLimitAsync(
+        Stream input,
+        string inputPath,
+        StructuredFinancialMetricsPdfExtractionOptions options,
+        CancellationToken cancellationToken)
+    {
+        const int bufferSize = 81_920;
+        var limit = GetMaximumTemporaryBytes(options);
+        var buffer = new byte[bufferSize];
+        long writtenBytes = 0;
+
+        await using var output = new FileStream(
+            inputPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize,
+            FileOptions.Asynchronous);
+
+        while (true)
+        {
+            var read = await input.ReadAsync(
+                buffer.AsMemory(),
+                cancellationToken);
+            if (read == 0)
+            {
+                return;
+            }
+
+            if (read > limit - writtenBytes)
+            {
+                throw new ResourceLimitExceededException();
+            }
+
+            await output.WriteAsync(
+                buffer.AsMemory(0, read),
+                cancellationToken);
+            writtenBytes += read;
+        }
+    }
+
+    private static long GetMaximumTemporaryBytes(
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        return Math.Max(0, options.MaxTemporaryBytes);
+    }
+
+    private static long GetMaximumSearchablePdfBytes(
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        return Math.Max(0, options.MaxSearchablePdfBytes);
+    }
+
+    private static long GetMaximumToolOutputBytes(
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        return Math.Max(0, options.MaxToolOutputBytes);
+    }
+
+    private static int GetMaximumMergerOutputBytes(
+        StructuredFinancialMetricsPdfExtractionOptions options)
+    {
+        return (int)Math.Min(int.MaxValue, GetMaximumToolOutputBytes(options));
     }
 
     private static async Task TryDeleteDirectoryAsync(string directory)
@@ -359,8 +454,12 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
             catch (UnauthorizedAccessException)
             {
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                Trace.TraceWarning(
+                    "Financial PDF temporary cleanup failed for '{0}': {1}",
+                    directory,
+                    exception.Message);
                 return;
             }
 
@@ -371,6 +470,10 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
                 await Task.Delay(CleanupRetryDelay, CancellationToken.None);
             }
         }
+
+        Trace.TraceWarning(
+            "Financial PDF temporary cleanup was deferred for '{0}'.",
+            directory);
     }
 
     private static void TryClearReadOnlyAttributes(string directory)
@@ -439,7 +542,9 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
     private sealed record SearchablePdfMergeRequest(
         string WorkingDirectory,
         IReadOnlyList<string> PagePaths,
-        string OutputPath);
+        string OutputPath,
+        long MaxTemporaryBytes,
+        long MaxSearchablePdfBytes);
 
     private sealed record SearchablePdfMergeResponse(
         bool Succeeded,
@@ -450,18 +555,122 @@ public sealed class LocalSearchablePdfOcrService : ISearchablePdfOcrService
 
 internal interface ISearchablePdfMerger
 {
-    string MergePdfPages(string requestJson);
+    Task<string> MergePdfPagesAsync(
+        string requestJson,
+        TimeSpan timeout,
+        int maxStandardOutputBytes,
+        CancellationToken cancellationToken);
 }
 
-internal sealed class CSnakesSearchablePdfMerger(
-    IPythonEnvironment pythonEnvironment) : ISearchablePdfMerger
+internal sealed class IsolatedSearchablePdfMerger : ISearchablePdfMerger
 {
-    private readonly IPythonEnvironment _pythonEnvironment = pythonEnvironment;
+    private const long DefaultMaxStandardInputBytes = 65_536;
+    private const int DefaultMaxStandardErrorBytes = 16_384;
 
-    public string MergePdfPages(string requestJson)
+    private readonly string _pythonExecutable;
+    private readonly string _scriptPath;
+    private readonly IFinancialDocumentProcessRunner _processRunner;
+    private readonly long _maxWorkerMemoryBytes;
+    private readonly long _maxStandardInputBytes;
+    private readonly int _maxStandardErrorBytes;
+
+    public IsolatedSearchablePdfMerger(
+        string pythonHome,
+        long maxWorkerMemoryBytes)
+        : this(
+            IsolatedFinancialDocumentMarkdownConverter.ResolvePythonExecutable(
+                pythonHome,
+                OperatingSystem.IsWindows()),
+            Path.Combine(pythonHome, "searchable_pdf.py"),
+            new SystemFinancialDocumentProcessRunner(),
+            maxWorkerMemoryBytes,
+            DefaultMaxStandardInputBytes,
+            DefaultMaxStandardErrorBytes)
     {
-        return _pythonEnvironment
-            .SearchablePdf()
-            .MergePdfPages(requestJson);
     }
+
+    internal IsolatedSearchablePdfMerger(
+        string pythonExecutable,
+        string scriptPath,
+        IFinancialDocumentProcessRunner processRunner,
+        long maxWorkerMemoryBytes,
+        long maxStandardInputBytes,
+        int maxStandardErrorBytes)
+    {
+        _pythonExecutable = pythonExecutable;
+        _scriptPath = scriptPath;
+        _processRunner = processRunner;
+        _maxWorkerMemoryBytes = Math.Max(1, maxWorkerMemoryBytes);
+        _maxStandardInputBytes = Math.Max(1, maxStandardInputBytes);
+        _maxStandardErrorBytes = Math.Max(1, maxStandardErrorBytes);
+    }
+
+    public async Task<string> MergePdfPagesAsync(
+        string requestJson,
+        TimeSpan timeout,
+        int maxStandardOutputBytes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requestJson);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var timeoutCancellation = new CancellationTokenSource(timeout);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            timeoutCancellation.Token);
+        using var standardInput = new MemoryStream(
+            Encoding.UTF8.GetBytes(requestJson),
+            writable: false);
+        var startInfo = new ProcessStartInfo(_pythonExecutable)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("-I");
+        startInfo.ArgumentList.Add(_scriptPath);
+        startInfo.ArgumentList.Add("--max-memory-bytes");
+        startInfo.ArgumentList.Add(
+            _maxWorkerMemoryBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        try
+        {
+            var result = await _processRunner.RunAsync(
+                new FinancialDocumentProcessRequest(
+                    startInfo,
+                    standardInput,
+                    _maxStandardInputBytes,
+                    _maxWorkerMemoryBytes,
+                    Math.Max(1, maxStandardOutputBytes),
+                    _maxStandardErrorBytes),
+                linkedCancellation.Token);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            return result.ExitCode == 0 && !result.OutputLimitExceeded
+                ? result.StandardOutput
+                : Failure(MergeFailure);
+        }
+        catch (OperationCanceledException) when (
+            timeoutCancellation.IsCancellationRequested &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            return Failure(TimeoutFailure);
+        }
+    }
+
+    private const string MergeFailure = "merge_failed";
+    private const string TimeoutFailure = "timeout";
+
+    private static string Failure(string failureReason)
+    {
+        return JsonSerializer.Serialize(new SearchablePdfMergeResponse(
+            false,
+            failureReason));
+    }
+
+    private sealed record SearchablePdfMergeResponse(
+        bool Succeeded,
+        string FailureReason);
 }

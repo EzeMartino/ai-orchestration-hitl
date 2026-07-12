@@ -43,6 +43,10 @@ var financialMetricsExtractionMaxMarkdownChunks =
     builder.Configuration["FinancialMetricsExtraction:MaxMarkdownChunks"];
 var financialMetricsExtractionConversionTimeoutSeconds =
     builder.Configuration["FinancialMetricsExtraction:ConversionTimeoutSeconds"];
+var financialMetricsExtractionMaxWorkerMemoryBytes =
+    builder.Configuration["FinancialMetricsExtraction:MaxWorkerMemoryBytes"];
+var financialMetricsExtractionMaxConcurrentConversions =
+    builder.Configuration["FinancialMetricsExtraction:MaxConcurrentConversions"];
 var financialMetricsExtractionSemanticExtractionTimeoutSeconds =
     builder.Configuration["FinancialMetricsExtraction:SemanticExtractionTimeoutSeconds"];
 var financialMetricsExtractionMaxEvidenceExcerptCharacters =
@@ -138,6 +142,8 @@ var api = builder
     .WithEnvironment("FinancialMetricsExtraction__MaxMarkdownCharacters", financialMetricsExtractionMaxMarkdownCharacters ?? "200000")
     .WithEnvironment("FinancialMetricsExtraction__MaxMarkdownChunks", financialMetricsExtractionMaxMarkdownChunks ?? "12")
     .WithEnvironment("FinancialMetricsExtraction__ConversionTimeoutSeconds", financialMetricsExtractionConversionTimeoutSeconds ?? "60")
+    .WithEnvironment("FinancialMetricsExtraction__MaxWorkerMemoryBytes", financialMetricsExtractionMaxWorkerMemoryBytes ?? "1073741824")
+    .WithEnvironment("FinancialMetricsExtraction__MaxConcurrentConversions", financialMetricsExtractionMaxConcurrentConversions ?? "2")
     .WithEnvironment("FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds", financialMetricsExtractionSemanticExtractionTimeoutSeconds ?? "90")
     .WithEnvironment("FinancialMetricsExtraction__MaxEvidenceExcerptCharacters", financialMetricsExtractionMaxEvidenceExcerptCharacters ?? "500")
     .WithReference(orchestrationDb)

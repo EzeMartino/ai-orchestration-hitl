@@ -89,8 +89,7 @@ builder.Services.AddScoped<IStructuredFinancialMetricsTextParser, StructuredFina
 builder.Services.AddScoped<IPdfTextExtractor, PdfPigTextExtractor>();
 builder.Services.AddScoped<IOcrTextExtractor, LocalOcrTextExtractor>();
 builder.Services.AddScoped<IStructuredFinancialMetricsPdfExtractor, StructuredFinancialMetricsPdfExtractor>();
-builder.Services.AddScoped<IFinancialDocumentMarkdownConverter, CSnakesFinancialDocumentMarkdownConverter>();
-builder.Services.AddScoped<ISearchablePdfOcrService, LocalSearchablePdfOcrService>();
+builder.Services.AddHostedService<LocalPdfTemporaryDirectorySweeper>();
 builder.Services.AddScoped<
     IFinancialMetricsExtractionCompletenessEvaluator,
     FinancialMetricsExtractionCompletenessEvaluator>();
@@ -137,6 +136,38 @@ if (!File.Exists(pythonLockFile))
         $"Python dependency lock file was not found at '{pythonLockFile}'. "
         + "Generate requirements.lock from requirements.txt before starting the API.");
 }
+
+var financialMetricsExtractionWorkerOptions = builder.Configuration
+    .GetSection(FinancialMetricsExtractionOptions.SectionName)
+    .Get<FinancialMetricsExtractionOptions>() ?? new FinancialMetricsExtractionOptions();
+builder.Services.AddSingleton(new FinancialDocumentConversionGate(
+    financialMetricsExtractionWorkerOptions.MaxConcurrentConversions));
+builder.Services.AddSingleton<IFinancialDocumentProcessingGate>(provider =>
+    provider.GetRequiredService<FinancialDocumentConversionGate>());
+builder.Services.AddScoped<ISearchablePdfOcrService>(_ =>
+    new LocalSearchablePdfOcrService(
+        pythonHome,
+        financialMetricsExtractionWorkerOptions.MaxWorkerMemoryBytes));
+builder.Services.AddScoped<IFinancialDocumentMarkdownConverter>(provider =>
+{
+    var fileOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            StructuredFinancialMetricsFileUploadOptions>>()
+        .Value;
+    var pdfOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            StructuredFinancialMetricsPdfExtractionOptions>>()
+        .Value;
+    var extractionOptions = provider
+        .GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            FinancialMetricsExtractionOptions>>()
+        .Value;
+
+    return new IsolatedFinancialDocumentMarkdownConverter(
+        pythonHome,
+        Math.Max(fileOptions.MaxFileSizeBytes, pdfOptions.MaxSearchablePdfBytes),
+        extractionOptions.MaxWorkerMemoryBytes);
+});
 
 builder.Services
     .WithPython()

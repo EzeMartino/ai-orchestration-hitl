@@ -1304,7 +1304,7 @@ The current provider expects structured financial metrics. `DataAgent__Structure
 
 ### Python and Local PDF Dependencies
 
-The API resolves `Python:Home` to `python-agents/data_agent` by default. That directory must contain the CSnakes virtual environment and the data-agent dependencies:
+The API resolves `Python:Home` to `python-agents/data_agent` by default. That directory must contain the shared Python virtual environment and the data-agent dependencies:
 
 ```powershell
 py -m venv python-agents/data_agent/.venv
@@ -1318,19 +1318,36 @@ markitdown[pdf]==0.1.6
 pypdf==6.13.1
 ```
 
+MarkItDown runs in a separate local Python process using that virtual environment. The API sends PDF bytes through standard input, accepts only bounded JSON through standard output, and terminates the complete worker process tree when conversion is cancelled or exceeds `FinancialMetricsExtraction__ConversionTimeoutSeconds`. Worker input accepts the larger of the upload limit and `MaxSearchablePdfBytes`, so a valid OCR result is not rejected before conversion. Before MarkItDown runs, an explicitly bounded page-tree walk rewrites at most `StructuredFinancialMetricsPdfExtraction__MaxPages` into the worker stream.
+
+Worker resource controls are configurable with:
+
+```text
+FinancialMetricsExtraction__MaxWorkerMemoryBytes=1073741824
+FinancialMetricsExtraction__MaxConcurrentConversions=2
+```
+
+Windows applies the memory budget and process-tree lifetime through a Job Object and fails the conversion if that containment cannot be established. Unix workers apply an address-space limit before importing MarkItDown or `pypdf`. The shared concurrency gate covers OCR, searchable-PDF merge, and MarkItDown so concurrent extraction pipelines cannot grow without bound.
+
 For local OCR of image-only PDFs, install command-line PDF/OCR tools and make sure they are on `PATH`, or point the app at them with:
 
 ```text
 StructuredFinancialMetricsPdfExtraction__PdfToPpmPath=<path-to-pdftoppm>
 StructuredFinancialMetricsPdfExtraction__TesseractPath=<path-to-tesseract>
 StructuredFinancialMetricsPdfExtraction__TesseractLanguage=eng
+StructuredFinancialMetricsPdfExtraction__MaxPages=20
+StructuredFinancialMetricsPdfExtraction__MaxTemporaryBytes=536870912
+StructuredFinancialMetricsPdfExtraction__MaxSearchablePdfBytes=104857600
+StructuredFinancialMetricsPdfExtraction__MaxToolOutputBytes=65536
 ```
+
+`MaxTemporaryBytes` covers the input PDF, rendered images, per-page OCR PDFs, and merged searchable PDF. `MaxSearchablePdfBytes` is enforced while the merged PDF is written, and `MaxToolOutputBytes` bounds each OCR tool's stdout and stderr. The searchable-PDF merge also runs in an isolated Python worker with timeout, memory, input/output, and process-tree limits. The process runner monitors the working directory while `pdftoppm` and Tesseract execute, kills the tool tree when any budget is exceeded, and keeps post-process checks as a race-condition safeguard. Failed immediate cleanup is logged; a hosted sweeper removes stale PDF/OCR directories after one hour. Container or filesystem quotas are still recommended as the hard outer boundary for untrusted documents.
 
 Troubleshooting:
 
 - Missing Python dependencies usually surface as MarkItDown import/conversion failures. Reinstall from `python-agents/data_agent/requirements.txt` inside `.venv`.
 - OCR failures usually mean `pdftoppm`, `tesseract`, or the configured language data cannot be found. Verify the configured paths from the API process, especially when running through Aspire.
-- Timeout failures are bounded by `StructuredFinancialMetricsPdfExtraction__OcrTimeoutSeconds`, `FinancialMetricsExtraction__ConversionTimeoutSeconds`, and `FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds`.
+- Timeout failures are bounded by `StructuredFinancialMetricsPdfExtraction__OcrTimeoutSeconds`, `FinancialMetricsExtraction__ConversionTimeoutSeconds`, and `FinancialMetricsExtraction__SemanticExtractionTimeoutSeconds`. MarkItDown and OCR tool timeouts terminate their child process trees.
 - MarkItDown failures should not crash the API. The ingestion path degrades to deterministic candidates and returns `review_required` or `failed`; previous active metrics stay unchanged.
 
 ### Tool Calling Diagnostics

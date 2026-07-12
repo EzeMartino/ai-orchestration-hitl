@@ -18,6 +18,10 @@ public sealed class FinancialMetricsExtractionOptions
 
     public int ConversionTimeoutSeconds { get; init; } = 60;
 
+    public long MaxWorkerMemoryBytes { get; init; } = 1_073_741_824;
+
+    public int MaxConcurrentConversions { get; init; } = 2;
+
     public int SemanticExtractionTimeoutSeconds { get; init; } = 90;
 
     public int MaxEvidenceExcerptCharacters { get; init; } = 500;

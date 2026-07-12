@@ -19,6 +19,7 @@ public sealed class LocalSearchablePdfOcrServiceTests
 
         options.MaxTemporaryBytes.Should().Be(536_870_912);
         options.MaxSearchablePdfBytes.Should().Be(104_857_600);
+        options.MaxToolOutputBytes.Should().Be(65_536);
     }
 
     [Fact]
@@ -60,7 +61,46 @@ public sealed class LocalSearchablePdfOcrServiceTests
         merger.PageNames.Should().Equal(
             "page-2-ocr.pdf",
             "page-10-ocr.pdf");
+        runner.Commands.Should().OnlyContain(
+            command => command.MaximumToolOutputBytes == 65_536);
         AssertTemporaryDirectoryDeleted(runner);
+    }
+
+    [Fact]
+    public async Task IsolatedSearchablePdfMerger_Should_run_bounded_python_cli()
+    {
+        var runner = new FakeFinancialDocumentProcessRunner(
+            new FinancialDocumentProcessResult(
+                0,
+                "{\"succeeded\":true,\"failureReason\":null}",
+                "",
+                false));
+        var merger = new IsolatedSearchablePdfMerger(
+            "python",
+            "searchable_pdf.py",
+            runner,
+            maxWorkerMemoryBytes: 12_345,
+            maxStandardInputBytes: 4_096,
+            maxStandardErrorBytes: 512);
+
+        var response = await merger.MergePdfPagesAsync(
+            "{\"workingDirectory\":\"work\"}",
+            TimeSpan.FromSeconds(7),
+            maxStandardOutputBytes: 256,
+            CancellationToken.None);
+
+        response.Should().Be("{\"succeeded\":true,\"failureReason\":null}");
+        runner.StandardInput.Should().Be("{\"workingDirectory\":\"work\"}");
+        runner.FileName.Should().Be("python");
+        runner.Arguments.Should().Equal(
+            "-I",
+            "searchable_pdf.py",
+            "--max-memory-bytes",
+            "12345");
+        runner.MaxStandardInputBytes.Should().Be(4_096);
+        runner.MaxWorkerMemoryBytes.Should().Be(12_345);
+        runner.MaxStandardOutputBytes.Should().Be(256);
+        runner.MaxStandardErrorBytes.Should().Be(512);
     }
 
     [Fact]
@@ -283,6 +323,84 @@ public sealed class LocalSearchablePdfOcrServiceTests
         result.Succeeded.Should().BeFalse();
         result.FailureReason.Should().Be("resource_limit_exceeded");
         merger.CallCount.Should().Be(1);
+        AssertTemporaryDirectoryDeleted(runner);
+    }
+
+    [Fact]
+    public async Task CreateSearchablePdfAsync_Should_map_merge_resource_limit_and_cleanup()
+    {
+        var runner = new FakePdfToolRunner();
+        var merger = new FakeSearchablePdfMerger(
+            responseJson: """
+                {
+                  "succeeded": false,
+                  "failureReason": "resource_limit_exceeded"
+                }
+                """,
+            createOutput: false);
+        var service = new LocalSearchablePdfOcrService(runner, merger);
+
+        await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+        var result = await service.CreateSearchablePdfAsync(
+            input,
+            TestOptions(),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.FailureReason.Should().Be("resource_limit_exceeded");
+        merger.MaxTemporaryBytes.Should().Be(536_870_912);
+        AssertTemporaryDirectoryDeleted(runner);
+    }
+
+    [Fact]
+    public async Task CreateSearchablePdfAsync_Should_pass_searchable_pdf_budget_to_merge()
+    {
+        var runner = new FakePdfToolRunner();
+        var merger = new FakeSearchablePdfMerger();
+        var service = new LocalSearchablePdfOcrService(runner, merger);
+
+        await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+        var result = await service.CreateSearchablePdfAsync(
+            input,
+            TestOptions(maxSearchablePdfBytes: 12_345),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        merger.MaxSearchablePdfBytes.Should().Be(12_345);
+        AssertTemporaryDirectoryDeleted(runner);
+    }
+
+    [Fact]
+    public async Task CreateSearchablePdfAsync_Should_ignore_rendered_pages_above_max_pages()
+    {
+        var runner = new FakePdfToolRunner(async (fileName, arguments, cancellationToken) =>
+        {
+            if (fileName == "pdftoppm")
+            {
+                await File.WriteAllBytesAsync(arguments[^1] + "-1.png", [1], cancellationToken);
+                await File.WriteAllBytesAsync(arguments[^1] + "-2.png", [2], cancellationToken);
+                await File.WriteAllBytesAsync(arguments[^1] + "-3.png", [3], cancellationToken);
+                return;
+            }
+
+            await File.WriteAllBytesAsync(
+                arguments[1] + ".pdf",
+                "%PDF-page"u8.ToArray(),
+                cancellationToken);
+        });
+        var service = new LocalSearchablePdfOcrService(
+            runner,
+            new FakeSearchablePdfMerger());
+
+        await using var input = new MemoryStream("%PDF-test"u8.ToArray());
+        var result = await service.CreateSearchablePdfAsync(
+            input,
+            TestOptions(maxPages: 2),
+            CancellationToken.None);
+
+        result.Succeeded.Should().BeTrue();
+        runner.Commands.Count(command => command.FileName == "tesseract")
+            .Should().Be(2);
         AssertTemporaryDirectoryDeleted(runner);
     }
 
@@ -515,7 +633,10 @@ public sealed class LocalSearchablePdfOcrServiceTests
     private sealed record RecordedCommand(
         string FileName,
         IReadOnlyList<string> Arguments,
-        TimeSpan Timeout);
+        TimeSpan Timeout,
+        long? MaximumWorkingDirectoryBytes,
+        string? WorkingDirectory,
+        long? MaximumToolOutputBytes);
 
     private sealed class FakePdfToolRunner : ILocalPdfToolRunner
     {
@@ -539,10 +660,19 @@ public sealed class LocalSearchablePdfOcrServiceTests
             string fileName,
             IReadOnlyList<string> arguments,
             TimeSpan timeout,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            long? maximumWorkingDirectoryBytes = null,
+            string? workingDirectory = null,
+            long? maximumToolOutputBytes = null)
         {
-            Commands.Add(new RecordedCommand(fileName, arguments, timeout));
-            WorkingDirectory ??= Path.GetDirectoryName(
+            Commands.Add(new RecordedCommand(
+                fileName,
+                arguments,
+                timeout,
+                maximumWorkingDirectoryBytes,
+                workingDirectory,
+                maximumToolOutputBytes));
+            WorkingDirectory ??= workingDirectory ?? Path.GetDirectoryName(
                 fileName == "pdftoppm"
                     ? arguments[^2]
                     : arguments[0]);
@@ -598,7 +728,15 @@ public sealed class LocalSearchablePdfOcrServiceTests
 
         public int CallCount { get; private set; }
 
-        public string MergePdfPages(string requestJson)
+        public long? MaxTemporaryBytes { get; private set; }
+
+        public long? MaxSearchablePdfBytes { get; private set; }
+
+        public Task<string> MergePdfPagesAsync(
+            string requestJson,
+            TimeSpan timeout,
+            int maxStandardOutputBytes,
+            CancellationToken cancellationToken)
         {
             CallCount++;
             using var request = JsonDocument.Parse(requestJson);
@@ -607,6 +745,12 @@ public sealed class LocalSearchablePdfOcrServiceTests
                 .EnumerateArray()
                 .Select(path => Path.GetFileName(path.GetString()))
                 .ToArray()!;
+            MaxTemporaryBytes = request.RootElement
+                .GetProperty("maxTemporaryBytes")
+                .GetInt64();
+            MaxSearchablePdfBytes = request.RootElement
+                .GetProperty("maxSearchablePdfBytes")
+                .GetInt64();
 
             if (_createOutput)
             {
@@ -628,7 +772,42 @@ public sealed class LocalSearchablePdfOcrServiceTests
                 File.SetAttributes(readOnlyPath, FileAttributes.ReadOnly);
             }
 
-            return _responseJson;
+            return Task.FromResult(_responseJson);
+        }
+    }
+
+    private sealed class FakeFinancialDocumentProcessRunner(
+        FinancialDocumentProcessResult result) : IFinancialDocumentProcessRunner
+    {
+        private readonly FinancialDocumentProcessResult _result = result;
+
+        public string? StandardInput { get; private set; }
+
+        public string? FileName { get; private set; }
+
+        public IReadOnlyList<string> Arguments { get; private set; } = [];
+
+        public long? MaxStandardInputBytes { get; private set; }
+
+        public long? MaxWorkerMemoryBytes { get; private set; }
+
+        public int? MaxStandardOutputBytes { get; private set; }
+
+        public int? MaxStandardErrorBytes { get; private set; }
+
+        public async Task<FinancialDocumentProcessResult> RunAsync(
+            FinancialDocumentProcessRequest request,
+            CancellationToken cancellationToken)
+        {
+            using var reader = new StreamReader(request.StandardInput, leaveOpen: true);
+            StandardInput = await reader.ReadToEndAsync(cancellationToken);
+            FileName = request.StartInfo.FileName;
+            Arguments = request.StartInfo.ArgumentList.ToArray();
+            MaxStandardInputBytes = request.MaxStandardInputBytes;
+            MaxWorkerMemoryBytes = request.MaxWorkerMemoryBytes;
+            MaxStandardOutputBytes = request.MaxStandardOutputBytes;
+            MaxStandardErrorBytes = request.MaxStandardErrorBytes;
+            return _result;
         }
     }
 }

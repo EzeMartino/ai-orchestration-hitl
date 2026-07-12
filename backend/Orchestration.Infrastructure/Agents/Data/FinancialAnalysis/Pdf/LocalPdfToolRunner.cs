@@ -9,14 +9,18 @@ internal interface ILocalPdfToolRunner
         string fileName,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        long? maximumWorkingDirectoryBytes = null,
+        string? workingDirectory = null,
+        long? maximumToolOutputBytes = null);
 }
 
 internal enum LocalPdfToolFailure
 {
     DependencyMissing,
     ToolFailed,
-    Timeout
+    Timeout,
+    ResourceLimitExceeded
 }
 
 internal sealed class LocalPdfToolException(
@@ -29,12 +33,17 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
 {
     private static readonly TimeSpan PostKillWaitTimeout =
         TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan WorkingDirectoryPollInterval =
+        TimeSpan.FromMilliseconds(50);
 
     public async Task RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? maximumWorkingDirectoryBytes = null,
+        string? workingDirectory = null,
+        long? maximumToolOutputBytes = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -88,13 +97,37 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
             cancellationToken,
             timeoutCts.Token);
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(linkedCts.Token);
-        var stderrTask = process.StandardError.ReadToEndAsync(linkedCts.Token);
+        var outputLimit = maximumToolOutputBytes is { } outputBytes
+            ? new ToolOutputLimit(Math.Max(0, outputBytes))
+            : null;
+        var stdoutTask = DrainOutputAsync(
+            process.StandardOutput.BaseStream,
+            outputLimit,
+            linkedCts.Token);
+        var stderrTask = DrainOutputAsync(
+            process.StandardError.BaseStream,
+            outputLimit,
+            linkedCts.Token);
         var exitTask = process.WaitForExitAsync(linkedCts.Token);
 
         try
         {
-            await Task.WhenAll(exitTask, stdoutTask, stderrTask);
+            await WaitForCompletionAsync(
+                exitTask,
+                stdoutTask,
+                stderrTask,
+                maximumWorkingDirectoryBytes,
+                workingDirectory,
+                linkedCts.Token);
+        }
+        catch (ResourceLimitExceededException)
+        {
+            await KillProcessTreeAndObserveAsync(
+                process,
+                stdoutTask,
+                stderrTask);
+            throw new LocalPdfToolException(
+                LocalPdfToolFailure.ResourceLimitExceeded);
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         {
@@ -113,6 +146,14 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
                 stderrTask);
             throw new LocalPdfToolException(LocalPdfToolFailure.Timeout);
         }
+        catch
+        {
+            await KillProcessTreeAndObserveAsync(
+                process,
+                stdoutTask,
+                stderrTask);
+            throw;
+        }
 
         if (process.ExitCode == 0)
         {
@@ -120,6 +161,97 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
         }
 
         throw new LocalPdfToolException(LocalPdfToolFailure.ToolFailed);
+    }
+
+    private static async Task WaitForCompletionAsync(
+        Task exitTask,
+        Task stdoutTask,
+        Task stderrTask,
+        long? maximumWorkingDirectoryBytes,
+        string? workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfFaulted(stdoutTask);
+            ThrowIfFaulted(stderrTask);
+
+            if (exitTask.IsCompleted)
+            {
+                await Task.WhenAll(exitTask, stdoutTask, stderrTask);
+                return;
+            }
+
+            var waitTasks = new List<Task> { exitTask };
+            if (!stdoutTask.IsCompleted)
+            {
+                waitTasks.Add(stdoutTask);
+            }
+
+            if (!stderrTask.IsCompleted)
+            {
+                waitTasks.Add(stderrTask);
+            }
+
+            if (maximumWorkingDirectoryBytes is { } maximumBytes
+                && !string.IsNullOrWhiteSpace(workingDirectory))
+            {
+                EnsureWorkingDirectoryWithinLimit(
+                    workingDirectory,
+                    Math.Max(0, maximumBytes));
+                waitTasks.Add(
+                    Task.Delay(WorkingDirectoryPollInterval, cancellationToken));
+            }
+
+            await Task.WhenAny(waitTasks);
+        }
+    }
+
+    private static void ThrowIfFaulted(Task task)
+    {
+        if (task.IsFaulted)
+        {
+            task.GetAwaiter().GetResult();
+        }
+    }
+
+    private static async Task DrainOutputAsync(
+        Stream stream,
+        ToolOutputLimit? outputLimit,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[16_384];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                return;
+            }
+
+            outputLimit?.Consume(read);
+        }
+    }
+
+    private static void EnsureWorkingDirectoryWithinLimit(
+        string workingDirectory,
+        long maximumBytes)
+    {
+        long totalBytes = 0;
+        foreach (var path in Directory.EnumerateFiles(
+                     workingDirectory,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var fileLength = new FileInfo(path).Length;
+            if (fileLength > maximumBytes - totalBytes)
+            {
+                throw new ResourceLimitExceededException();
+            }
+
+            totalBytes += fileLength;
+        }
     }
 
     private static async Task KillProcessTreeAndObserveAsync(
@@ -195,6 +327,21 @@ internal sealed class LocalPdfToolRunner : ILocalPdfToolRunner
         {
             // Cleanup must observe background faults without masking the
             // caller cancellation or timeout that triggered process teardown.
+        }
+    }
+
+    private sealed class ResourceLimitExceededException : Exception;
+
+    private sealed class ToolOutputLimit(long maximumBytes)
+    {
+        private long _consumedBytes;
+
+        public void Consume(int bytes)
+        {
+            if (Interlocked.Add(ref _consumedBytes, bytes) > maximumBytes)
+            {
+                throw new ResourceLimitExceededException();
+            }
         }
     }
 }

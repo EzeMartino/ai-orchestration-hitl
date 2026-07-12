@@ -33,6 +33,8 @@ public sealed class FinancialMetricsExtractionCompletenessEvaluatorTests
         options.MaxMarkdownCharacters.Should().Be(200_000);
         options.MaxMarkdownChunks.Should().Be(12);
         options.ConversionTimeoutSeconds.Should().Be(60);
+        options.MaxWorkerMemoryBytes.Should().Be(1_073_741_824);
+        options.MaxConcurrentConversions.Should().Be(2);
         options.SemanticExtractionTimeoutSeconds.Should().Be(90);
         options.MaxEvidenceExcerptCharacters.Should().Be(500);
     }

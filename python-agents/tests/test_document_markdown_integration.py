@@ -1,4 +1,3 @@
-import base64
 import importlib.util
 import json
 import sys
@@ -12,7 +11,7 @@ if MARKITDOWN_AVAILABLE:
     REPO_ROOT = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(REPO_ROOT / "python-agents" / "data_agent"))
 
-    from document_markdown import convert_pdf_to_markdown  # noqa: E402
+    from document_markdown import convert_pdf_bytes_to_markdown  # noqa: E402
 
 
 def _minimal_pdf(text: str) -> bytes:
@@ -59,16 +58,13 @@ def _minimal_pdf(text: str) -> bytes:
 )
 class DocumentMarkdownIntegrationTests(unittest.TestCase):
     def test_converts_generated_pdf_with_real_markitdown(self):
-        request = json.dumps(
-            {
-                "pdfBase64": base64.b64encode(
-                    _minimal_pdf("Revenue 100")
-                ).decode("ascii"),
-                "maxCharacters": 10_000,
-            }
+        result = json.loads(
+            convert_pdf_bytes_to_markdown(
+                _minimal_pdf("Revenue 100"),
+                10_000,
+                20,
+            )
         )
-
-        result = json.loads(convert_pdf_to_markdown(request))
 
         self.assertTrue(result["succeeded"], result["failureReason"])
         self.assertIn("Revenue 100", result["markdown"])

@@ -31,6 +31,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
                 "sha256:abc"));
         fixture.MarkdownConverter.Calls.Should().Be(0);
         fixture.SemanticAgent.Calls.Should().Be(0);
+        fixture.ProcessingGate.EnterCalls.Should().Be(0);
     }
 
     [Fact]
@@ -63,6 +64,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         fixture.MarkdownConverter.Calls.Should().Be(1);
         fixture.MarkdownConverter.SeenPdfBytes.Should().ContainSingle()
             .Which.Should().Equal([1, 2, 3]);
+        fixture.MarkdownConverter.LastMaxPages.Should().Be(20);
         fixture.SemanticAgent.Requests.Should().ContainSingle();
         fixture.SemanticAgent.Requests.Single().MaxEvidenceExcerptCharacters.Should().Be(123);
         fixture.SemanticAgent.Requests.Single().MaxMarkdownChunks.Should().Be(7);
@@ -82,6 +84,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         await fixture.Service.IngestAsync(Request());
 
         fixture.OcrService.Calls.Should().Be(1);
+        fixture.ProcessingGate.EnterCalls.Should().Be(1);
         fixture.OcrService.SeenPdfBytes.Should().ContainSingle().Which.Should().Equal([1, 2, 3]);
         fixture.MarkdownConverter.SeenPdfBytes.Should().ContainSingle().Which.Should().Equal([9, 8, 7]);
         fixture.SemanticAgent.Calls.Should().Be(1);
@@ -499,6 +502,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         public FakePdfExtractor PdfExtractor { get; } = new();
         public FakeCompletenessEvaluator CompletenessEvaluator { get; } = new();
         public FakeMarkdownConverter MarkdownConverter { get; } = new();
+        public FakeProcessingGate ProcessingGate { get; } = new();
         public FakeOcrService OcrService { get; } = new();
         public FakeSemanticAgent SemanticAgent { get; } = new();
         public FakeReconciler Reconciler { get; } = new();
@@ -516,6 +520,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
                 PdfExtractor,
                 CompletenessEvaluator,
                 MarkdownConverter,
+                ProcessingGate,
                 OcrService,
                 SemanticAgent,
                 Reconciler,
@@ -524,6 +529,25 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
                 ActivityPublisher,
                 Options.Create(extractionOptions ?? new FinancialMetricsExtractionOptions()),
                 Options.Create(pdfExtractionOptions ?? new StructuredFinancialMetricsPdfExtractionOptions()));
+        }
+    }
+
+    private sealed class FakeProcessingGate : IFinancialDocumentProcessingGate
+    {
+        public int EnterCalls { get; private set; }
+
+        public ValueTask<IDisposable> EnterAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnterCalls++;
+            return ValueTask.FromResult<IDisposable>(new Lease());
+        }
+
+        private sealed class Lease : IDisposable
+        {
+            public void Dispose()
+            {
+            }
         }
     }
 
@@ -564,14 +588,17 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         public int Calls { get; private set; }
         public List<byte[]> SeenPdfBytes { get; } = [];
         public CancellationToken LastCancellationToken { get; private set; }
+        public int LastMaxPages { get; private set; }
         public Exception? Exception { get; set; }
 
         public Task<FinancialDocumentMarkdownResult> ConvertPdfAsync(
             Stream pdf,
             int maxCharacters,
+            int maxPages,
             CancellationToken cancellationToken)
         {
             Calls++;
+            LastMaxPages = maxPages;
             LastCancellationToken = cancellationToken;
             SeenPdfBytes.Add(ReadAll(pdf));
 

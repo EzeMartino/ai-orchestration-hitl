@@ -16,6 +16,8 @@ public sealed class StructuredFinancialMetricsPdfExtractionOptions
 
     public long MaxSearchablePdfBytes { get; init; } = 104_857_600;
 
+    public long MaxToolOutputBytes { get; init; } = 65_536;
+
     public decimal MinimumMetricConfidence { get; init; } = 0.5m;
 
     public string PdfToPpmPath { get; init; } = "pdftoppm";

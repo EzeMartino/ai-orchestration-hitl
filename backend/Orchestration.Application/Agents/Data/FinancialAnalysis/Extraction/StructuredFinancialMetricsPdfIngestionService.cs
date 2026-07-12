@@ -15,6 +15,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
     private readonly IFinancialMetricsExtractionCompletenessEvaluator
         _completenessEvaluator;
     private readonly IFinancialDocumentMarkdownConverter _markdownConverter;
+    private readonly IFinancialDocumentProcessingGate _processingGate;
     private readonly ISearchablePdfOcrService _ocrService;
     private readonly IFinancialDocumentExtractionAgent _semanticAgent;
     private readonly IFinancialMetricCandidateReconciler _reconciler;
@@ -29,6 +30,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         IStructuredFinancialMetricsPdfExtractor pdfExtractor,
         IFinancialMetricsExtractionCompletenessEvaluator completenessEvaluator,
         IFinancialDocumentMarkdownConverter markdownConverter,
+        IFinancialDocumentProcessingGate processingGate,
         ISearchablePdfOcrService ocrService,
         IFinancialDocumentExtractionAgent semanticAgent,
         IFinancialMetricCandidateReconciler reconciler,
@@ -41,6 +43,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         _pdfExtractor = pdfExtractor;
         _completenessEvaluator = completenessEvaluator;
         _markdownConverter = markdownConverter;
+        _processingGate = processingGate;
         _ocrService = ocrService;
         _semanticAgent = semanticAgent;
         _reconciler = reconciler;
@@ -243,6 +246,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         List<string> reasonCodes,
         CancellationToken cancellationToken)
     {
+        using var processingLease = await _processingGate.EnterAsync(cancellationToken);
         byte[] markdownPdfBytes = request.PdfBytes;
 
         if (!deterministicResult.NativeTextAvailable)
@@ -292,6 +296,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
             markdown = await _markdownConverter.ConvertPdfAsync(
                 markdownPdf,
                 _extractionOptions.MaxMarkdownCharacters,
+                GetMaxSourcePage(_pdfExtractionOptions),
                 conversionTimeout.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
