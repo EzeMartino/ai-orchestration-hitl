@@ -1608,21 +1608,41 @@ Net income 10
 
     private static string GetDocumentContent(ChatHistory history)
     {
-        const string startMarker = "<document_content>\n";
-        const string endMarker = "\n</document_content>";
+        const string startMarker = "<document_content>";
+        const string endMarker = "</document_content>";
         var prompt = GetUserPrompt(history);
         var start = prompt.IndexOf(startMarker, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        var contentStart = start + startMarker.Length;
+        if (contentStart < prompt.Length && prompt[contentStart] == '\r')
+        {
+            contentStart++;
+        }
+
+        if (contentStart < prompt.Length && prompt[contentStart] == '\n')
+        {
+            contentStart++;
+        }
+
         var end = prompt.IndexOf(
             endMarker,
-            start + startMarker.Length,
+            contentStart,
             StringComparison.Ordinal);
 
-        start.Should().BeGreaterThanOrEqualTo(0);
-        end.Should().BeGreaterThanOrEqualTo(start + startMarker.Length);
+        end.Should().BeGreaterThanOrEqualTo(contentStart);
 
-        return prompt[
-            (start + startMarker.Length)..
-            end];
+        var contentEnd = end;
+        if (contentEnd > contentStart && prompt[contentEnd - 1] == '\n')
+        {
+            contentEnd--;
+        }
+
+        if (contentEnd > contentStart && prompt[contentEnd - 1] == '\r')
+        {
+            contentEnd--;
+        }
+
+        return prompt[contentStart..contentEnd];
     }
 
     private static void AssertFailure(
