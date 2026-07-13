@@ -196,6 +196,13 @@ export function validateReviewDraft(
   };
 }
 
+export function isFinancialReviewInteractionDisabled(
+  isSaving: boolean,
+  isLoading: boolean,
+) {
+  return isSaving || isLoading;
+}
+
 export function getDraftReportSummaryForm(
   draft?: FinancialMetricsExtractionDraft | null,
 ): FinancialReportSummaryFormState {

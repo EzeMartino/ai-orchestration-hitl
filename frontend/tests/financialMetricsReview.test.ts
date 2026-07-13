@@ -7,6 +7,7 @@ import {
   applyReportSummaryToDraft,
   getDraftReportSummaryForm,
   isCurrentSessionRequest,
+  isFinancialReviewInteractionDisabled,
   mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   shouldLoadFinancialMetricsReview,
@@ -261,6 +262,13 @@ test("shouldLoadFinancialMetricsReview blocks stale sessions and same-session up
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", null), true);
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-b", null), false);
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", "session-a"), false);
+});
+
+test("financial review interactions are disabled while loading or saving", () => {
+  assert.equal(isFinancialReviewInteractionDisabled(false, false), false);
+  assert.equal(isFinancialReviewInteractionDisabled(true, false), true);
+  assert.equal(isFinancialReviewInteractionDisabled(false, true), true);
+  assert.equal(isFinancialReviewInteractionDisabled(true, true), true);
 });
 
 test("version 1 review drafts start with empty explicit report summary fields", () => {

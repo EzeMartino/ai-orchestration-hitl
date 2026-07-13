@@ -19,6 +19,7 @@ import {
   applyProposedMetadataEdit,
   applyReportSummaryToDraft,
   getDraftReportSummaryForm,
+  isFinancialReviewInteractionDisabled,
   mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   validateReviewDraft,
@@ -389,6 +390,10 @@ export function FinancialMetricsReviewPanel({
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
+  const isInteractionDisabled = isFinancialReviewInteractionDisabled(
+    isSaving,
+    isLoading,
+  );
   const summaryErrorMessages = mapFinancialReportSummaryErrorsByField(
     validation.reportSummaryIssues,
   );
@@ -635,7 +640,11 @@ export function FinancialMetricsReviewPanel({
         : undefined;
 
   return (
-    <section className="financialMetricsReviewPanel" aria-labelledby="financialMetricsReviewTitle">
+    <section
+      className="financialMetricsReviewPanel"
+      aria-labelledby="financialMetricsReviewTitle"
+      aria-busy={isLoading}
+    >
       <div className="financialMetricsReviewHeader">
         <div>
           <p className="financialMetricsReviewEyebrow">Revisión de extracción PDF</p>
@@ -666,6 +675,12 @@ export function FinancialMetricsReviewPanel({
           {error ?? blockingReason}
         </div>
       )}
+
+      <fieldset
+        className="financialMetricsReviewInteractionGate"
+        disabled={isInteractionDisabled}
+      >
+        <legend className="srOnly">Controles de revisión financiera</legend>
 
       <div className="financialMetricsReviewMeta">
         <span>Archivo: {workingDraft.originalFileName}</span>
@@ -1095,13 +1110,13 @@ export function FinancialMetricsReviewPanel({
       </div>
 
       <div className="financialMetricsReviewActions">
-        <button type="button" onClick={handleSave} disabled={!dirty || isSaving}>
+        <button type="button" onClick={handleSave} disabled={!dirty || isInteractionDisabled}>
           {isSaving ? "Guardando..." : "Guardar cambios"}
         </button>
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={!canConfirm || isSaving}
+          disabled={!canConfirm || isInteractionDisabled}
           title={blockingReason}
         >
           {isSaving ? "Guardando..." : "Confirmar y guardar"}
@@ -1110,11 +1125,12 @@ export function FinancialMetricsReviewPanel({
           type="button"
           className="financialMetricsReviewDiscard"
           onClick={() => onDiscard(workingDraft.id)}
-          disabled={isSaving}
+          disabled={isInteractionDisabled}
         >
           Descartar borrador
         </button>
       </div>
+      </fieldset>
     </section>
   );
 }

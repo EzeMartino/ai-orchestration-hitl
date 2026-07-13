@@ -803,6 +803,13 @@ code {
   background: rgba(8, 22, 36, 0.48);
 }
 
+.financialMetricsReviewInteractionGate {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .financialReportSummaryForm legend {
   padding: 0 0.45rem;
   color: #e8f1f8;
