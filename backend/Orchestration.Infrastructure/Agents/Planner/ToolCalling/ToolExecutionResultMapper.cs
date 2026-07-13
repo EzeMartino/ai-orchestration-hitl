@@ -31,6 +31,11 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
         try
         {
+            if (HasAmbiguousFinancialAnalysisMetadata(call.OutputJson))
+            {
+                return null;
+            }
+
             var normalizedJson = NormalizeFinancialExecutionJson(
                 call.OutputJson,
                 out var executionMetadataValid);
@@ -77,28 +82,112 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     {
         var root = JsonNode.Parse(outputJson);
         if (root is not JsonObject rootObject ||
-            rootObject["financialAnalysis"] is not JsonObject financialAnalysis)
+            GetPropertyIgnoreCase(rootObject, "financialAnalysis") is not
+                JsonObject financialAnalysis)
         {
             executionMetadataValid = true;
             return outputJson;
         }
 
         executionMetadataValid = IsValidExecutionMetadata(
-            financialAnalysis["execution"]);
+            GetPropertyIgnoreCase(financialAnalysis, "execution"));
         if (executionMetadataValid)
         {
             return outputJson;
         }
 
-        financialAnalysis["execution"] = null;
+        SetPropertyToNullIgnoreCase(financialAnalysis, "execution");
         return root.ToJsonString(JsonOptions);
+    }
+
+    private static bool HasAmbiguousFinancialAnalysisMetadata(string outputJson)
+    {
+        using var document = JsonDocument.Parse(outputJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        JsonElement financialAnalysis = default;
+        var financialAnalysisCount = 0;
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (!string.Equals(
+                    property.Name,
+                    "financialAnalysis",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            financialAnalysis = property.Value;
+            financialAnalysisCount++;
+        }
+
+        if (financialAnalysisCount > 1)
+        {
+            return true;
+        }
+
+        if (financialAnalysisCount == 0 ||
+            financialAnalysis.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        JsonElement execution = default;
+        var executionCount = 0;
+        foreach (var property in financialAnalysis.EnumerateObject())
+        {
+            if (!string.Equals(
+                    property.Name,
+                    "execution",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            execution = property.Value;
+            executionCount++;
+        }
+
+        return executionCount > 1 ||
+            executionCount == 1 && HasCaseEquivalentDuplicates(execution);
+    }
+
+    private static bool HasCaseEquivalentDuplicates(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name) ||
+                    HasCaseEquivalentDuplicates(property.Value))
+                {
+                    return true;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                if (HasCaseEquivalentDuplicates(item))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool IsValidExecutionMetadata(JsonNode? executionNode)
     {
         if (executionNode is not JsonObject execution ||
-            !IsAggregateStatus(execution["overallStatus"]) ||
-            execution["stages"] is not JsonArray stages ||
+            !IsAggregateStatus(GetPropertyIgnoreCase(execution, "overallStatus")) ||
+            GetPropertyIgnoreCase(execution, "stages") is not JsonArray stages ||
             stages.Count != FinancialAnalysisOperations.All.Count)
         {
             return false;
@@ -108,19 +197,61 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         foreach (var stageNode in stages)
         {
             if (stageNode is not JsonObject stage ||
-                !TryGetString(stage["operation"], out var operation) ||
+                !TryGetString(
+                    GetPropertyIgnoreCase(stage, "operation"),
+                    out var operation) ||
                 !FinancialAnalysisOperations.All.Contains(operation, StringComparer.Ordinal) ||
                 !operations.Add(operation) ||
-                !TryGetString(stage["status"], out var status) ||
+                !TryGetString(GetPropertyIgnoreCase(stage, "status"), out var status) ||
                 !IsStageStatus(status) ||
-                !TryGetNonNegativeDuration(stage["durationMilliseconds"]) ||
-                !IsValidFailureCode(stage["failureCode"], status))
+                !TryGetNonNegativeDuration(
+                    GetPropertyIgnoreCase(stage, "durationMilliseconds")) ||
+                !IsValidFailureCode(
+                    GetPropertyIgnoreCase(stage, "failureCode"),
+                    status))
             {
                 return false;
             }
         }
 
         return operations.Count == FinancialAnalysisOperations.All.Count;
+    }
+
+    private static JsonNode? GetPropertyIgnoreCase(
+        JsonObject value,
+        string propertyName)
+    {
+        foreach (var property in value)
+        {
+            if (string.Equals(
+                    property.Key,
+                    propertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return property.Value;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetPropertyToNullIgnoreCase(
+        JsonObject value,
+        string propertyName)
+    {
+        foreach (var property in value.ToArray())
+        {
+            if (string.Equals(
+                    property.Key,
+                    propertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                value[property.Key] = null;
+                return;
+            }
+        }
+
+        value[propertyName] = null;
     }
 
     private static bool IsAggregateStatus(JsonNode? statusNode)

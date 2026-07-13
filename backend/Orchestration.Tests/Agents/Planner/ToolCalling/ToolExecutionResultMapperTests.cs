@@ -426,6 +426,54 @@ public class ToolExecutionResultMapperTests
         result.RequiresHumanReview.Should().BeTrue();
     }
 
+    [Fact]
+    public void TryMapDataResult_Should_validate_pascal_case_execution_before_deserialization()
+    {
+        const string rawFailure = "System.InvalidOperationException: sensitive detail";
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", rawFailure),
+            StageJson("summary", "succeeded"));
+        var outputJson = PascalCaseExecutionMetadata(
+            BuildRawDataJson(executionJson));
+
+        var result = MapRawDataResult(outputJson);
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        JsonSerializer.Serialize(result, JsonOptions).Should().NotContain(rawFailure);
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_fail_closed_for_pascal_case_null_stages()
+    {
+        var outputJson = PascalCaseExecutionMetadata(BuildRawDataJson(
+            "{\"overallStatus\":\"succeeded\",\"stages\":null}"));
+
+        var result = MapRawDataResult(outputJson);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_reject_case_equivalent_financial_analysis_properties()
+    {
+        var outputJson = BuildRawDataJsonWithDuplicateFinancialAnalysis(
+            BuildExecutionJson("succeeded", CreateSucceededStageJson()));
+
+        var result = MapRawDataResult(outputJson);
+
+        result.Should().BeNull();
+    }
+
     private static DataAgentResult? MapDataResult(DataAgentResult dataResult)
     {
         return new ToolExecutionResultMapper().TryMapDataResult(
@@ -498,6 +546,41 @@ public class ToolExecutionResultMapperTests
                 "warnings": ["Preserved warning."],
                 "limitations": []{{executionProperty}}
               },
+              "requiresHumanReview": false
+            }
+            """;
+    }
+
+    private static string PascalCaseExecutionMetadata(string outputJson)
+    {
+        return outputJson
+            .Replace("\"financialAnalysis\"", "\"FinancialAnalysis\"", StringComparison.Ordinal)
+            .Replace("\"execution\"", "\"Execution\"", StringComparison.Ordinal)
+            .Replace("\"overallStatus\"", "\"OverallStatus\"", StringComparison.Ordinal)
+            .Replace("\"stages\"", "\"Stages\"", StringComparison.Ordinal)
+            .Replace("\"operation\"", "\"Operation\"", StringComparison.Ordinal)
+            .Replace("\"status\"", "\"Status\"", StringComparison.Ordinal)
+            .Replace("\"durationMilliseconds\"", "\"DurationMilliseconds\"", StringComparison.Ordinal)
+            .Replace("\"failureCode\"", "\"FailureCode\"", StringComparison.Ordinal);
+    }
+
+    private static string BuildRawDataJsonWithDuplicateFinancialAnalysis(
+        string executionJson)
+    {
+        using var document = JsonDocument.Parse(BuildRawDataJson(executionJson));
+        var financialAnalysisJson = document.RootElement
+            .GetProperty("financialAnalysis")
+            .GetRawText();
+
+        return $$"""
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Ambiguous financial result.",
+              "engine": "Financial Workflow",
+              "evidence": [],
+              "financialAnalysis": {{financialAnalysisJson}},
+              "FinancialAnalysis": {{financialAnalysisJson}},
               "requiresHumanReview": false
             }
             """;
