@@ -418,6 +418,45 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         session.ContextJson.Should().Be("{}");
     }
 
+    [Theory]
+    [InlineData("{\"unexpected\":true}")]
+    [InlineData("[1,2]")]
+    public async Task SaveFinancialMetricsFile_Object_or_array_json_summary_timestamp_Should_return_stable_invalid_issue(
+        string timestampJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.json",
+                $$"""
+                {
+                  "documentId": "json-file-input",
+                  "reportSummary": {
+                    "reportName": "report.json",
+                    "totalAmount": 10,
+                    "transactionCount": 1,
+                    "submittedAt": {{timestampJson}}
+                  },
+                  "metrics": [{ "name": "Revenue", "period": "2024A", "value": 10 }]
+                }
+                """),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
+    }
+
     [Fact]
     public async Task SaveFinancialMetricsFile_Should_use_form_metadata_as_json_fallback()
     {

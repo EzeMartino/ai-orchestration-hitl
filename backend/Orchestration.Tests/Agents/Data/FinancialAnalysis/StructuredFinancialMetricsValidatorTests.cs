@@ -104,6 +104,38 @@ public sealed class StructuredFinancialMetricsValidatorTests
             .Which.Code.Should().Be("SUBMITTED_AT_INVALID");
     }
 
+    [Theory]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("{\"unexpected\":\"value\"}")]
+    [InlineData("[1,2]")]
+    public void Structured_input_json_Non_string_summary_timestamp_Should_return_stable_invalid_issue(
+        string timestampJson)
+    {
+        var input = JsonSerializer.Deserialize<StructuredFinancialMetricsInput>(
+            $$"""
+            {
+              "documentId": "json-input",
+              "metrics": [
+                { "name": "Revenue", "period": "2024A", "value": 10 }
+              ],
+              "reportSummary": {
+                "reportName": "report.json",
+                "totalAmount": 10,
+                "transactionCount": 1,
+                "submittedAt": {{timestampJson}}
+              }
+            }
+            """,
+            JsonOptions);
+
+        input!.ReportSummary!.SubmittedAt.Should().Be(DateTimeOffset.MinValue);
+        var result = Validate(input);
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+    }
+
     [Fact]
     public void Csv_input_json_Malformed_summary_timestamp_Should_return_stable_invalid_issue()
     {

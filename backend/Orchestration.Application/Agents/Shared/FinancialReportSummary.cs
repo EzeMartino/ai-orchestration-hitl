@@ -30,20 +30,25 @@ public sealed class FinancialReportSubmittedAtJsonConverter
             return null;
         }
 
-        if (reader.TokenType != JsonTokenType.String)
+        if (reader.TokenType == JsonTokenType.String)
         {
-            throw new JsonException("Financial report submission date must be a string.");
+            var value = reader.GetString();
+
+            return DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var submittedAt)
+                ? submittedAt
+                : DateTimeOffset.MinValue;
         }
 
-        var value = reader.GetString();
+        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+        {
+            using var ignored = JsonDocument.ParseValue(ref reader);
+        }
 
-        return DateTimeOffset.TryParse(
-            value,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind,
-            out var submittedAt)
-            ? submittedAt
-            : DateTimeOffset.MinValue;
+        return DateTimeOffset.MinValue;
     }
 
     public override void Write(
