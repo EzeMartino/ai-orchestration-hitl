@@ -10,7 +10,9 @@ import type {
   FinancialReportSummary,
 } from "../types/domain.types";
 import {
+  canEditFinancialReportSummary,
   emptyFinancialReportSummaryForm,
+  mapFinancialReportSummaryErrorsByField,
   toFinancialReportSummaryForm,
   validateFinancialReportSummary,
 } from "../utils/financialReportSummary";
@@ -237,9 +239,14 @@ export function StructuredFinancialMetricsPanel({
     );
   }
 
-  function hasSummaryIssue(field: keyof FinancialReportSummaryFormState) {
-    return reportSummaryIssues.some((issue) => issue.field === field);
-  }
+  const canEditSummary = canEditFinancialReportSummary(
+    sessionId,
+    isSaving,
+    isLoading,
+  );
+  const summaryErrorMessages = mapFinancialReportSummaryErrorsByField(
+    reportSummaryIssues,
+  );
 
   async function handleSaveJson() {
     setInputError(null);
@@ -435,9 +442,11 @@ export function StructuredFinancialMetricsPanel({
             <input
               value={reportSummary.reportName}
               onChange={(event) => updateReportSummary("reportName", event.target.value)}
-              aria-invalid={hasSummaryIssue("reportName")}
-              disabled={!sessionId || isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.reportName)}
+              aria-describedby={summaryErrorMessages.reportName ? "financial-report-name-error" : undefined}
+              disabled={!canEditSummary}
             />
+            {summaryErrorMessages.reportName && <span id="financial-report-name-error" className="fieldError">{summaryErrorMessages.reportName}</span>}
           </label>
           <label>
             Importe total
@@ -447,9 +456,11 @@ export function StructuredFinancialMetricsPanel({
               step="any"
               value={reportSummary.totalAmount}
               onChange={(event) => updateReportSummary("totalAmount", event.target.value)}
-              aria-invalid={hasSummaryIssue("totalAmount")}
-              disabled={!sessionId || isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.totalAmount)}
+              aria-describedby={summaryErrorMessages.totalAmount ? "financial-report-total-error" : undefined}
+              disabled={!canEditSummary}
             />
+            {summaryErrorMessages.totalAmount && <span id="financial-report-total-error" className="fieldError">{summaryErrorMessages.totalAmount}</span>}
           </label>
           <label>
             Cantidad de transacciones
@@ -459,9 +470,11 @@ export function StructuredFinancialMetricsPanel({
               step="1"
               value={reportSummary.transactionCount}
               onChange={(event) => updateReportSummary("transactionCount", event.target.value)}
-              aria-invalid={hasSummaryIssue("transactionCount")}
-              disabled={!sessionId || isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.transactionCount)}
+              aria-describedby={summaryErrorMessages.transactionCount ? "financial-report-count-error" : undefined}
+              disabled={!canEditSummary}
             />
+            {summaryErrorMessages.transactionCount && <span id="financial-report-count-error" className="fieldError">{summaryErrorMessages.transactionCount}</span>}
           </label>
           <label>
             Fecha de envío
@@ -469,9 +482,11 @@ export function StructuredFinancialMetricsPanel({
               type="datetime-local"
               value={reportSummary.submittedAt}
               onChange={(event) => updateReportSummary("submittedAt", event.target.value)}
-              aria-invalid={hasSummaryIssue("submittedAt")}
-              disabled={!sessionId || isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.submittedAt)}
+              aria-describedby={summaryErrorMessages.submittedAt ? "financial-report-date-error" : undefined}
+              disabled={!canEditSummary}
             />
+            {summaryErrorMessages.submittedAt && <span id="financial-report-date-error" className="fieldError">{summaryErrorMessages.submittedAt}</span>}
           </label>
         </div>
         {persistedReportSummary && (
@@ -524,7 +539,7 @@ export function StructuredFinancialMetricsPanel({
           >
             <button
               onClick={handleSaveJson}
-              disabled={!sessionId || isSaving}
+              disabled={!sessionId || isSaving || isLoading}
               type="button"
             >
               {isSaving ? "Guardando..." : "Guardar Métricas JSON"}
@@ -581,7 +596,7 @@ export function StructuredFinancialMetricsPanel({
           >
             <button
               onClick={handleSaveCsv}
-              disabled={!sessionId || isSaving}
+              disabled={!sessionId || isSaving || isLoading}
               type="button"
             >
               {isSaving ? "Guardando..." : "Guardar Métricas CSV"}
@@ -666,7 +681,7 @@ export function StructuredFinancialMetricsPanel({
           >
             <button
               onClick={handleUploadFile}
-              disabled={!sessionId || isSaving || !selectedFile}
+              disabled={!sessionId || isSaving || isLoading || !selectedFile}
               type="button"
             >
               {isSaving ? "Subiendo..." : "Subir Archivo"}

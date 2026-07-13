@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canEditFinancialReportSummary,
   emptyFinancialReportSummaryForm,
+  mapFinancialReportSummaryErrorsByField,
   validateFinancialReportSummary,
 } from "../src/utils/financialReportSummary.ts";
 
@@ -58,4 +60,22 @@ test("negative, non-finite, fractional count, and invalid date return exact inva
     "TOTAL_AMOUNT_INVALID",
     "TRANSACTION_COUNT_INVALID",
   ]);
+});
+
+test("summary editing is locked without a session, while loading, or while saving", () => {
+  assert.equal(canEditFinancialReportSummary(undefined, false, false), false);
+  assert.equal(canEditFinancialReportSummary("session-1", false, true), false);
+  assert.equal(canEditFinancialReportSummary("session-1", true, false), false);
+  assert.equal(canEditFinancialReportSummary("session-1", false, false), true);
+});
+
+test("summary issues map to human-readable messages by field", () => {
+  const validation = validateFinancialReportSummary(emptyFinancialReportSummaryForm());
+
+  assert.deepEqual(mapFinancialReportSummaryErrorsByField(validation.issues), {
+    reportName: "El nombre del informe es obligatorio.",
+    totalAmount: "El importe total es obligatorio.",
+    transactionCount: "La cantidad de transacciones es obligatoria.",
+    submittedAt: "La fecha de envío es obligatoria.",
+  });
 });

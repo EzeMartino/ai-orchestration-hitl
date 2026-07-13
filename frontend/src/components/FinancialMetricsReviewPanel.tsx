@@ -23,7 +23,10 @@ import {
   parseFiniteMetricValue,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
-import { validateFinancialReportSummary } from "../utils/financialReportSummary";
+import {
+  mapFinancialReportSummaryErrorsByField,
+  validateFinancialReportSummary,
+} from "../utils/financialReportSummary";
 import type { FinancialReportSummaryFormState } from "../utils/financialReportSummary";
 
 interface FinancialMetricsReviewPanelProps {
@@ -386,6 +389,9 @@ export function FinancialMetricsReviewPanel({
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
+  const summaryErrorMessages = mapFinancialReportSummaryErrorsByField(
+    validation.reportSummaryIssues,
+  );
   const dirty =
     isDraftDirty(draft ?? null, workingDraft) ||
     metricAdditions.length > 0 ||
@@ -681,9 +687,11 @@ export function FinancialMetricsReviewPanel({
             <input
               value={reportSummary.reportName}
               onChange={(event) => setReportSummary((current) => ({ ...current, reportName: event.target.value }))}
-              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "reportName")}
-              disabled={isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.reportName)}
+              aria-describedby={summaryErrorMessages.reportName ? "review-financial-report-name-error" : undefined}
+              disabled={isSaving || isLoading}
             />
+            {summaryErrorMessages.reportName && <span id="review-financial-report-name-error" className="fieldError">{summaryErrorMessages.reportName}</span>}
           </label>
           <label>
             Importe total
@@ -693,9 +701,11 @@ export function FinancialMetricsReviewPanel({
               step="any"
               value={reportSummary.totalAmount}
               onChange={(event) => setReportSummary((current) => ({ ...current, totalAmount: event.target.value }))}
-              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "totalAmount")}
-              disabled={isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.totalAmount)}
+              aria-describedby={summaryErrorMessages.totalAmount ? "review-financial-report-total-error" : undefined}
+              disabled={isSaving || isLoading}
             />
+            {summaryErrorMessages.totalAmount && <span id="review-financial-report-total-error" className="fieldError">{summaryErrorMessages.totalAmount}</span>}
           </label>
           <label>
             Cantidad de transacciones
@@ -705,9 +715,11 @@ export function FinancialMetricsReviewPanel({
               step="1"
               value={reportSummary.transactionCount}
               onChange={(event) => setReportSummary((current) => ({ ...current, transactionCount: event.target.value }))}
-              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "transactionCount")}
-              disabled={isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.transactionCount)}
+              aria-describedby={summaryErrorMessages.transactionCount ? "review-financial-report-count-error" : undefined}
+              disabled={isSaving || isLoading}
             />
+            {summaryErrorMessages.transactionCount && <span id="review-financial-report-count-error" className="fieldError">{summaryErrorMessages.transactionCount}</span>}
           </label>
           <label>
             Fecha de envío
@@ -715,9 +727,11 @@ export function FinancialMetricsReviewPanel({
               type="datetime-local"
               value={reportSummary.submittedAt}
               onChange={(event) => setReportSummary((current) => ({ ...current, submittedAt: event.target.value }))}
-              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "submittedAt")}
-              disabled={isSaving}
+              aria-invalid={Boolean(summaryErrorMessages.submittedAt)}
+              aria-describedby={summaryErrorMessages.submittedAt ? "review-financial-report-date-error" : undefined}
+              disabled={isSaving || isLoading}
             />
+            {summaryErrorMessages.submittedAt && <span id="review-financial-report-date-error" className="fieldError">{summaryErrorMessages.submittedAt}</span>}
           </label>
         </div>
       </fieldset>

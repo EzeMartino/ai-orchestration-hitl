@@ -40,6 +40,28 @@ export function emptyFinancialReportSummaryForm(): FinancialReportSummaryFormSta
   };
 }
 
+export function canEditFinancialReportSummary(
+  sessionId: string | undefined,
+  isSaving: boolean,
+  isLoading: boolean,
+) {
+  return Boolean(sessionId) && !isSaving && !isLoading;
+}
+
+export function mapFinancialReportSummaryErrorsByField(
+  issues: FinancialReportSummaryIssue[],
+): Partial<Record<keyof FinancialReportSummaryFormState, string>> {
+  return issues.reduce<Partial<Record<keyof FinancialReportSummaryFormState, string>>>(
+    (messages, current) => {
+      messages[current.field] = messages[current.field]
+        ? `${messages[current.field]} ${current.message}`
+        : current.message;
+      return messages;
+    },
+    {},
+  );
+}
+
 export function validateFinancialReportSummary(
   form: FinancialReportSummaryFormState,
 ): FinancialReportSummaryValidation {
