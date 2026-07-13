@@ -19,7 +19,8 @@ public class ControlledToolExecutorTests
         var dataAgent = new FakeDataAgent();
         var executor = CreateExecutor(dataAgent);
         var sessionId = Guid.NewGuid();
-        var submittedAt = DateTimeOffset.UtcNow;
+        var submittedAt = new DateTimeOffset(
+            2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
 
         var results = await executor.ExecuteAsync(
             [
@@ -49,6 +50,7 @@ public class ControlledToolExecutorTests
         result.OutputJson.Should().NotBe("{}");
 
         dataAgent.WasCalled.Should().BeTrue();
+        dataAgent.ReceivedReport!.SubmittedAt.Should().Be(submittedAt);
         dataAgent.ReceivedReport.Should().BeEquivalentTo(
             new FinancialReportContext(
                 sessionId,

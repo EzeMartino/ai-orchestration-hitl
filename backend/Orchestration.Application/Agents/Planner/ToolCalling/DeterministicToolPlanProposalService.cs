@@ -37,7 +37,7 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                         ["reportName"] = input.ReportName,
                         ["totalAmount"] = input.TotalAmount.ToString(CultureInfo.InvariantCulture),
                         ["transactionCount"] = input.TransactionCount.ToString(CultureInfo.InvariantCulture),
-                        ["submittedAt"] = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+                        ["submittedAt"] = input.SubmittedAt.ToString("O", CultureInfo.InvariantCulture)
                     },
                     Reason: "Analizar senales cuantitativas del reporte financiero para detectar anomalias."
                 ));

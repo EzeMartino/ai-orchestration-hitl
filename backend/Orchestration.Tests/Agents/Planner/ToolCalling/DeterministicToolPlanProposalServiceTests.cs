@@ -1,10 +1,14 @@
 using FluentAssertions;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using System.Globalization;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
 public class DeterministicToolPlanProposalServiceTests
 {
+    private static readonly DateTimeOffset SubmittedAt =
+        new(2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
     [Fact]
     public async Task ProposeAsync_Should_return_empty_plan_when_tool_calling_is_disabled()
     {
@@ -47,7 +51,8 @@ public class DeterministicToolPlanProposalServiceTests
         dataCall.Arguments["reportName"].Should().Be("financial-report");
         dataCall.Arguments["totalAmount"].Should().Be("125000.50");
         dataCall.Arguments["transactionCount"].Should().Be("42");
-        dataCall.Arguments["submittedAt"].Should().NotBeNullOrWhiteSpace();
+        dataCall.Arguments["submittedAt"].Should().Be(
+            SubmittedAt.ToString("O", CultureInfo.InvariantCulture));
         dataCall.Reason.Should().Be("Analizar senales cuantitativas del reporte financiero para detectar anomalias.");
 
         var legalCall = result.ProposedCalls[1];
@@ -87,6 +92,7 @@ public class DeterministicToolPlanProposalServiceTests
             ReportName: "financial-report",
             TotalAmount: 125000.50m,
             TransactionCount: 42,
+            SubmittedAt: SubmittedAt,
             PlannerSummary: "Planner reviewed evidence.",
             RiskFactors: ["High data severity."],
             Limitations: ["Human approval required."]

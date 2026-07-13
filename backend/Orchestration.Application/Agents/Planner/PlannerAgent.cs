@@ -580,6 +580,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             PlannerSummary: reasoningResult.Summary,
             RiskFactors: reasoningResult.RiskFactors,
             Limitations: reasoningResult.Limitations
@@ -594,6 +595,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             PlannerSummary: "Recopilar evidencia de anomalías financieras y recuperación regulatoria antes del razonamiento del planificador.",
             RiskFactors: [],
             Limitations:

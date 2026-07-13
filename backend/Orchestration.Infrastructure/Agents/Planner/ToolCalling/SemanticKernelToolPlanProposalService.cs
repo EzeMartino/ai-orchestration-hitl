@@ -157,6 +157,7 @@ If no tool is appropriate, return:
             input.ReportName,
             totalAmount = input.TotalAmount.ToString(CultureInfo.InvariantCulture),
             transactionCount = input.TransactionCount.ToString(CultureInfo.InvariantCulture),
+            submittedAt = input.SubmittedAt.ToString("O", CultureInfo.InvariantCulture),
             planner = new
             {
                 summary = input.PlannerSummary,
