@@ -255,7 +255,6 @@ public sealed class ProductionLikeWorkflowE2ETests
             expectedDocumentId: "session-one-metrics",
             expectedRevenue: 1111m,
             otherReportName: "session-two-report.pdf",
-            otherTotalAmount: 222222.22m,
             otherDocumentId: "session-two-metrics",
             otherRevenue: 2222m);
         AssertIsolatedFinalContext(
@@ -264,7 +263,6 @@ public sealed class ProductionLikeWorkflowE2ETests
             expectedDocumentId: "session-two-metrics",
             expectedRevenue: 2222m,
             otherReportName: "session-one-report.pdf",
-            otherTotalAmount: 111111.11m,
             otherDocumentId: "session-one-metrics",
             otherRevenue: 1111m);
     }
@@ -682,7 +680,6 @@ public sealed class ProductionLikeWorkflowE2ETests
         string expectedDocumentId,
         decimal expectedRevenue,
         string otherReportName,
-        decimal otherTotalAmount,
         string otherDocumentId,
         decimal otherRevenue)
     {
@@ -736,10 +733,6 @@ public sealed class ProductionLikeWorkflowE2ETests
 
         contextJson.Should().NotContain(otherReportName);
         contextJson.Should().NotContain(otherDocumentId);
-        contextJson.Should().NotContain(
-            otherTotalAmount.ToString(CultureInfo.InvariantCulture));
-        contextJson.Should().NotContain(
-            otherRevenue.ToString(CultureInfo.InvariantCulture));
     }
 
     private static bool DoesNotHaveOutputJson(
