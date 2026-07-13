@@ -252,15 +252,21 @@ public sealed class ProductionLikeWorkflowE2ETests
         AssertIsolatedFinalContext(
             sessions[first.Id].ContextJson,
             firstSummary,
-            "session-one-metrics",
-            "session-two-report.pdf",
-            222222.22m);
+            expectedDocumentId: "session-one-metrics",
+            expectedRevenue: 1111m,
+            otherReportName: "session-two-report.pdf",
+            otherTotalAmount: 222222.22m,
+            otherDocumentId: "session-two-metrics",
+            otherRevenue: 2222m);
         AssertIsolatedFinalContext(
             sessions[second.Id].ContextJson,
             secondSummary,
-            "session-two-metrics",
-            "session-one-report.pdf",
-            111111.11m);
+            expectedDocumentId: "session-two-metrics",
+            expectedRevenue: 2222m,
+            otherReportName: "session-one-report.pdf",
+            otherTotalAmount: 111111.11m,
+            otherDocumentId: "session-one-metrics",
+            otherRevenue: 1111m);
     }
 
 
@@ -674,8 +680,11 @@ public sealed class ProductionLikeWorkflowE2ETests
         string contextJson,
         FinancialReportSummaryInput expectedSummary,
         string expectedDocumentId,
+        decimal expectedRevenue,
         string otherReportName,
-        decimal otherTotalAmount)
+        decimal otherTotalAmount,
+        string otherDocumentId,
+        decimal otherRevenue)
     {
         using var document = JsonDocument.Parse(contextJson);
         var root = document.RootElement;
@@ -688,10 +697,27 @@ public sealed class ProductionLikeWorkflowE2ETests
             .Should().Be(expectedSummary.TransactionCount);
         report.GetProperty("submittedAt").GetDateTimeOffset()
             .Should().Be(expectedSummary.SubmittedAt);
-        root.GetProperty("structuredFinancialMetrics")
-            .GetProperty("documentId").GetString().Should().Be(expectedDocumentId);
-        root.GetProperty("financialAnalysis")
-            .GetProperty("documentId").GetString().Should().Be(expectedDocumentId);
+        var structuredMetrics = root.GetProperty("structuredFinancialMetrics");
+        structuredMetrics.GetProperty("documentId").GetString()
+            .Should().Be(expectedDocumentId);
+        var metrics = structuredMetrics.GetProperty("metrics")
+            .EnumerateArray()
+            .ToArray();
+        var revenueMetrics = metrics
+            .Where(metric =>
+                metric.GetProperty("name").GetString() == "revenue" &&
+                metric.GetProperty("period").GetString() == "2024A")
+            .ToArray();
+        revenueMetrics.Should().ContainSingle();
+        revenueMetrics.Single().GetProperty("value").GetDecimal()
+            .Should().Be(expectedRevenue);
+        metrics.Should().NotContain(metric =>
+            metric.GetProperty("value").GetDecimal() == otherRevenue);
+
+        var financialAnalysis = root.GetProperty("financialAnalysis");
+        financialAnalysis.GetProperty("documentId").GetString()
+            .Should().Be(expectedDocumentId);
+        financialAnalysis.GetRawText().Should().NotContain(otherDocumentId);
 
         var dataCall = root.GetProperty("toolPlan")
             .GetProperty("proposedCalls")
@@ -709,8 +735,11 @@ public sealed class ProductionLikeWorkflowE2ETests
             .Should().Be(expectedSummary.SubmittedAt!.Value.ToString("O", CultureInfo.InvariantCulture));
 
         contextJson.Should().NotContain(otherReportName);
+        contextJson.Should().NotContain(otherDocumentId);
         contextJson.Should().NotContain(
             otherTotalAmount.ToString(CultureInfo.InvariantCulture));
+        contextJson.Should().NotContain(
+            otherRevenue.ToString(CultureInfo.InvariantCulture));
     }
 
     private static bool DoesNotHaveOutputJson(
