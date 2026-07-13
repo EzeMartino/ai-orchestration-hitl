@@ -723,11 +723,18 @@ Sample templates are available from the dashboard:
 
 The templates use synthetic sample values. They are examples of the expected structure, not accounting guidance or source-document verification.
 
-Structured metrics are persisted in `AnalysisSession.ContextJson` under:
+The validated report summary and structured metrics are persisted in
+`AnalysisSession.ContextJson` under separate roots:
 
 ```text
+financialReport
 structuredFinancialMetrics
 ```
+
+`financialReport` contains the caller-supplied `reportName`, `totalAmount`,
+`transactionCount`, and `submittedAt`. These values remain session-scoped and
+survive the complete workflow. The Planner and tool-plan proposal consume these
+persisted values exactly; they do not derive, default, or replace them.
 
 The persisted block includes audit provenance:
 
@@ -823,7 +830,13 @@ Example:
       "source": "manual_upload",
       "confidence": 0.85
     }
-  ]
+  ],
+  "reportSummary": {
+    "reportName": "manual-json-input.json",
+    "totalAmount": 842350.75,
+    "transactionCount": 187,
+    "submittedAt": "2026-07-12T18:30:00Z"
+  }
 }
 ```
 
@@ -843,6 +856,24 @@ Gross Profit,2024A,924000,USD_thousand,USD,manual_upload,18,0.85
 
 CSV input is parsed deterministically without PDF/OCR or LLM extraction.
 
+For pasted CSV, send the CSV text and report summary in the request envelope:
+
+```json
+{
+  "documentId": "manual-csv-input",
+  "company": "Manual Test Co",
+  "currency": "USD",
+  "unit": "USD_thousand",
+  "csv": "name,period,value,unit,currency,source,sourcePage,confidence\nRevenue,2024A,1647768,USD_thousand,USD,manual_upload,18,0.9",
+  "reportSummary": {
+    "reportName": "manual-csv-input.csv",
+    "totalAmount": 842350.75,
+    "transactionCount": 187,
+    "submittedAt": "2026-07-12T18:30:00Z"
+  }
+}
+```
+
 Invalid headers, invalid numbers, invalid source pages, malformed quotes, and missing required values are reported as safe validation errors.
 
 ### PDF Metrics Input
@@ -854,6 +885,27 @@ Local OCR uses configured `pdftoppm` and `tesseract` executables. No external OC
 Supported PDF metric aliases currently include revenue/sales, gross profit, operating income, EBITDA, EBIT, net income, cash, short-term investments, receivables, inventory, current assets, current liabilities, total debt, net debt, equity, capex, free cash flow, interest expense, and shares.
 
 OCR metrics below `StructuredFinancialMetricsPdfExtraction__MinimumMetricConfidence` are ignored. If no extracted metric meets the threshold, the PDF upload returns a validation error instead of persisting low-confidence data.
+
+PDF review drafts use schema v2. A legacy schema-v1 draft has no trustworthy
+report summary: open the review editor, complete all four report fields, and
+confirm. Confirmation validates the summary and upgrades the draft to v2 in the
+same persistence operation; it never invents summary values.
+
+### Financial Report Summary Validation
+
+Every JSON, CSV, and PDF ingestion path requires a valid report summary. Stable
+field-validation codes are:
+
+- `REPORT_SUMMARY_REQUIRED`
+- `REPORT_NAME_REQUIRED`
+- `TOTAL_AMOUNT_REQUIRED` / `TOTAL_AMOUNT_INVALID`
+- `TRANSACTION_COUNT_REQUIRED` / `TRANSACTION_COUNT_INVALID`
+- `SUBMITTED_AT_REQUIRED` / `SUBMITTED_AT_INVALID`
+
+Workflow context resolution reports `FINANCIAL_REPORT_SUMMARY_REQUIRED` when
+the persisted block is absent and `FINANCIAL_REPORT_SUMMARY_INVALID` when it is
+malformed. Fix the source input or review draft; the Planner never supplies
+fallback report values.
 
 ### Structured Metrics Endpoints
 
@@ -887,7 +939,15 @@ Form fields:
 - `documentId`: optional for JSON/PDF, required for CSV,
 - `company`: optional,
 - `currency`: optional,
-- `unit`: optional.
+- `unit`: optional,
+- `ReportName`: required for CSV/PDF; JSON reads `reportSummary.reportName` from the file,
+- `TotalAmount`: required, non-negative decimal for CSV/PDF,
+- `TransactionCount`: required, non-negative integer for CSV/PDF,
+- `SubmittedAt`: required ISO-8601 timestamp for CSV/PDF.
+
+For JSON uploads, embed the complete `reportSummary` object shown above. JSON
+file content is authoritative for the report summary; multipart summary fields
+are used by CSV and PDF uploads.
 
 Uploaded JSON and CSV files are parsed in memory, validated, normalized, and persisted as structured metrics in the analysis session context. PDF files follow the deterministic-first extraction path and may return `review_required`; in that case, the review draft is stored separately and active metrics are not changed until a human confirms it.
 

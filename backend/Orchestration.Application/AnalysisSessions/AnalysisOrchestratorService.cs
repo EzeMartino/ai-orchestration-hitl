@@ -558,22 +558,24 @@ namespace Orchestration.Application.AnalysisSessions
             try
             {
                 var existingRoot = JsonNode.Parse(existingContextJson) as JsonObject;
-                var structuredMetrics = existingRoot?["structuredFinancialMetrics"];
-
-                if (structuredMetrics is null)
-                {
-                    return contextJson;
-                }
-
                 var contextRoot = JsonNode.Parse(contextJson) as JsonObject;
 
-                if (contextRoot is null)
+                if (existingRoot is null || contextRoot is null)
                 {
                     return contextJson;
                 }
 
-                contextRoot["structuredFinancialMetrics"] =
-                    JsonNode.Parse(structuredMetrics.ToJsonString());
+                foreach (var propertyName in new[]
+                {
+                    "financialReport",
+                    "structuredFinancialMetrics"
+                })
+                {
+                    if (existingRoot[propertyName] is { } value)
+                    {
+                        contextRoot[propertyName] = JsonNode.Parse(value.ToJsonString());
+                    }
+                }
 
                 return contextRoot.ToJsonString();
             }

@@ -513,6 +513,12 @@ public class AnalysisOrchestratorContextTests
     {
         const string existingContextJson = """
         {
+          "financialReport": {
+            "reportName": "persisted-report.pdf",
+            "totalAmount": 842350.75,
+            "transactionCount": 187,
+            "submittedAt": "2026-07-12T18:30:00Z"
+          },
           "structuredFinancialMetrics": {
             "documentId": "uploaded-json-metrics-test",
             "company": "Uploaded JSON Test Co",
@@ -543,6 +549,14 @@ public class AnalysisOrchestratorContextTests
 
         using var document = JsonDocument.Parse(contextJson);
         var structuredMetrics = document.RootElement.GetProperty("structuredFinancialMetrics");
+        var financialReport = document.RootElement.GetProperty("financialReport");
+
+        financialReport.GetProperty("reportName").GetString()
+            .Should()
+            .Be("persisted-report.pdf");
+        financialReport.GetProperty("totalAmount").GetDecimal()
+            .Should()
+            .Be(842350.75m);
 
         structuredMetrics.GetProperty("documentId").GetString()
             .Should()

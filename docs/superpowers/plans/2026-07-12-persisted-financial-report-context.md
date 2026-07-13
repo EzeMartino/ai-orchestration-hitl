@@ -597,8 +597,10 @@ git commit -m "Collect explicit financial report summary"
 ### Task 8: Complete isolation, E2E, documentation, and verification
 
 **Files:**
+- Modify: `backend/Orchestration.Application/AnalysisSessions/AnalysisOrchestratorService.cs`
 - Modify: `backend/Orchestration.Tests/AnalysisSessions/ProductionLikeWorkflowE2ETests.cs`
 - Modify: `backend/Orchestration.Tests/AnalysisSessions/AnalysisOrchestratorContextTests.cs`
+- Modify: `frontend/public/templates/structured-financial-metrics-sample.json`
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-07-12-persisted-financial-report-context.md`
 
@@ -648,3 +650,23 @@ Comment on issue #3 with test counts, build results, branch, propagation proof, 
 git add README.md backend/Orchestration.Tests/AnalysisSessions docs/superpowers/plans/2026-07-12-persisted-financial-report-context.md
 git commit -m "Document persisted report context verification"
 ```
+
+#### Completion evidence (2026-07-12)
+
+- RED: focused production-like/context run first failed compilation for the new
+  parameterized fixture/assertion helpers, then failed 2 of 15 tests because
+  final orchestration context dropped the persisted `financialReport` root.
+- GREEN: the focused filter passed 15 of 15 after the context merge preserved
+  both `financialReport` and `structuredFinancialMetrics`.
+- `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --verbosity minimal`
+  passed 1103 of 1103 tests (0 failed, 0 skipped).
+- `dotnet build backend/Orchestration.slnx --no-restore --verbosity minimal`
+  completed with 0 warnings and 0 errors.
+- `node --test frontend/tests/*.test.ts` passed 24 of 24 tests.
+- `npm run build --prefix frontend` completed TypeScript and Vite production
+  builds successfully (60 modules transformed).
+- `git diff --check` exited 0.
+- Production residue scan for `TotalAmount: 125000m`, `TransactionCount: 42`,
+  `financial-report-{session.Id}`, and runtime `UtcNow` tool-input formatting
+  returned 0 matches in Application and Infrastructure.
+- No GitHub issue or PR mutation was performed during this task.

@@ -484,5 +484,11 @@
       "sourcePage": 26,
       "confidence": 0.75
     }
-  ]
+  ],
+  "reportSummary": {
+    "reportName": "structured-financial-metrics-sample.json",
+    "totalAmount": 842350.75,
+    "transactionCount": 187,
+    "submittedAt": "2026-07-12T18:30:00Z"
+  }
 }

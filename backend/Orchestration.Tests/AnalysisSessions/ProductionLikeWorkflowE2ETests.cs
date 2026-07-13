@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
@@ -185,6 +186,81 @@ public sealed class ProductionLikeWorkflowE2ETests
             .ToListAsync();
         persistedEvents.Select(evt => evt.Type).Should().Contain("analysis_completed");
         persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_TwoSessions_ShouldKeepPersistedReportsAndToolInputsIsolated()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var publisher = new PersistingActivityEventPublisher(dbContext);
+        var controller = CreateController(
+            dbContext,
+            publisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            new FakeProductionCnvRegulationMcpClient(),
+            ToolCallingExecutionMode.PlanDriven);
+        var userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var first = AnalysisSession.Create(userId);
+        var second = AnalysisSession.Create(userId);
+        dbContext.AnalysisSessions.AddRange(first, second);
+        await dbContext.SaveChangesAsync();
+        var firstSummary = new FinancialReportSummaryInput(
+            "session-one-report.pdf",
+            111111.11m,
+            11,
+            new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+        var secondSummary = new FinancialReportSummaryInput(
+            "session-two-report.pdf",
+            222222.22m,
+            22,
+            new DateTimeOffset(2026, 7, 13, 9, 45, 0, TimeSpan.Zero));
+
+        await controller.SaveFinancialMetrics(
+            first.Id,
+            CreateStructuredMetricsInput(
+                documentId: "session-one-metrics",
+                company: "Session One Co",
+                reportSummary: firstSummary,
+                revenue: 1111m),
+            CancellationToken.None);
+        await controller.SaveFinancialMetrics(
+            second.Id,
+            CreateStructuredMetricsInput(
+                documentId: "session-two-metrics",
+                company: "Session Two Co",
+                reportSummary: secondSummary,
+                revenue: 2222m),
+            CancellationToken.None);
+
+        await controller.StartSession(first.Id, CancellationToken.None);
+        await controller.StartSession(second.Id, CancellationToken.None);
+        await controller.ApproveSession(
+            first.Id,
+            new HumanDecisionDto("Approved isolated session one."),
+            CancellationToken.None);
+        await controller.ApproveSession(
+            second.Id,
+            new HumanDecisionDto("Approved isolated session two."),
+            CancellationToken.None);
+
+        var sessions = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .Where(session => session.Id == first.Id || session.Id == second.Id)
+            .ToDictionaryAsync(session => session.Id);
+        sessions[first.Id].Status.Should().Be(AnalysisSessionStatus.Completed);
+        sessions[second.Id].Status.Should().Be(AnalysisSessionStatus.Completed);
+        AssertIsolatedFinalContext(
+            sessions[first.Id].ContextJson,
+            firstSummary,
+            "session-one-metrics",
+            "session-two-report.pdf",
+            222222.22m);
+        AssertIsolatedFinalContext(
+            sessions[second.Id].ContextJson,
+            secondSummary,
+            "session-two-metrics",
+            "session-one-report.pdf",
+            111111.11m);
     }
 
 
@@ -390,16 +466,20 @@ public sealed class ProductionLikeWorkflowE2ETests
         );
     }
 
-    private static StructuredFinancialMetricsInput CreateStructuredMetricsInput()
+    private static StructuredFinancialMetricsInput CreateStructuredMetricsInput(
+        string documentId = "production-like-json-metrics",
+        string company = "Production Like Test Co",
+        FinancialReportSummaryInput? reportSummary = null,
+        decimal revenue = 1647768m)
     {
         return new StructuredFinancialMetricsInput(
-            DocumentId: "production-like-json-metrics",
-            Company: "Production Like Test Co",
+            DocumentId: documentId,
+            Company: company,
             Currency: "USD",
             Unit: "USD_thousand",
             Metrics:
             [
-                Metric("Revenue", "2024A", 1647768m),
+                Metric("Revenue", "2024A", revenue),
                 Metric("Gross Profit", "2024A", 924000m),
                 Metric("EBITDA", "2024A", 760000m),
                 Metric("Current Assets", "2024A", 1203000m),
@@ -416,7 +496,7 @@ public sealed class ProductionLikeWorkflowE2ETests
                 Metric("Net Debt", "2025E", 1300000m),
                 Metric("Equity", "2025E", 899000m)
             ],
-            ReportSummary: TestReportSummary.Input
+            ReportSummary: reportSummary ?? TestReportSummary.Input
         );
     }
 
@@ -588,6 +668,49 @@ public sealed class ProductionLikeWorkflowE2ETests
             call.GetProperty("succeeded").GetBoolean()
         );
         executedCalls.All(DoesNotHaveOutputJson).Should().BeTrue();
+    }
+
+    private static void AssertIsolatedFinalContext(
+        string contextJson,
+        FinancialReportSummaryInput expectedSummary,
+        string expectedDocumentId,
+        string otherReportName,
+        decimal otherTotalAmount)
+    {
+        using var document = JsonDocument.Parse(contextJson);
+        var root = document.RootElement;
+        var report = root.GetProperty("financialReport");
+        report.GetProperty("reportName").GetString()
+            .Should().Be(expectedSummary.ReportName);
+        report.GetProperty("totalAmount").GetDecimal()
+            .Should().Be(expectedSummary.TotalAmount);
+        report.GetProperty("transactionCount").GetInt32()
+            .Should().Be(expectedSummary.TransactionCount);
+        report.GetProperty("submittedAt").GetDateTimeOffset()
+            .Should().Be(expectedSummary.SubmittedAt);
+        root.GetProperty("structuredFinancialMetrics")
+            .GetProperty("documentId").GetString().Should().Be(expectedDocumentId);
+        root.GetProperty("financialAnalysis")
+            .GetProperty("documentId").GetString().Should().Be(expectedDocumentId);
+
+        var dataCall = root.GetProperty("toolPlan")
+            .GetProperty("proposedCalls")
+            .EnumerateArray()
+            .Single(call => call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.AnalyzeTransactionsName);
+        var arguments = dataCall.GetProperty("arguments");
+        arguments.GetProperty("reportName").GetString()
+            .Should().Be(expectedSummary.ReportName);
+        arguments.GetProperty("totalAmount").GetString()
+            .Should().Be(expectedSummary.TotalAmount!.Value.ToString(CultureInfo.InvariantCulture));
+        arguments.GetProperty("transactionCount").GetString()
+            .Should().Be(expectedSummary.TransactionCount!.Value.ToString(CultureInfo.InvariantCulture));
+        arguments.GetProperty("submittedAt").GetString()
+            .Should().Be(expectedSummary.SubmittedAt!.Value.ToString("O", CultureInfo.InvariantCulture));
+
+        contextJson.Should().NotContain(otherReportName);
+        contextJson.Should().NotContain(
+            otherTotalAmount.ToString(CultureInfo.InvariantCulture));
     }
 
     private static bool DoesNotHaveOutputJson(
