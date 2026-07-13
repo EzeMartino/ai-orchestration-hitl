@@ -2,7 +2,7 @@
 
 **Issue:** [#4 — Prevent financial-analysis execution failures from being classified as Low risk](https://github.com/EzeMartino/ai-orchestration-hitl/issues/4)
 
-**Status:** Approved design; pending written-spec review
+**Status:** Approved for implementation
 
 ## Problem
 
