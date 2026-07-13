@@ -21,6 +21,9 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
     private const string RequiredMetricsWarning =
         "Se requieren métricas financieras estructuradas para este modo, pero no se adjuntaron a la sesión.";
 
+    private const string IncompleteAnalysisLimitation =
+        "El análisis financiero está incompleto y requiere revisión humana.";
+
     private static readonly string[] RequestedRatios =
     [
         "gross_margin",
@@ -117,7 +120,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
         var ratios = await _financialAnalysisService.ComputeFinancialRatiosAsync(
             new ComputeFinancialRatiosRequest(
                 Metrics: metricsDocument.Metrics,
-                RequestedRatios: RequestedRatios
+                RequestedRatios: RequestedRatios,
+                SessionId: report.SessionId
             ),
             cancellationToken
         );
@@ -127,7 +131,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Metrics: metricsDocument.Metrics,
                 FromPeriod: BasePeriod,
                 ToPeriod: ComparisonPeriod,
-                MetricNames: MetricsToCompare
+                MetricNames: MetricsToCompare,
+                SessionId: report.SessionId
             ),
             cancellationToken
         );
@@ -138,7 +143,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Ratios: ratios.Ratios,
                 Comparisons: comparisons.Comparisons,
                 ThresholdProfileName: resolvedProfileName,
-                Thresholds: resolvedThresholds
+                Thresholds: resolvedThresholds,
+                SessionId: report.SessionId
             ),
             cancellationToken
         );
@@ -149,10 +155,23 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Ratios: ratios.Ratios,
                 Comparisons: comparisons.Comparisons,
                 Signals: signals.Signals,
-                MaxItems: 8
+                MaxItems: 8,
+                SessionId: report.SessionId
             ),
             cancellationToken
         );
+
+        var execution = FinancialAnalysisExecution.FromStages(
+        [
+            ratios.Execution,
+            comparisons.Execution,
+            signals.Execution,
+            summary.Execution
+        ]);
+        var signalsSucceeded =
+            signals.Execution.Status == FinancialAnalysisExecutionStatus.Succeeded;
+        var requiresHumanReview =
+            execution.OverallStatus != FinancialAnalysisExecutionStatus.Succeeded;
 
         var warnings = ratios.Warnings
             .Concat(comparisons.Warnings)
@@ -181,27 +200,46 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
             signals.Signals,
             summary.Result.Evidence
         );
-        var severity = ResolveSeverity(signals.Signals.Select(signal => signal.Severity));
-        var hasAnomaly = signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
-        var limitations = new[] { FinancialMetricsInputLimitation };
-        var aiReview = await _aiReviewService.ReviewAsync(
-            new FinancialAnalysisAiReviewInput(
-                SessionId: report.SessionId.ToString(),
-                DocumentId: metricsDocument.DocumentId,
-                Company: metricsDocument.Company,
-                MetricsInputSource: metricsDocument.InputSource,
-                MetricsProvenance: metricsDocument.Provenance,
-                Ratios: ratios.Ratios,
-                PeriodComparisons: comparisons.Comparisons,
-                RiskSignals: signals.Signals,
-                RiskEvidence: summary.Result.Evidence,
-                Warnings: warnings,
-                Limitations: limitations,
-                ThresholdProfile: resolvedProfileName,
-                ThresholdsUsed: resolvedThresholds
-            ),
-            cancellationToken
-        );
+        var severity = signalsSucceeded
+            ? ResolveSeverity(signals.Signals.Select(signal => signal.Severity))
+            : "Unknown";
+        var hasAnomaly = signalsSucceeded &&
+            signals.Signals.Any(signal => IsMediumOrHigh(signal.Severity));
+        var limitations = requiresHumanReview
+            ? new[] { FinancialMetricsInputLimitation, IncompleteAnalysisLimitation }
+            : new[] { FinancialMetricsInputLimitation };
+
+        if (requiresHumanReview)
+        {
+            await PublishIncompleteExecutionActivityAsync(
+                report.SessionId,
+                execution,
+                cancellationToken
+            );
+        }
+
+        var aiReview = signalsSucceeded
+            ? await _aiReviewService.ReviewAsync(
+                new FinancialAnalysisAiReviewInput(
+                    SessionId: report.SessionId.ToString(),
+                    DocumentId: metricsDocument.DocumentId,
+                    Company: metricsDocument.Company,
+                    MetricsInputSource: metricsDocument.InputSource,
+                    MetricsProvenance: metricsDocument.Provenance,
+                    Ratios: ratios.Ratios,
+                    PeriodComparisons: comparisons.Comparisons,
+                    RiskSignals: signals.Signals,
+                    RiskEvidence: summary.Result.Evidence,
+                    Warnings: warnings,
+                    Limitations: limitations,
+                    ThresholdProfile: resolvedProfileName,
+                    ThresholdsUsed: resolvedThresholds
+                ),
+                cancellationToken
+            )
+            : FinancialAnalysisAiReviewResults.NotRun(
+                "financial_analysis_execution_failed"
+            );
 
         return new DataAgentResult(
             HasAnomaly: hasAnomaly,
@@ -225,7 +263,51 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 ThresholdProfile: resolvedProfileName,
                 ThresholdsUsed: resolvedThresholds
             )
+            {
+                Execution = execution
+            },
+            RequiresHumanReview: requiresHumanReview
         );
+    }
+
+    private Task PublishIncompleteExecutionActivityAsync(
+        Guid sessionId,
+        FinancialAnalysisExecution execution,
+        CancellationToken cancellationToken)
+    {
+        var eventType = execution.OverallStatus == FinancialAnalysisExecutionStatus.Failed
+            ? "financial_analysis_execution_failed"
+            : "financial_analysis_execution_degraded";
+        var failedStages = execution.Stages
+            .Where(stage => stage.Status != FinancialAnalysisExecutionStatus.Succeeded)
+            .Select(stage =>
+                $"{stage.Operation}:{GetSafeFailureCode(stage.FailureCode)}")
+            .ToArray();
+
+        return _activityPublisher.PublishAsync(
+            new ActivityEvent(
+                sessionId,
+                eventType,
+                "DataAgent",
+                $"Análisis financiero incompleto. Etapas fallidas: {string.Join(", ", failedStages)}.",
+                DateTimeOffset.UtcNow
+            ),
+            cancellationToken
+        );
+    }
+
+    private static string GetSafeFailureCode(string? failureCode)
+    {
+        return failureCode switch
+        {
+            FinancialAnalysisFailureCodes.PythonInvocationFailed =>
+                FinancialAnalysisFailureCodes.PythonInvocationFailed,
+            FinancialAnalysisFailureCodes.PythonResponseInvalid =>
+                FinancialAnalysisFailureCodes.PythonResponseInvalid,
+            FinancialAnalysisFailureCodes.UnexpectedFailure =>
+                FinancialAnalysisFailureCodes.UnexpectedFailure,
+            _ => FinancialAnalysisFailureCodes.UnexpectedFailure
+        };
     }
 
     private static DataAgentResult NoMetricsResult(
@@ -257,7 +339,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 Limitations: [FinancialMetricsInputLimitation],
                 MetricsInputSource: FinancialMetricsInputSources.None,
                 AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
-            )
+            ),
+            RequiresHumanReview: true
         );
     }
 
@@ -294,7 +377,8 @@ public sealed class DataAgentFinancialAnalysisWorkflow : IDataAgentFinancialAnal
                 ],
                 MetricsInputSource: FinancialMetricsInputSources.None,
                 AiReview: FinancialAnalysisAiReviewResults.NotRun("structured_financial_metrics_missing")
-            )
+            ),
+            RequiresHumanReview: true
         );
     }
 

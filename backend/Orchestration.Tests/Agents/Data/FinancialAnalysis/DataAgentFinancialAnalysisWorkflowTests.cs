@@ -20,7 +20,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         var service = new FakePythonFinancialAnalysisService
         {
             RatioWarnings = ["Structured metrics only."],
-            SignalWarnings = ["Human review recommended."]
+            ComparisonWarnings = ["Comparison coverage is partial."],
+            SignalWarnings = ["Human review recommended."],
+            SummaryWarnings = ["Summary evidence is partial."]
         };
         var aiReviewService = new FakeDataAgentAiReviewService();
         var workflow = CreateWorkflow(
@@ -66,7 +68,9 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
             evidence.MetricName == "net_debt_to_ebitda"
         );
         result.FinancialAnalysis.Warnings.Should().Contain("Structured metrics only.");
+        result.FinancialAnalysis.Warnings.Should().Contain("Comparison coverage is partial.");
         result.FinancialAnalysis.Warnings.Should().Contain("Human review recommended.");
+        result.FinancialAnalysis.Warnings.Should().Contain("Summary evidence is partial.");
         result.FinancialAnalysis.Limitations.Should().Contain(limitation =>
             limitation.Contains("JSON o CSV", StringComparison.OrdinalIgnoreCase)
         );
@@ -108,6 +112,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.AiReview!.UsedLlm.Should().BeFalse();
         result.FinancialAnalysis.AiReview.UsedFallback.Should().BeTrue();
         result.FinancialAnalysis.AiReview.FailureReason.Should().Be("structured_financial_metrics_missing");
+        result.RequiresHumanReview.Should().BeTrue();
         service.ComputeCalls.Should().Be(0);
     }
 
@@ -147,6 +152,7 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.AiReview.Should().NotBeNull();
         result.FinancialAnalysis.AiReview!.Summary.Should().Be("La revisión de IA no se ejecutó.");
         result.FinancialAnalysis.AiReview.FailureReason.Should().Be("structured_financial_metrics_missing");
+        result.RequiresHumanReview.Should().BeTrue();
         service.ComputeCalls.Should().Be(0);
         publisher.PublishedEvents.Should().ContainSingle(e =>
             e.Type == "financial_metrics_required_missing" &&
@@ -353,6 +359,140 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
         result.FinancialAnalysis.RiskEvidence.Should().BeEmpty();
         result.FinancialAnalysis.Warnings.Should().Contain("Missing input metric: current_liabilities.");
         result.FinancialAnalysis.Warnings.Should().Contain("Insufficient comparable periods for trend risk signals.");
+        result.RequiresHumanReview.Should().BeFalse();
+        result.FinancialAnalysis.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisOperations.Ratios)]
+    [InlineData(FinancialAnalysisOperations.Comparisons)]
+    [InlineData(FinancialAnalysisOperations.Summary)]
+    public async Task AnalyzeAsync_Should_preserve_evidence_and_require_review_when_non_signal_stage_fails(
+        string failedOperation)
+    {
+        var publisher = new FakeActivityEventPublisher();
+        var aiReview = new FakeDataAgentAiReviewService();
+        var service = new FakePythonFinancialAnalysisService();
+        service.SetExecution(FailedExecution(failedOperation));
+        var workflow = CreateWorkflow(
+            new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument()),
+            service,
+            publisher,
+            aiReviewService: aiReview
+        );
+
+        var result = await workflow.AnalyzeAsync(
+            CreateReport(),
+            CancellationToken.None
+        );
+
+        result.HasAnomaly.Should().BeTrue();
+        result.Severity.Should().Be("High");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Evidence.Should().NotBeEmpty();
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Degraded);
+        result.FinancialAnalysis.Execution.Stages.Should().ContainSingle(stage =>
+            stage.Operation == failedOperation &&
+            stage.Status == FinancialAnalysisExecutionStatus.Failed
+        );
+        result.FinancialAnalysis.RiskSignals.Should().NotBeEmpty();
+        aiReview.Calls.Should().Be(1);
+        result.FinancialAnalysis.Limitations.Should().ContainSingle(limitation =>
+            limitation.Contains("incompleto", StringComparison.OrdinalIgnoreCase)
+        );
+        publisher.PublishedEvents.Should().ContainSingle();
+        var activity = publisher.PublishedEvents.Single();
+        activity.Type.Should().Be("financial_analysis_execution_degraded");
+        activity.Message.Should().Contain(failedOperation);
+        activity.Message.Should().Contain(
+            FinancialAnalysisFailureCodes.PythonInvocationFailed
+        );
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_fail_closed_when_signal_stage_fails()
+    {
+        var report = CreateReport();
+        var publisher = new FakeActivityEventPublisher();
+        var aiReview = new FakeDataAgentAiReviewService();
+        var service = new FakePythonFinancialAnalysisService
+        {
+            SignalWarnings = ["sensitive adapter detail 3.75 net_debt_to_ebitda"]
+        };
+        service.SetExecution(FailedExecution(
+            FinancialAnalysisOperations.Signals,
+            "sensitive exception failure code"
+        ));
+        var workflow = CreateWorkflow(
+            new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument()),
+            service,
+            publisher,
+            aiReviewService: aiReview
+        );
+
+        var result = await workflow.AnalyzeAsync(
+            report,
+            CancellationToken.None
+        );
+
+        result.HasAnomaly.Should().BeFalse();
+        result.Severity.Should().Be("Unknown");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.FinancialAnalysis.Warnings.Should().Contain(
+            "sensitive adapter detail 3.75 net_debt_to_ebitda"
+        );
+        result.FinancialAnalysis.AiReview.Should().NotBeNull();
+        result.FinancialAnalysis.AiReview!.FailureReason
+            .Should().Be("financial_analysis_execution_failed");
+        aiReview.Calls.Should().Be(0);
+        publisher.PublishedEvents.Should().ContainSingle();
+        var activity = publisher.PublishedEvents.Single();
+        activity.SessionId.Should().Be(report.SessionId);
+        activity.Type.Should().Be("financial_analysis_execution_failed");
+        activity.Message.Should().Contain(FinancialAnalysisOperations.Signals);
+        activity.Message.Should().Contain(
+            FinancialAnalysisFailureCodes.UnexpectedFailure
+        );
+        activity.Message.Should().NotContain("sensitive adapter detail");
+        activity.Message.Should().NotContain("sensitive exception failure code");
+        activity.Message.Should().NotContain("3.75");
+        activity.Message.Should().NotContain("net_debt_to_ebitda");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_propagate_report_session_id_to_every_python_request()
+    {
+        var report = CreateReport();
+        var service = new FakePythonFinancialAnalysisService();
+        var workflow = CreateWorkflow(
+            new FakeStructuredFinancialMetricsProvider(CreateMetricsDocument()),
+            service
+        );
+
+        await workflow.AnalyzeAsync(report, CancellationToken.None);
+
+        service.ComputeRequest!.SessionId.Should().Be(report.SessionId);
+        service.CompareRequest!.SessionId.Should().Be(report.SessionId);
+        service.SignalsRequest!.SessionId.Should().Be(report.SessionId);
+        service.SummaryRequest!.SessionId.Should().Be(report.SessionId);
+    }
+
+    private static FinancialAnalysisStageExecution FailedExecution(
+        string operation,
+        string failureCode = FinancialAnalysisFailureCodes.PythonInvocationFailed)
+    {
+        return new FinancialAnalysisStageExecution(
+            operation,
+            FinancialAnalysisExecutionStatus.Failed,
+            DurationMilliseconds: 5,
+            FailureCode: failureCode
+        );
     }
 
     private static DataAgentFinancialAnalysisWorkflow CreateWorkflow(
@@ -454,11 +594,54 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
 
         public ComputeFinancialRatiosRequest? ComputeRequest { get; private set; }
 
+        public ComparePeriodsRequest? CompareRequest { get; private set; }
+
+        public DetectFinancialRiskSignalsRequest? SignalsRequest { get; private set; }
+
+        public SummarizeQuantitativeEvidenceRequest? SummaryRequest { get; private set; }
+
         public IReadOnlyList<string> RatioWarnings { get; init; } = [];
+
+        public IReadOnlyList<string> ComparisonWarnings { get; init; } = [];
 
         public IReadOnlyList<string> SignalWarnings { get; init; } = [];
 
+        public IReadOnlyList<string> SummaryWarnings { get; init; } = [];
+
         public bool ReturnNoRiskSignals { get; init; }
+
+        public FinancialAnalysisStageExecution RatiosExecution { get; private set; } =
+            SucceededExecution(FinancialAnalysisOperations.Ratios);
+
+        public FinancialAnalysisStageExecution ComparisonsExecution { get; private set; } =
+            SucceededExecution(FinancialAnalysisOperations.Comparisons);
+
+        public FinancialAnalysisStageExecution SignalsExecution { get; private set; } =
+            SucceededExecution(FinancialAnalysisOperations.Signals);
+
+        public FinancialAnalysisStageExecution SummaryExecution { get; private set; } =
+            SucceededExecution(FinancialAnalysisOperations.Summary);
+
+        public void SetExecution(FinancialAnalysisStageExecution execution)
+        {
+            switch (execution.Operation)
+            {
+                case FinancialAnalysisOperations.Ratios:
+                    RatiosExecution = execution;
+                    break;
+                case FinancialAnalysisOperations.Comparisons:
+                    ComparisonsExecution = execution;
+                    break;
+                case FinancialAnalysisOperations.Signals:
+                    SignalsExecution = execution;
+                    break;
+                case FinancialAnalysisOperations.Summary:
+                    SummaryExecution = execution;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(execution));
+            }
+        }
 
         public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
             ComputeFinancialRatiosRequest request,
@@ -482,13 +665,18 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                     )
                 ],
                 Warnings: RatioWarnings
-            ));
+            )
+            {
+                Execution = RatiosExecution
+            });
         }
 
         public Task<ComparePeriodsResponse> ComparePeriodsAsync(
             ComparePeriodsRequest request,
             CancellationToken cancellationToken)
         {
+            CompareRequest = request;
+
             return Task.FromResult(new ComparePeriodsResponse(
                 Engine: "Fake Financial Analysis",
                 Comparisons:
@@ -505,14 +693,19 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                         Interpretation: "Revenue dropped."
                     )
                 ],
-                Warnings: []
-            ));
+                Warnings: ComparisonWarnings
+            )
+            {
+                Execution = ComparisonsExecution
+            });
         }
 
         public Task<DetectFinancialRiskSignalsResponse> DetectFinancialRiskSignalsAsync(
             DetectFinancialRiskSignalsRequest request,
             CancellationToken cancellationToken)
         {
+            SignalsRequest = request;
+
             if (ReturnNoRiskSignals)
             {
                 return Task.FromResult(new DetectFinancialRiskSignalsResponse(
@@ -526,7 +719,10 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                         Evidence: [],
                         Warnings: SignalWarnings
                     )
-                ));
+                )
+                {
+                    Execution = SignalsExecution
+                });
             }
 
             var leverageEvidence = new RiskEvidenceItem(
@@ -586,13 +782,18 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                     Evidence: [leverageEvidence, liquidityEvidence],
                     Warnings: SignalWarnings
                 )
-            ));
+            )
+            {
+                Execution = SignalsExecution
+            });
         }
 
         public Task<SummarizeQuantitativeEvidenceResponse> SummarizeQuantitativeEvidenceAsync(
             SummarizeQuantitativeEvidenceRequest request,
             CancellationToken cancellationToken)
         {
+            SummaryRequest = request;
+
             if (ReturnNoRiskSignals)
             {
                 return Task.FromResult(new SummarizeQuantitativeEvidenceResponse(
@@ -604,9 +805,12 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                         Summary: "No quantitative risk signals were detected.",
                         Engine: "Fake Financial Analysis",
                         Evidence: [],
-                        Warnings: []
+                        Warnings: SummaryWarnings
                     )
-                ));
+                )
+                {
+                    Execution = SummaryExecution
+                });
             }
 
             var evidence = new RiskEvidenceItem(
@@ -627,9 +831,21 @@ public sealed class DataAgentFinancialAnalysisWorkflowTests
                     Summary: "High-severity quantitative evidence summarized.",
                     Engine: "Fake Financial Analysis",
                     Evidence: [evidence],
-                    Warnings: []
+                    Warnings: SummaryWarnings
                 )
-            ));
+            )
+            {
+                Execution = SummaryExecution
+            });
+        }
+
+        private static FinancialAnalysisStageExecution SucceededExecution(string operation)
+        {
+            return new FinancialAnalysisStageExecution(
+                operation,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                DurationMilliseconds: 1
+            );
         }
     }
 
