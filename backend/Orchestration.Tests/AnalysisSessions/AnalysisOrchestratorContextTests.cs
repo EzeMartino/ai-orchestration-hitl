@@ -55,6 +55,65 @@ public class AnalysisOrchestratorContextTests
         persisted.Status.Should().Be(AnalysisSessionStatus.Failed);
     }
 
+    [Theory]
+    [InlineData(AnalysisSessionStatus.Completed)]
+    [InlineData(AnalysisSessionStatus.Failed)]
+    public async Task StartAnalysisAsync_TerminalSessionWithInvalidReport_ShouldPreserveState(
+        AnalysisSessionStatus terminalStatus)
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        const string originalContext = """{"financialReport":{"reportName":""}}""";
+        session.SetContext(originalContext);
+        session.SetCurrentAgent("ExistingAgent");
+
+        if (terminalStatus == AnalysisSessionStatus.Failed)
+        {
+            session.MarkFailed("Existing failure");
+        }
+        else
+        {
+            session.SetStatus(terminalStatus);
+        }
+
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var originalFailureReason = session.FailureReason;
+        var originalUpdatedAt = session.UpdatedAt;
+        var originalCompletedAt = session.CompletedAt;
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new CapturingPlannerAgent();
+        var orchestrator = new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner,
+            new FinancialReportContextResolver());
+
+        Func<Task> act = async () => await orchestrator.StartAnalysisAsync(
+            session.Id,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"Invalid transition: {terminalStatus} -> Start");
+        planner.RunCalls.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
+        session.Status.Should().Be(terminalStatus);
+        session.ContextJson.Should().Be(originalContext);
+        session.FailureReason.Should().Be(originalFailureReason);
+        session.CurrentAgent.Should().Be("ExistingAgent");
+        session.UpdatedAt.Should().Be(originalUpdatedAt);
+        session.CompletedAt.Should().Be(originalCompletedAt);
+
+        var persisted = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        persisted.Status.Should().Be(terminalStatus);
+        persisted.ContextJson.Should().Be(originalContext);
+        persisted.FailureReason.Should().Be(originalFailureReason);
+        persisted.CurrentAgent.Should().Be("ExistingAgent");
+    }
+
     [Fact]
     public void BuildAnalysisContext_Should_include_planner_reasoning()
     {

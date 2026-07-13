@@ -46,6 +46,11 @@ namespace Orchestration.Application.AnalysisSessions
                 return null;
             }
 
+            var dataGatheringStatus = _workflow.ApplyTrigger(
+                session,
+                AnalysisSessionTrigger.Start
+            );
+
             var reportResolution = _reportContextResolver.Resolve(session);
 
             if (!reportResolution.IsValid || reportResolution.Report is null)
@@ -69,11 +74,6 @@ namespace Orchestration.Application.AnalysisSessions
                 "Orchestrator",
                 "Iniciando sesión de análisis.",
                 cancellationToken
-            );
-
-            var dataGatheringStatus = _workflow.ApplyTrigger(
-                session,
-                AnalysisSessionTrigger.Start
             );
 
             session.SetStatus(dataGatheringStatus);
