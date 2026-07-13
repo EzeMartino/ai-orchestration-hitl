@@ -219,6 +219,25 @@ export type FinancialRiskThreshold = {
   description: string;
 };
 
+export type FinancialAnalysisExecutionStatus =
+  | "legacy_unknown"
+  | "succeeded"
+  | "degraded"
+  | "failed"
+  | (string & {});
+
+export type FinancialAnalysisStageExecutionContext = {
+  operation?: string | null;
+  status?: FinancialAnalysisExecutionStatus | null;
+  durationMilliseconds?: number | null;
+  failureCode?: string | null;
+};
+
+export type FinancialAnalysisExecutionContext = {
+  overallStatus?: FinancialAnalysisExecutionStatus | null;
+  stages?: FinancialAnalysisStageExecutionContext[] | null;
+};
+
 export type FinancialAnalysisContext = {
   engine: string;
   documentId: string;
@@ -229,6 +248,7 @@ export type FinancialAnalysisContext = {
   riskEvidence: FinancialRiskEvidenceContext[];
   warnings: string[];
   limitations: string[];
+  execution?: FinancialAnalysisExecutionContext | null;
   metricsInputSource?: string | null;
   metricsProvenance?: StructuredFinancialMetricsProvenanceContext | null;
   aiReview?: FinancialAnalysisAiReviewContext | null;
