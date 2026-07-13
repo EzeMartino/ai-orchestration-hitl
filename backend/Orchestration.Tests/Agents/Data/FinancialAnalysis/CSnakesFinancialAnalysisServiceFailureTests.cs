@@ -124,6 +124,89 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
     }
 
     [Theory]
+    [InlineData(FinancialAnalysisOperations.Ratios, "{}")]
+    [InlineData(FinancialAnalysisOperations.Comparisons, "{\"comparisons\":{}}")]
+    [InlineData(FinancialAnalysisOperations.Signals, "{\"signals\":null}")]
+    [InlineData(FinancialAnalysisOperations.Summary, "{\"evidence\":[]}")]
+    public async Task InvalidResponseShape_ReturnsInvalidResponseFailure(
+        string operation,
+        string responseJson)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ => responseJson);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var result = await InvokeAsync(service, operation, CancellationToken.None);
+
+        result.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.Execution.FailureCode.Should().Be(FinancialAnalysisFailureCodes.PythonResponseInvalid);
+        logger.Entries.Should().ContainSingle().Which.Exception.Should().BeAssignableTo<JsonException>();
+    }
+
+    [Theory]
+    [InlineData(
+        FinancialAnalysisOperations.Ratios,
+        "{\"ratios\":[{\"period\":\"2025E\",\"value\":1.2}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Ratios,
+        "{\"ratios\":[{\"name\":\"current_ratio\",\"period\":\"2025E\",\"value\":\"not-a-number\"}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Comparisons,
+        "{\"comparisons\":[{\"basePeriod\":\"2024A\",\"comparisonPeriod\":\"2025E\",\"baseValue\":1,\"comparisonValue\":2,\"absoluteChange\":1}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Comparisons,
+        "{\"comparisons\":[{\"metricName\":\"revenue\",\"basePeriod\":\"2024A\",\"comparisonPeriod\":\"2025E\",\"baseValue\":\"not-a-number\",\"comparisonValue\":2,\"absoluteChange\":1}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Signals,
+        "{\"signals\":[{\"severity\":\"High\",\"period\":\"2025E\",\"summary\":\"Risk\",\"evidence\":[]}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Signals,
+        "{\"signals\":[{\"name\":\"LOW_CURRENT_RATIO\",\"severity\":\"High\",\"period\":\"2025E\",\"summary\":\"Risk\",\"evidence\":[{\"metricName\":\"current_ratio\",\"period\":\"2025E\",\"value\":\"not-a-number\"}]}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Summary,
+        "{\"summary\":\"Review\",\"evidence\":[{\"period\":\"2025E\",\"value\":1.2}]}")]
+    [InlineData(
+        FinancialAnalysisOperations.Summary,
+        "{\"summary\":\"Review\",\"evidence\":[{\"metricName\":\"current_ratio\",\"period\":\"2025E\",\"value\":\"not-a-number\"}]}")]
+    public async Task InvalidRequiredItemField_ReturnsInvalidResponseFailure(
+        string operation,
+        string responseJson)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ => responseJson);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var result = await InvokeAsync(service, operation, CancellationToken.None);
+
+        result.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.Execution.FailureCode.Should().Be(FinancialAnalysisFailureCodes.PythonResponseInvalid);
+        logger.Entries.Should().ContainSingle().Which.Exception.Should().BeAssignableTo<JsonException>();
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisOperations.Ratios, "{\"ratios\":[]}")]
+    [InlineData(FinancialAnalysisOperations.Comparisons, "{\"comparisons\":[]}")]
+    [InlineData(FinancialAnalysisOperations.Signals, "{\"signals\":[]}")]
+    [InlineData(FinancialAnalysisOperations.Summary, "{\"summary\":\"No evidence.\",\"evidence\":[]}")]
+    public async Task ExplicitEmptyResults_RemainSuccessful(
+        string operation,
+        string responseJson)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ => responseJson);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var result = await InvokeAsync(service, operation, CancellationToken.None);
+
+        result.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        result.Execution.FailureCode.Should().BeNull();
+        if (operation == FinancialAnalysisOperations.Signals)
+        {
+            result.RiskLevel.Should().Be("Low");
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(Operations))]
     public async Task OperationAsync_PreCancelledToken_DoesNotInvokePython(
         string operation)

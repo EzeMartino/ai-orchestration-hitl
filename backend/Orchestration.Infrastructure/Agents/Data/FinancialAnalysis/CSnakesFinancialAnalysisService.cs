@@ -204,12 +204,12 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         var root = document.RootElement;
         var ratios = new List<FinancialRatio>();
 
-        foreach (var ratio in EnumerateArray(root, "ratios"))
+        foreach (var ratio in GetRequiredArray(root, "ratios"))
         {
             ratios.Add(new FinancialRatio(
-                Name: GetString(ratio, "name"),
-                Period: GetString(ratio, "period"),
-                Value: GetDecimal(ratio, "value"),
+                Name: GetRequiredString(ratio, "name"),
+                Period: GetRequiredString(ratio, "period"),
+                Value: GetRequiredDecimal(ratio, "value"),
                 Unit: GetString(ratio, "unit"),
                 Formula: GetString(ratio, "formula"),
                 Inputs: GetStringArray(ratio, "inputs"),
@@ -231,15 +231,15 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         var root = document.RootElement;
         var comparisons = new List<FinancialPeriodComparison>();
 
-        foreach (var comparison in EnumerateArray(root, "comparisons"))
+        foreach (var comparison in GetRequiredArray(root, "comparisons"))
         {
             comparisons.Add(new FinancialPeriodComparison(
-                MetricName: GetString(comparison, "metricName"),
-                FromPeriod: GetString(comparison, "fromPeriod", "basePeriod"),
-                ToPeriod: GetString(comparison, "toPeriod", "comparisonPeriod"),
-                FromValue: GetDecimal(comparison, "fromValue", "baseValue"),
-                ToValue: GetDecimal(comparison, "toValue", "comparisonValue"),
-                AbsoluteChange: GetDecimal(comparison, "absoluteChange"),
+                MetricName: GetRequiredString(comparison, "metricName"),
+                FromPeriod: GetRequiredString(comparison, "fromPeriod", "basePeriod"),
+                ToPeriod: GetRequiredString(comparison, "toPeriod", "comparisonPeriod"),
+                FromValue: GetRequiredDecimal(comparison, "fromValue", "baseValue"),
+                ToValue: GetRequiredDecimal(comparison, "toValue", "comparisonValue"),
+                AbsoluteChange: GetRequiredDecimal(comparison, "absoluteChange"),
                 PercentageChange: GetNullableDecimal(comparison, "percentageChange"),
                 Unit: GetString(comparison, "unit"),
                 Interpretation: GetString(comparison, "interpretation", "explanation")
@@ -259,15 +259,15 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         var root = document.RootElement;
         var signals = new List<FinancialRiskSignal>();
 
-        foreach (var signal in EnumerateArray(root, "signals"))
+        foreach (var signal in GetRequiredArray(root, "signals"))
         {
             var evidence = MapEvidence(signal);
 
             signals.Add(new FinancialRiskSignal(
-                Name: GetString(signal, "name", "code"),
-                Severity: GetString(signal, "severity", defaultValue: "Info"),
-                Period: GetString(signal, "period"),
-                Summary: GetString(signal, "summary"),
+                Name: GetRequiredString(signal, "name", "code"),
+                Severity: GetRequiredString(signal, "severity"),
+                Period: GetRequiredString(signal, "period"),
+                Summary: GetRequiredString(signal, "summary"),
                 Evidence: evidence,
                 Metric: GetNullableString(signal, "metric"),
                 Value: GetNullableDecimal(signal, "value"),
@@ -302,9 +302,9 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         using var document = JsonDocument.Parse(responseJson);
         var root = document.RootElement;
-        var narrative = GetString(root, "summary", defaultValue: "Se resumió la evidencia cuantitativa.");
+        var narrative = GetRequiredString(root, "summary");
         var evidence = MapEvidence(root);
-        var severities = EnumerateArray(root, "evidence")
+        var severities = GetRequiredArray(root, "evidence")
             .Select(item => GetString(item, "severity", defaultValue: "Info"));
         var riskLevel = ResolveRiskLevel(severities);
         var warnings = GetWarningsAndLimitations(root);
@@ -327,12 +327,12 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         var evidence = new List<RiskEvidenceItem>();
 
-        foreach (var item in EnumerateArray(element, "evidence"))
+        foreach (var item in GetRequiredArray(element, "evidence"))
         {
             evidence.Add(new RiskEvidenceItem(
-                MetricName: GetString(item, "metricName"),
-                Period: GetString(item, "period"),
-                Value: GetDecimal(item, "value"),
+                MetricName: GetRequiredString(item, "metricName"),
+                Period: GetRequiredString(item, "period"),
+                Value: GetRequiredDecimal(item, "value"),
                 Threshold: GetNullableDecimal(item, "threshold"),
                 Unit: GetString(item, "unit"),
                 Interpretation: GetString(item, "interpretation")
@@ -458,18 +458,19 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             .ToArray();
     }
 
-    private static IEnumerable<JsonElement> EnumerateArray(
+    private static IReadOnlyList<JsonElement> GetRequiredArray(
         JsonElement element,
         string propertyName)
     {
-        if (element.ValueKind == JsonValueKind.Object &&
-            element.TryGetProperty(propertyName, out var property) &&
-            property.ValueKind == JsonValueKind.Array)
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Array)
         {
-            return property.EnumerateArray().ToArray();
+            throw new JsonException(
+                $"Required array '{propertyName}' was missing or invalid.");
         }
 
-        return [];
+        return property.EnumerateArray().ToArray();
     }
 
     private static IReadOnlyList<string> GetStringArray(
@@ -497,6 +498,21 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         params string[] propertyNames)
     {
         return GetString(element, propertyNames, defaultValue: string.Empty);
+    }
+
+    private static string GetRequiredString(
+        JsonElement element,
+        params string[] propertyNames)
+    {
+        if (!TryGetProperty(element, propertyNames, out var property) ||
+            property.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new JsonException(
+                $"Required string '{propertyNames[0]}' was missing or invalid.");
+        }
+
+        return property.GetString()!;
     }
 
     private static string GetString(
@@ -546,11 +562,13 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             : value;
     }
 
-    private static decimal GetDecimal(
+    private static decimal GetRequiredDecimal(
         JsonElement element,
         params string[] propertyNames)
     {
-        return GetNullableDecimal(element, propertyNames) ?? 0m;
+        return GetNullableDecimal(element, propertyNames) ??
+            throw new JsonException(
+                $"Required decimal '{propertyNames[0]}' was missing or invalid.");
     }
 
     private static decimal? GetNullableDecimal(
