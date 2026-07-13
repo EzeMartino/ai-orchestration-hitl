@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
@@ -23,6 +24,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         result.Outcome.Should().Be(FinancialMetricsFileOutcome.Accepted);
         result.SaveResult.Should().NotBeNull();
         fixture.SessionService.SaveRequests.Should().ContainSingle();
+        fixture.SessionService.SaveRequests.Single().Input.ReportSummary
+            .Should().BeSameAs(TestReportSummary.Input);
         fixture.SessionService.SaveRequests.Single().Provenance.Should().Be(
             new StructuredFinancialMetricsProvenanceInput(
                 "pdf_file",
@@ -109,6 +112,9 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         result.ReviewDraft.Should().NotBeNull();
         fixture.SessionService.SaveRequests.Should().BeEmpty();
         fixture.DraftService.Requests.Should().ContainSingle();
+        fixture.DraftService.Requests.Single().Payload.SchemaVersion.Should().Be(2);
+        fixture.DraftService.Requests.Single().Payload.ProposedInput.ReportSummary
+            .Should().BeSameAs(TestReportSummary.Input);
         fixture.DraftService.Requests.Single().Payload.Candidates
             .Should().Contain(candidate => candidate.ExtractionStrategy == "deterministic_pdf_parser");
         fixture.DraftService.Requests.Single().Payload.MissingFields
@@ -373,7 +379,8 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Unit: "USD_million",
             OriginalFileName: "metrics.pdf",
             FileSizeBytes: 3,
-            ContentHash: "sha256:abc");
+            ContentHash: "sha256:abc",
+            ReportSummary: TestReportSummary.Input);
     }
 
     private static FinancialMetricsExtractionOptions SemanticOptions(
@@ -715,6 +722,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
@@ -760,6 +768,16 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Guid sessionId,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<FinancialReportSummary?>(null);
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
     }
 
     private sealed class FakeActivityPublisher : IActivityEventPublisher

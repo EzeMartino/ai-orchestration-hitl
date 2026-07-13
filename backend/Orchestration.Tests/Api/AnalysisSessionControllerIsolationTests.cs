@@ -14,6 +14,7 @@ using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
@@ -42,7 +43,8 @@ public class AnalysisSessionControllerIsolationTests
             dbContext,
             orchestrator: null!, // Not executing backend service orchestrator logic, controller checks take precedence
             new AnalysisSessionStartPreflightValidator(
-                Options.Create(new DataAgentOptions())
+                Options.Create(new DataAgentOptions()),
+                new FinancialReportContextResolver()
             ),
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
@@ -108,6 +110,7 @@ public class AnalysisSessionControllerIsolationTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken) => NotFound();
 
         public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(
@@ -330,5 +333,80 @@ public class AnalysisSessionControllerIsolationTests
         var result = await controller.GetFinancialMetrics(sessionA.Id, CancellationToken.None);
 
         result.Should().BeOfType<NotFoundResult>();
+    }
+
+    [Fact]
+    public async Task FinancialMetrics_TwoUsersAndSessions_ShouldKeepReportSummariesIsolated()
+    {
+        await using var dbContext = CreateDbContext();
+        var sessionA = AnalysisSession.Create(UserAId);
+        var sessionB = AnalysisSession.Create(UserBId);
+        dbContext.AnalysisSessions.AddRange(sessionA, sessionB);
+        await dbContext.SaveChangesAsync();
+        var controllerA = CreateController(dbContext, UserAId);
+        var controllerB = CreateController(dbContext, UserBId);
+        var summaryA = new FinancialReportSummaryInput(
+            "  balance-sheet-2025.pdf  ",
+            842350.75m,
+            187,
+            new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+        var summaryB = new FinancialReportSummaryInput(
+            "user-b-report.pdf",
+            99001m,
+            23,
+            new DateTimeOffset(2026, 7, 13, 9, 0, 0, TimeSpan.Zero));
+
+        await controllerA.SaveFinancialMetrics(
+            sessionA.Id,
+            CreateMetricsInput("user-a-document", summaryA),
+            CancellationToken.None);
+        await controllerB.SaveFinancialMetrics(
+            sessionB.Id,
+            CreateMetricsInput("user-b-document", summaryB),
+            CancellationToken.None);
+
+        var getA = await controllerA.GetFinancialMetrics(sessionA.Id, CancellationToken.None);
+        var getB = await controllerB.GetFinancialMetrics(sessionB.Id, CancellationToken.None);
+        var responseA = getA.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<GetFinancialMetricsResponse>().Subject;
+        var responseB = getB.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<GetFinancialMetricsResponse>().Subject;
+        responseA.ReportSummary.Should().Be(new FinancialReportSummary(
+            "balance-sheet-2025.pdf",
+            842350.75m,
+            187,
+            new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero)));
+        responseB.ReportSummary.Should().Be(new FinancialReportSummary(
+            "user-b-report.pdf",
+            99001m,
+            23,
+            new DateTimeOffset(2026, 7, 13, 9, 0, 0, TimeSpan.Zero)));
+
+        var forbiddenRead = await controllerA.GetFinancialMetrics(
+            sessionB.Id,
+            CancellationToken.None);
+        var forbiddenWrite = await controllerA.SaveFinancialMetrics(
+            sessionB.Id,
+            CreateMetricsInput("cross-session-write", summaryA),
+            CancellationToken.None);
+
+        forbiddenRead.Should().BeOfType<NotFoundResult>();
+        forbiddenWrite.Should().BeOfType<NotFoundResult>();
+        var unchangedB = await controllerB.GetFinancialMetrics(
+            sessionB.Id,
+            CancellationToken.None);
+        unchangedB.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<GetFinancialMetricsResponse>()
+            .Which.ReportSummary.Should().Be(responseB.ReportSummary);
+    }
+
+    private static StructuredFinancialMetricsInput CreateMetricsInput(
+        string documentId,
+        FinancialReportSummaryInput reportSummary)
+    {
+        return StructuredFinancialMetricsSessionServiceTests.CreateInput(documentId) with
+        {
+            ReportSummary = reportSummary
+        };
     }
 }

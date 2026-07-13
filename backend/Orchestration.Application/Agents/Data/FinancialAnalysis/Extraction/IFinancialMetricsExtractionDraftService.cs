@@ -24,6 +24,7 @@ public interface IFinancialMetricsExtractionDraftService
         Guid draftId,
         Guid sessionId,
         Guid userId,
+        ConfirmFinancialMetricsExtractionDraftRequest request,
         CancellationToken cancellationToken);
 
     Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(

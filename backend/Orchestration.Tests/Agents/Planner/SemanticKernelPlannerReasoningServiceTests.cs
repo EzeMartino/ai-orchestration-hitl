@@ -193,6 +193,12 @@ No other action was taken.
             .Select(message => message.Content)
             .Should()
             .Contain(message => message != null && message.Contains("Respond in Spanish."));
+        chatCompletionService.LastChatHistory!
+            .Select(message => message.Content)
+            .Should()
+            .Contain(message => message != null && message.Contains(
+                "\"submittedAt\":\"2026-07-12T18:30:00.0000000-03:00\"",
+                StringComparison.Ordinal));
     }
 
     private static PlannerReasoningInput CreateInput()
@@ -202,6 +208,8 @@ No other action was taken.
             ReportName: "financial-report",
             TotalAmount: 125000m,
             TransactionCount: 42,
+            SubmittedAt: new DateTimeOffset(
+                2026, 7, 12, 18, 30, 0, TimeSpan.FromHours(-3)),
             DataSummary: "Anomaly detected.",
             DataSeverity: "High",
             DataEngine: "TestDataEngine",

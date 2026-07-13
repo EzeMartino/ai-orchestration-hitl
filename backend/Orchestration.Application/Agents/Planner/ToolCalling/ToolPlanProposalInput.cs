@@ -5,6 +5,7 @@ public sealed record ToolPlanProposalInput(
     string ReportName,
     decimal TotalAmount,
     int TransactionCount,
+    DateTimeOffset SubmittedAt,
     string PlannerSummary,
     IReadOnlyList<string> RiskFactors,
     IReadOnlyList<string> Limitations

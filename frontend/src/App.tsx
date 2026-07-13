@@ -105,6 +105,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
     setSelectedSessionId,
     errorMessage,
     structuredMetrics,
+    financialReportSummary,
     isLoadingStructuredMetrics,
     isSavingStructuredMetrics,
     metricsSaveResult,
@@ -307,6 +308,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
           <StructuredFinancialMetricsPanel
             sessionId={session?.id}
             metricsContext={structuredMetrics}
+            persistedReportSummary={financialReportSummary}
             isLoading={isLoadingStructuredMetrics}
             isSaving={isSavingStructuredMetrics}
             saveResult={metricsSaveResult}

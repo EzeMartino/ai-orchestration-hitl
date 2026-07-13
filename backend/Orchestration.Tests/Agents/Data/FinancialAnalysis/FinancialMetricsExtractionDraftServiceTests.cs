@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Domain.FinancialMetricsExtraction;
 using Orchestration.Infrastructure.Persistence;
@@ -2254,6 +2255,123 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
     }
 
     [Fact]
+    public async Task GetPendingAsync_VersionOnePayload_ShouldRemainReadableWithoutSummary()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var payload = CreatePayload() with
+        {
+            SchemaVersion = 1,
+            ProposedInput = CreateInput() with { ReportSummary = null }
+        };
+        var entity = FinancialMetricsExtractionDraft.Create(
+            session.Id,
+            userId,
+            "legacy.pdf",
+            4096,
+            "legacy-hash",
+            JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            DateTimeOffset.UtcNow);
+        dbContext.FinancialMetricsExtractionDrafts.Add(entity);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var result = await service.GetPendingAsync(
+            session.Id,
+            userId,
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        result.Draft!.Payload.SchemaVersion.Should().Be(1);
+        result.Draft.Payload.ProposedInput.ReportSummary.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ConfirmAsync_WithoutExplicitSummary_ShouldStayPending(
+        int schemaVersion)
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var payload = CreatePayload() with
+        {
+            SchemaVersion = schemaVersion
+        };
+        var service = CreateService(dbContext);
+        var draft = await CreateDraftAsync(service, session.Id, userId, payload: payload);
+        dbContext.ResetSaveChangesCount();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new ConfirmFinancialMetricsExtractionDraftRequest(null),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Invalid);
+        result.ValidationIssues.Should().ContainSingle(issue =>
+            issue.Code == "REPORT_SUMMARY_REQUIRED");
+        dbContext.SaveChangesCount.Should().Be(0);
+        (await dbContext.FinancialMetricsExtractionDrafts.SingleAsync(x => x.Id == draft.Id))
+            .Status.Should().Be(FinancialMetricsExtractionDraftStatus.PendingReview);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_VersionOneWithCorrectedSummary_ShouldUpgradePayloadAndPersistAtomically()
+    {
+        await using var dbContext = CreateDbContext();
+        var userId = Guid.NewGuid();
+        var session = await AddSessionAsync(dbContext, userId);
+        var payload = CreatePayload() with
+        {
+            SchemaVersion = 1,
+            ProposedInput = CreateInput() with { ReportSummary = null }
+        };
+        var sessionService = new StructuredFinancialMetricsSessionService(
+            dbContext,
+            new StructuredFinancialMetricsValidator(),
+            new FinancialMetricInputMapper(),
+            new FakeActivityEventPublisher());
+        var service = CreateService(dbContext, sessionService);
+        var draft = await CreateDraftAsync(service, session.Id, userId, payload: payload);
+        var corrected = TestReportSummary.Input with
+        {
+            ReportName = "corrected-report.pdf",
+            TotalAmount = 9876.54m,
+            TransactionCount = 11
+        };
+        dbContext.ResetSaveChangesCount();
+
+        var result = await service.ConfirmAsync(
+            draft.Id,
+            session.Id,
+            userId,
+            new ConfirmFinancialMetricsExtractionDraftRequest(corrected),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(FinancialMetricsExtractionDraftResultKind.Success);
+        dbContext.SaveChangesCount.Should().Be(1);
+        result.Draft!.Payload.SchemaVersion.Should().Be(2);
+        result.Draft.Payload.ProposedInput.ReportSummary.Should().BeEquivalentTo(corrected);
+        var persisted = await dbContext.FinancialMetricsExtractionDrafts
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == draft.Id);
+        var persistedPayload = JsonSerializer.Deserialize<FinancialMetricsExtractionDraftPayload>(
+            persisted.PayloadJson,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        persistedPayload!.SchemaVersion.Should().Be(2);
+        persistedPayload.ProposedInput.ReportSummary.Should().BeEquivalentTo(corrected);
+        using var context = JsonDocument.Parse(session.ContextJson);
+        context.RootElement.GetProperty("financialReport").GetProperty("reportName")
+            .GetString().Should().Be("corrected-report.pdf");
+        context.RootElement.GetProperty("financialReport").GetProperty("totalAmount")
+            .GetDecimal().Should().Be(9876.54m);
+    }
+
+    [Fact]
     public async Task ConfirmAsync_Should_stage_and_save_session_and_draft_once_atomically()
     {
         await using var dbContext = CreateDbContext();
@@ -3447,7 +3565,8 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                     Source: metricSource,
                     SourcePage: 7,
                     Confidence: 0.95m)
-            ]);
+            ],
+            ReportSummary: TestReportSummary.Input);
     }
 
     private static StructuredFinancialMetricsInput CreateNonCanonicalInput(
@@ -3594,7 +3713,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 MetadataCandidates: [])
             : null;
 
-        return reconciler.Reconcile(
+        var reconciliation = reconciler.Reconcile(
             deterministicInput,
             semanticResult,
             new FinancialMetricsExtractionOptions
@@ -3602,6 +3721,8 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 Mode = "ReviewOnly",
                 AutomaticAcceptanceConfidence = 0.9m
             });
+
+        return WithTestReportSummary(reconciliation);
     }
 
     private static FinancialMetricReconciliationResult
@@ -3646,7 +3767,7 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         var reconciler = new FinancialMetricCandidateReconciler(
             new StructuredFinancialMetricsValidator());
 
-        return reconciler.Reconcile(
+        var reconciliation = reconciler.Reconcile(
             CreateInput(metrics: [primary]),
             new FinancialDocumentExtractionResult(
                 Company: null,
@@ -3659,6 +3780,20 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 Mode = "ReviewOnly",
                 AutomaticAcceptanceConfidence = 0.9m
             });
+
+        return WithTestReportSummary(reconciliation);
+    }
+
+    private static FinancialMetricReconciliationResult WithTestReportSummary(
+        FinancialMetricReconciliationResult reconciliation)
+    {
+        return reconciliation with
+        {
+            ProposedInput = reconciliation.ProposedInput with
+            {
+                ReportSummary = TestReportSummary.Input
+            }
+        };
     }
 
     private static FinancialMetricCandidate CompositeSupporter(
@@ -4010,6 +4145,20 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
         }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<FinancialReportSummary?>(null);
+        }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
+        }
     }
 
     private sealed class StagingSessionService(
@@ -4083,6 +4232,20 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return Task.FromResult<StructuredFinancialMetricsContext?>(null);
         }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<FinancialReportSummary?>(null);
+        }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new StructuredFinancialMetricsSessionContext(null, null));
+        }
     }
 
     private sealed class DirtyThenThrowSessionService
@@ -4149,6 +4312,20 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
         {
             return _inner.GetAsync(sessionId, cancellationToken);
         }
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.GetReportSummaryAsync(sessionId, cancellationToken);
+        }
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            return _inner.GetSessionContextAsync(sessionId, cancellationToken);
+        }
     }
 
     private sealed class AlwaysValidValidator : IStructuredFinancialMetricsValidator
@@ -4162,5 +4339,23 @@ public sealed class FinancialMetricsExtractionDraftServiceTests
                 [],
                 []);
         }
+    }
+}
+
+internal static class FinancialMetricsExtractionDraftServiceTestExtensions
+{
+    internal static Task<FinancialMetricsExtractionDraftServiceResult> ConfirmAsync(
+        this IFinancialMetricsExtractionDraftService service,
+        Guid draftId,
+        Guid sessionId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        return service.ConfirmAsync(
+            draftId,
+            sessionId,
+            userId,
+            new ConfirmFinancialMetricsExtractionDraftRequest(TestReportSummary.Input),
+            cancellationToken);
     }
 }

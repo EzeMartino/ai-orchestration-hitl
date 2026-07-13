@@ -50,30 +50,28 @@ public sealed class PlannerAgent : IPlannerAgent
     }
 
     public async Task<PlannerAgentResult> RunAsync(
-        AnalysisSession session,
+        FinancialReportContext report,
         CancellationToken cancellationToken)
     {
         await PublishAsync(
-            session.Id,
+            report.SessionId,
             "agent_started",
             "PlannerAgent",
             "PlannerAgent (Agente Planificador) inicializado. Construyendo plan de ejecución.",
             cancellationToken
         );
 
-        var report = BuildReportContext(session);
-
         if (IsPlanDrivenMode())
         {
             return await RunPlanDrivenModeAsync(
-                session.Id,
+                report.SessionId,
                 report,
                 cancellationToken
             );
         }
 
         return await RunShadowModeAsync(
-            session.Id,
+            report.SessionId,
             report,
             cancellationToken
         );
@@ -547,18 +545,6 @@ public sealed class PlannerAgent : IPlannerAgent
         return "Razonamiento del Planificador completado usando la alternativa determinista.";
     }
 
-    private static FinancialReportContext BuildReportContext(
-        AnalysisSession session)
-    {
-        return new FinancialReportContext(
-            SessionId: session.Id,
-            ReportName: $"financial-report-{session.Id}",
-            TotalAmount: 125000m,
-            TransactionCount: 42,
-            SubmittedAt: session.CreatedAt
-        );
-    }
-
     private static PlannerReasoningInput BuildReasoningInput(
         FinancialReportContext report,
         DataAgentResult dataResult,
@@ -569,6 +555,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             DataSummary: dataResult.Summary,
             DataSeverity: dataResult.Severity,
             DataEngine: dataResult.Engine,
@@ -594,6 +581,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             PlannerSummary: reasoningResult.Summary,
             RiskFactors: reasoningResult.RiskFactors,
             Limitations: reasoningResult.Limitations
@@ -608,6 +596,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             PlannerSummary: "Recopilar evidencia de anomalías financieras y recuperación regulatoria antes del razonamiento del planificador.",
             RiskFactors: [],
             Limitations:

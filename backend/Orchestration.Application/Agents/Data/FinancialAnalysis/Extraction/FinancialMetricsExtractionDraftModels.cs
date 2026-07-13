@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Shared;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 
 public sealed record FinancialMetricsExtractionDraftPayload(
@@ -10,7 +12,7 @@ public sealed record FinancialMetricsExtractionDraftPayload(
     IReadOnlyList<FinancialMetricsValidationIssue> ValidationIssues,
     FinancialMetricsExtractionDiagnostics Diagnostics)
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public IReadOnlyList<FinancialDocumentMetadataCandidate> MetadataCandidates
     {
@@ -108,6 +110,9 @@ public sealed record UpdateFinancialMetricsExtractionDraftRequest(
         init;
     } = [];
 }
+
+public sealed record ConfirmFinancialMetricsExtractionDraftRequest(
+    FinancialReportSummaryInput? ReportSummary);
 
 public sealed record FinancialMetricsExtractionDraftDto(
     Guid Id,

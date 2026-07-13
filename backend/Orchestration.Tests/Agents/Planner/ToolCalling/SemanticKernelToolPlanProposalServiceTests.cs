@@ -9,6 +9,9 @@ namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
 public class SemanticKernelToolPlanProposalServiceTests
 {
+    private static readonly DateTimeOffset SubmittedAt =
+        new(2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
     [Fact]
     public async Task ProposeAsync_Should_fallback_safely_when_llm_output_is_invalid()
     {
@@ -96,6 +99,12 @@ public class SemanticKernelToolPlanProposalServiceTests
             .Contain(message => message != null && message.Contains("Write the reason field in Spanish."))
             .And
             .Contain(message => message != null && message.Contains("Do not exceed maxToolCalls."));
+        var userMessage = chatCompletionService.LastChatHistory!
+            .Single(message => message.Role == AuthorRole.User)
+            .Content!;
+        using var payload = JsonDocument.Parse(userMessage);
+        payload.RootElement.GetProperty("submittedAt").GetString()
+            .Should().Be("2024-02-03T04:05:06.0000000+00:00");
     }
 
     [Fact]
@@ -167,6 +176,7 @@ public class SemanticKernelToolPlanProposalServiceTests
             ReportName: "financial-report",
             TotalAmount: 125000m,
             TransactionCount: 42,
+            SubmittedAt: SubmittedAt,
             PlannerSummary: "Planner reviewed collected evidence.",
             RiskFactors: ["High data severity."],
             Limitations: ["Human approval required."]

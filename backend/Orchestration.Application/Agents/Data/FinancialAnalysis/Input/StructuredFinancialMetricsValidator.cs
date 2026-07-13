@@ -1,4 +1,5 @@
 using System.Text;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
@@ -43,8 +44,13 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
                 "Se requiere la entrada de métricas financieras estructuradas."
             ));
 
-            return BuildResult(validatedMetrics, errors, warnings);
+            return BuildResult(validatedMetrics, errors, warnings, null);
         }
+
+        var reportSummaryValidation = FinancialReportSummaryValidator.Validate(input.ReportSummary);
+        errors.AddRange(reportSummaryValidation.Errors.Select(issue => Error(
+            issue.Code,
+            issue.Message)));
 
         if (string.IsNullOrWhiteSpace(input.DocumentId))
         {
@@ -65,7 +71,11 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
                 "Se requiere al menos una métrica financiera."
             ));
 
-            return BuildResult(validatedMetrics, errors, warnings);
+            return BuildResult(
+                validatedMetrics,
+                errors,
+                warnings,
+                reportSummaryValidation.Summary);
         }
 
         foreach (var metric in input.Metrics)
@@ -79,7 +89,11 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
             );
         }
 
-        return BuildResult(validatedMetrics, errors, warnings);
+        return BuildResult(
+            validatedMetrics,
+            errors,
+            warnings,
+            reportSummaryValidation.Summary);
     }
 
     private static void ValidateMetric(
@@ -399,13 +413,15 @@ public sealed class StructuredFinancialMetricsValidator : IStructuredFinancialMe
     private static FinancialMetricsValidationResult BuildResult(
         Dictionary<(string Name, string Period), ValidatedFinancialMetric> validatedMetrics,
         IReadOnlyList<FinancialMetricsValidationIssue> errors,
-        IReadOnlyList<FinancialMetricsValidationIssue> warnings)
+        IReadOnlyList<FinancialMetricsValidationIssue> warnings,
+        FinancialReportSummary? reportSummary)
     {
         return new FinancialMetricsValidationResult(
             IsValid: errors.Count == 0,
             Metrics: validatedMetrics.Values.ToArray(),
             Errors: errors,
-            Warnings: warnings
+            Warnings: warnings,
+            ReportSummary: reportSummary
         );
     }
 

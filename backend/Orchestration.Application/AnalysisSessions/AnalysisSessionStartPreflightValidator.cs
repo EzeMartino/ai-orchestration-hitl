@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Domain.FinancialMetricsExtraction;
@@ -34,18 +35,22 @@ public sealed class AnalysisSessionStartPreflightValidator
         };
 
     private readonly DataAgentOptions _options;
+    private readonly IFinancialReportContextResolver _reportContextResolver;
     private readonly IOrchestrationDbContext? _dbContext;
 
     public AnalysisSessionStartPreflightValidator(
-        IOptions<DataAgentOptions> options)
+        IOptions<DataAgentOptions> options,
+        IFinancialReportContextResolver reportContextResolver)
     {
         _options = options.Value;
+        _reportContextResolver = reportContextResolver;
     }
 
     public AnalysisSessionStartPreflightValidator(
         IOptions<DataAgentOptions> options,
+        IFinancialReportContextResolver reportContextResolver,
         IOrchestrationDbContext dbContext)
-        : this(options)
+        : this(options, reportContextResolver)
     {
         _dbContext = dbContext;
     }
@@ -75,6 +80,22 @@ public sealed class AnalysisSessionStartPreflightValidator
                 ],
                 Warnings: []
             );
+        }
+
+        var reportResolution = _reportContextResolver.Resolve(session);
+
+        if (!reportResolution.IsValid)
+        {
+            return new AnalysisSessionStartPreflightResult(
+                CanStart: false,
+                Errors:
+                [
+                    new AnalysisSessionStartPreflightIssue(
+                        Code: reportResolution.ErrorCode!,
+                        Message: reportResolution.ErrorMessage!,
+                        Severity: "Error")
+                ],
+                Warnings: []);
         }
 
         if (!_options.FinancialAnalysisToolsEnabled ||

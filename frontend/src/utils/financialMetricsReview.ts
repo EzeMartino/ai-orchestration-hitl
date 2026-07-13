@@ -4,6 +4,16 @@ import type {
   StructuredFinancialMetricInput,
   StructuredFinancialMetricsInput,
 } from "../types/domain.types";
+import {
+  emptyFinancialReportSummaryForm,
+  toFinancialReportSummaryForm,
+} from "./financialReportSummary.ts";
+import type {
+  FinancialReportSummaryFormState,
+  FinancialReportSummaryIssue,
+  FinancialReportSummaryValidation,
+  FinancialReportSummaryValue,
+} from "./financialReportSummary.ts";
 
 const blockingReviewStates = new Set(["inferred", "conflict", "missing"]);
 const metadataFieldNames = new Set(["company", "currency", "unit"]);
@@ -13,10 +23,12 @@ export type ReviewDraftValidationResult = {
   canConfirm: boolean;
   blockingCandidateIds: string[];
   missingFields: string[];
+  reportSummaryIssues: FinancialReportSummaryIssue[];
 };
 
 export type ReviewDraftValidationOptions = {
   metricAdditionCount?: number;
+  reportSummary?: FinancialReportSummaryValidation;
 };
 
 export type FinancialMetricCandidateEdit = Pick<
@@ -171,11 +183,51 @@ export function validateReviewDraft(
     .filter((candidate) => blockingReviewStates.has(candidate.reviewState))
     .map((candidate) => candidate.id);
   const missingFields = computeDraftMissingFields(draft, options);
+  const reportSummaryIssues = options.reportSummary?.issues ?? [];
 
   return {
-    canConfirm: blockingCandidateIds.length === 0 && missingFields.length === 0,
+    canConfirm:
+      blockingCandidateIds.length === 0 &&
+      missingFields.length === 0 &&
+      reportSummaryIssues.length === 0,
     blockingCandidateIds,
     missingFields,
+    reportSummaryIssues,
+  };
+}
+
+export function isFinancialReviewInteractionDisabled(
+  isSaving: boolean,
+  isLoading: boolean,
+) {
+  return isSaving || isLoading;
+}
+
+export function getDraftReportSummaryForm(
+  draft?: FinancialMetricsExtractionDraft | null,
+): FinancialReportSummaryFormState {
+  if (draft?.payload.schemaVersion !== 2) {
+    return emptyFinancialReportSummaryForm();
+  }
+
+  return toFinancialReportSummaryForm(
+    draft.payload.proposedInput.reportSummary ?? null,
+  );
+}
+
+export function applyReportSummaryToDraft(
+  draft: FinancialMetricsExtractionDraft,
+  reportSummary: FinancialReportSummaryValue,
+): FinancialMetricsExtractionDraft {
+  return {
+    ...draft,
+    payload: {
+      ...draft.payload,
+      proposedInput: {
+        ...draft.payload.proposedInput,
+        reportSummary,
+      },
+    },
   };
 }
 

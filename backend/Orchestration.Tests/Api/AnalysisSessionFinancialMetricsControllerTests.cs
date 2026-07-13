@@ -9,6 +9,7 @@ using Orchestration.Api.Controllers;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
@@ -26,6 +27,18 @@ namespace Orchestration.Tests.Api;
 
 public sealed class AnalysisSessionFinancialMetricsControllerTests
 {
+    private static FinancialReportSummaryInput ApiReportSummaryInput => new(
+        "  balance-sheet-2025.pdf  ",
+        842350.75m,
+        187,
+        new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+
+    private static FinancialReportSummary ApiReportSummary => new(
+        "balance-sheet-2025.pdf",
+        842350.75m,
+        187,
+        new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.Zero));
+
     [Fact]
     public void AnalysisSessionsController_Should_expose_only_review_ingestion_constructor()
     {
@@ -54,7 +67,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
 
         var result = await controller.SaveFinancialMetrics(
             session.Id,
-            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
             CancellationToken.None
         );
 
@@ -66,6 +82,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context!.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
         response.Context.Provenance.Should().NotBeNull();
         response.Context.Provenance!.IngestionMethod.Should().Be("json_paste");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
     }
 
@@ -152,6 +169,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Company.Should().Be("Manual Test Co");
         response.Context.Provenance.Should().NotBeNull();
         response.Context.Provenance!.IngestionMethod.Should().Be("csv_paste");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         response.Context.Metrics.Should().Contain(metric =>
             metric.Name == "revenue" &&
             metric.Period == "2024A" &&
@@ -230,7 +248,10 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var controller = CreateController(dbContext);
         await controller.SaveFinancialMetrics(
             session.Id,
-            StructuredFinancialMetricsSessionServiceTests.CreateInput(),
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
             CancellationToken.None
         );
 
@@ -245,6 +266,39 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.SessionId.Should().Be(session.Id);
         response.Context.Should().NotBeNull();
         response.Context!.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
+    }
+
+    [Fact]
+    public async Task GetFinancialMetrics_ShouldReadMetricsAndSummaryFromOneCombinedSnapshot()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var inner = StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext);
+        await inner.SaveAsync(
+            session.Id,
+            StructuredFinancialMetricsSessionServiceTests.CreateInput() with
+            {
+                ReportSummary = ApiReportSummaryInput
+            },
+            CancellationToken.None);
+        var snapshotService = new CombinedSnapshotOnlySessionService(inner);
+        var controller = CreateController(
+            dbContext,
+            financialMetricsSessionService: snapshotService);
+
+        var result = await controller.GetFinancialMetrics(
+            session.Id,
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<GetFinancialMetricsResponse>().Subject;
+        snapshotService.CombinedGetCalls.Should().Be(1);
+        response.Context.Should().NotBeNull();
+        response.Context!.DocumentId.Should().Be("vista-energy-structured-input");
+        response.ReportSummary.Should().Be(ApiReportSummary);
     }
 
     [Fact]
@@ -275,6 +329,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
               "company": "JSON File Co",
               "currency": "USD",
               "unit": "USD_thousand",
+              "reportSummary": {
+                "reportName": "  balance-sheet-2025.pdf  ",
+                "totalAmount": 842350.75,
+                "transactionCount": 187,
+                "submittedAt": "2026-07-12T18:30:00Z"
+              },
               "metrics": [
                 {
                   "name": "Revenue",
@@ -318,7 +378,83 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance.ContentHash.Should().Be(ComputeSha256(content));
         response.Context.Provenance.MetricCount.Should().Be(1);
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Malformed_json_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.json",
+                """
+                {
+                  "documentId": "json-file-input",
+                  "reportSummary": {
+                    "reportName": "report.json",
+                    "totalAmount": 10,
+                    "transactionCount": 1,
+                    "submittedAt": "not-an-iso-timestamp"
+                  },
+                  "metrics": [{ "name": "Revenue", "period": "2024A", "value": 10 }]
+                }
+                """),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Theory]
+    [InlineData("{\"unexpected\":true}")]
+    [InlineData("[1,2]")]
+    public async Task SaveFinancialMetricsFile_Object_or_array_json_summary_timestamp_Should_return_stable_invalid_issue(
+        string timestampJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.json",
+                $$"""
+                {
+                  "documentId": "json-file-input",
+                  "reportSummary": {
+                    "reportName": "report.json",
+                    "totalAmount": 10,
+                    "transactionCount": 1,
+                    "submittedAt": {{timestampJson}}
+                  },
+                  "metrics": [{ "name": "Revenue", "period": "2024A", "value": 10 }]
+                }
+                """),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
     }
 
     [Fact]
@@ -337,6 +473,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 """
                 {
                   "documentId": "",
+                  "reportSummary": {
+                    "reportName": "Test financial report",
+                    "totalAmount": 1250.50,
+                    "transactionCount": 7,
+                    "submittedAt": "2026-07-12T12:00:00Z"
+                  },
                   "metrics": [
                     {
                       "name": "Revenue",
@@ -363,6 +505,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Company.Should().Be("Form Metadata Co");
         response.Context.Currency.Should().Be("USD");
         response.Context.Unit.Should().Be("USD_thousand");
+        response.ReportSummary.Should().Be(new FinancialReportSummary(
+            "Test financial report",
+            1250.50m,
+            7,
+            new DateTimeOffset(2026, 7, 12, 12, 0, 0, TimeSpan.Zero)));
     }
 
     [Fact]
@@ -507,10 +654,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             metric.Source == "pdf_extraction" &&
             metric.SourcePage == 18
         );
+        response.ReportSummary.Should().Be(ApiReportSummary);
         ingestion.LastRequest.Should().NotBeNull();
         ingestion.LastRequest!.SessionId.Should().Be(session.Id);
         ingestion.LastRequest.UserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
+        ingestion.LastRequest.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
     }
 
     [Fact]
@@ -758,7 +907,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
-        var controller = CreateController(dbContext);
+        var csvParser = new CapturingStructuredFinancialMetricsCsvParser();
+        var controller = CreateController(dbContext, csvParser: csvParser);
 
         var result = await controller.SaveFinancialMetricsFile(
             session.Id,
@@ -793,7 +943,40 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.Context.Provenance.FileSizeBytes.Should().Be(response.FileSizeBytes);
         response.Context.Provenance.ContentHash.Should().NotBeNullOrWhiteSpace();
         response.Context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        response.ReportSummary.Should().Be(ApiReportSummary);
+        csvParser.LastInput.Should().NotBeNull();
+        csvParser.LastInput!.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Malformed_form_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.csv",
+                """
+                name,period,value
+                Revenue,2024A,10
+                """,
+                documentId: "csv-file-input",
+                submittedAt: "not-an-iso-timestamp"),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
     }
 
     [Fact]
@@ -1013,6 +1196,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                 """
                 {
                   "documentId": "uppercase-json-file",
+                  "reportSummary": {
+                    "reportName": "Test financial report",
+                    "totalAmount": 1250.50,
+                    "transactionCount": 7,
+                    "submittedAt": "2026-07-12T12:00:00Z"
+                  },
                   "metrics": [
                     {
                       "name": "Revenue",
@@ -1129,10 +1318,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             ConfirmResult = FinancialMetricsExtractionDraftServiceResult.Success(identity)
         };
         var controller = CreateController(dbContext, draftService: draftService);
+        var confirmRequest = new ConfirmFinancialMetricsExtractionDraftRequest(
+            ApiReportSummaryInput);
 
         var result = await controller.ConfirmFinancialMetricsReview(
             session.Id,
             draftId,
+            confirmRequest,
             CancellationToken.None
         );
 
@@ -1141,6 +1333,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         draftService.LastDraftId.Should().Be(draftId);
         draftService.LastSessionId.Should().Be(session.Id);
         draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastConfirmRequest.Should().BeSameAs(confirmRequest);
     }
 
     [Fact]
@@ -1194,7 +1387,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         };
         var controller = CreateController(dbContext, draftService: draftService);
 
-        var confirm = await controller.ConfirmFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
+        var confirm = await controller.ConfirmFinancialMetricsReview(
+            session.Id,
+            draftId,
+            new ConfirmFinancialMetricsExtractionDraftRequest(ApiReportSummaryInput),
+            CancellationToken.None);
         var discard = await controller.DiscardFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
 
         confirm.Should().BeOfType<OkObjectResult>()
@@ -1229,6 +1426,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var result = await controller.ConfirmFinancialMetricsReview(
             session.Id,
             Guid.Parse("00000000-0000-0000-0000-000000000099"),
+            new ConfirmFinancialMetricsExtractionDraftRequest(ApiReportSummaryInput),
             CancellationToken.None
         );
 
@@ -1243,6 +1441,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(
@@ -1368,6 +1567,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -1401,7 +1601,9 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         DataAgentOptions? dataAgentOptions = null,
         AnalysisOrchestratorService? orchestrator = null,
         IStructuredFinancialMetricsPdfIngestionService? pdfIngestionService = null,
-        IFinancialMetricsExtractionDraftService? draftService = null)
+        IFinancialMetricsExtractionDraftService? draftService = null,
+        IStructuredFinancialMetricsCsvParser? csvParser = null,
+        IStructuredFinancialMetricsSessionService? financialMetricsSessionService = null)
     {
         publisher ??= new FakeActivityEventPublisher();
 
@@ -1409,11 +1611,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             dbContext,
             orchestrator: orchestrator!,
             new AnalysisSessionStartPreflightValidator(
-                Options.Create(dataAgentOptions ?? new DataAgentOptions())
+                Options.Create(dataAgentOptions ?? new DataAgentOptions()),
+                new FinancialReportContextResolver()
             ),
             publisher,
-            StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
-            new StructuredFinancialMetricsCsvParser(),
+            financialMetricsSessionService ??
+                StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),
+            csvParser ?? new StructuredFinancialMetricsCsvParser(),
             pdfIngestionService ?? new FakeStructuredFinancialMetricsPdfIngestionService(
                 new StructuredFinancialMetricsPdfIngestionResult(
                     FinancialMetricsFileOutcome.Failed,
@@ -1459,7 +1663,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             dbContext,
             new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
             publisher,
-            planner
+            planner,
+            new FinancialReportContextResolver()
         );
     }
 
@@ -1490,7 +1695,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Company: "Manual Test Co",
             Currency: "USD",
             Unit: "USD_thousand",
-            Csv: csv
+            Csv: csv,
+            ReportSummary: ApiReportSummaryInput
         );
     }
 
@@ -1500,10 +1706,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId = null,
         string? company = null,
         string? currency = null,
-        string? unit = null)
+        string? unit = null,
+        string? submittedAt = null)
     {
         var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+        return CreateFileUploadRequest(
+            fileName, stream, documentId, company, currency, unit, submittedAt);
     }
 
     private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
@@ -1512,10 +1720,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId = null,
         string? company = null,
         string? currency = null,
-        string? unit = null)
+        string? unit = null,
+        string? submittedAt = null)
     {
         var stream = new MemoryStream(content);
-        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+        return CreateFileUploadRequest(
+            fileName, stream, documentId, company, currency, unit, submittedAt);
     }
 
     private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
@@ -1524,7 +1734,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId,
         string? company,
         string? currency,
-        string? unit)
+        string? unit,
+        string? submittedAt)
     {
         var file = new FormFile(stream, 0, stream.Length, "file", fileName);
 
@@ -1534,7 +1745,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             DocumentId = documentId,
             Company = company,
             Currency = currency,
-            Unit = unit
+            Unit = unit,
+            ReportName = ApiReportSummaryInput.ReportName,
+            TotalAmount = ApiReportSummaryInput.TotalAmount,
+            TransactionCount = ApiReportSummaryInput.TransactionCount,
+            SubmittedAt = submittedAt ??
+                ApiReportSummaryInput.SubmittedAt!.Value.ToString("O")
         };
     }
 
@@ -1574,7 +1790,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
                     SourcePage: 18,
                     Confidence: 0.9m
                 )
-            ]
+            ],
+            ReportSummary: ApiReportSummaryInput
         );
         var context = new StructuredFinancialMetricsContext(
             DocumentId: input.DocumentId,
@@ -1612,7 +1829,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             IsValid: true,
             context,
             Errors: [],
-            Warnings: []
+            Warnings: [],
+            ReportSummary: ApiReportSummary
         );
     }
 
@@ -1696,7 +1914,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         public bool? LastCancellationTokenCanBeCanceled { get; private set; }
 
         public Task<PlannerAgentResult> RunAsync(
-            AnalysisSession session,
+            FinancialReportContext report,
             CancellationToken cancellationToken)
         {
             RunCalls++;
@@ -1764,6 +1982,62 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         }
     }
 
+    private sealed class CapturingStructuredFinancialMetricsCsvParser
+        : IStructuredFinancialMetricsCsvParser
+    {
+        private readonly StructuredFinancialMetricsCsvParser _inner = new();
+
+        public StructuredFinancialMetricsCsvInput? LastInput { get; private set; }
+
+        public StructuredFinancialMetricsCsvParseResult Parse(
+            StructuredFinancialMetricsCsvInput input)
+        {
+            LastInput = input;
+            return _inner.Parse(input);
+        }
+    }
+
+    private sealed class CombinedSnapshotOnlySessionService(
+        IStructuredFinancialMetricsSessionService inner)
+        : IStructuredFinancialMetricsSessionService
+    {
+        public int CombinedGetCalls { get; private set; }
+
+        public Task<FinancialMetricsSessionSaveResult?> StageAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken) =>
+            inner.StageAsync(request, cancellationToken);
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            Guid sessionId,
+            StructuredFinancialMetricsInput input,
+            CancellationToken cancellationToken) =>
+            inner.SaveAsync(sessionId, input, cancellationToken);
+
+        public Task<FinancialMetricsSessionSaveResult?> SaveAsync(
+            SaveStructuredFinancialMetricsRequest request,
+            CancellationToken cancellationToken) =>
+            inner.SaveAsync(request, cancellationToken);
+
+        public Task<StructuredFinancialMetricsContext?> GetAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Split metrics read must not be used.");
+
+        public Task<FinancialReportSummary?> GetReportSummaryAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Split report read must not be used.");
+
+        public Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            CombinedGetCalls++;
+            return inner.GetSessionContextAsync(sessionId, cancellationToken);
+        }
+    }
+
     private sealed class FakeFinancialMetricsExtractionDraftService
         : IFinancialMetricsExtractionDraftService
     {
@@ -1783,6 +2057,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         public Guid? LastSessionId { get; private set; }
         public Guid? LastUserId { get; private set; }
         public UpdateFinancialMetricsExtractionDraftRequest? LastUpdateRequest { get; private set; }
+        public ConfirmFinancialMetricsExtractionDraftRequest? LastConfirmRequest { get; private set; }
 
         public Task<FinancialMetricsExtractionDraftServiceResult> CreateOrReplaceAsync(
             Guid sessionId,
@@ -1823,11 +2098,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken)
         {
             LastDraftId = draftId;
             LastSessionId = sessionId;
             LastUserId = userId;
+            LastConfirmRequest = request;
 
             return Task.FromResult(ConfirmResult);
         }

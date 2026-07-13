@@ -1232,7 +1232,8 @@ public sealed class FinancialMetricCandidateReconcilerTests
             Company: company,
             Currency: currency,
             Unit: unit,
-            Metrics: metrics ?? [Metric("revenue", "2024A", 100m)]);
+            Metrics: metrics ?? [Metric("revenue", "2024A", 100m)],
+            ReportSummary: TestReportSummary.Input);
     }
 
     private static StructuredFinancialMetricInput Metric(

@@ -11,6 +11,8 @@ import type {
   StructuredFinancialMetricsCsvInput,
   StructuredFinancialMetricsFileMetadata,
   UpdateFinancialMetricsExtractionDraftRequest,
+  ConfirmFinancialMetricsExtractionDraftRequest,
+  FinancialReportSummary,
 } from "../types/domain.types";
 import * as api from "../services/api";
 import {
@@ -33,6 +35,8 @@ export function useAnalysisSession() {
   const [selectedSessionId, setSelectedSessionId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [structuredMetrics, setStructuredMetrics] = useState<StructuredFinancialMetricsContext | null>(null);
+  const [financialReportSummary, setFinancialReportSummary] =
+    useState<FinancialReportSummary | null>(null);
   const [isLoadingStructuredMetrics, setIsLoadingStructuredMetrics] = useState(false);
   const [isSavingStructuredMetrics, setIsSavingStructuredMetrics] = useState(false);
   const [metricsSaveResult, setMetricsSaveResult] = useState<SaveFinancialMetricsResponse | null>(null);
@@ -56,6 +60,7 @@ export function useAnalysisSession() {
     setIsLoadingFinancialMetricsReview(false);
     setIsSavingFinancialMetricsReview(false);
     setIsLoadingStructuredMetrics(false);
+    setFinancialReportSummary(null);
     setIsSavingStructuredMetrics(false);
     setIsCheckingStartPreflight(false);
   };
@@ -112,6 +117,7 @@ export function useAnalysisSession() {
       const payload = await api.loadStructuredFinancialMetrics(sessionId);
       if (activeSessionId.current === sessionId) {
         setStructuredMetrics(payload.context ?? null);
+        setFinancialReportSummary(payload.reportSummary ?? null);
       }
     } finally {
       if (activeSessionId.current === sessionId) {
@@ -529,13 +535,16 @@ export function useAnalysisSession() {
     }
   };
 
-  const confirmFinancialMetricsReview = async (draftId: string) => {
+  const confirmFinancialMetricsReview = async (
+    draftId: string,
+    request: ConfirmFinancialMetricsExtractionDraftRequest,
+  ) => {
     if (!session) return;
     const reviewSessionId = session.id;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
-      await api.confirmFinancialMetricsReview(reviewSessionId, draftId);
+      await api.confirmFinancialMetricsReview(reviewSessionId, draftId, request);
       if (activeSessionId.current === reviewSessionId) {
         setFinancialMetricsReview(null);
         setMetricsSaveResult(null);
@@ -618,6 +627,7 @@ export function useAnalysisSession() {
       console.error("Failed to load structured financial metrics:", error);
       if (activeSessionId.current === session.id) {
         setStructuredMetrics(null);
+        setFinancialReportSummary(null);
       }
     });
 
@@ -644,6 +654,7 @@ export function useAnalysisSession() {
     errorMessage,
     setErrorMessage,
     structuredMetrics,
+    financialReportSummary,
     isLoadingStructuredMetrics,
     isSavingStructuredMetrics,
     metricsSaveResult,

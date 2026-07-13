@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
@@ -7,13 +8,112 @@ using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.FinancialAnalysis.Thresholds;
+using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Tests.Agents;
+using Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Tests.AnalysisSessions;
 
 public class AnalysisOrchestratorContextTests
 {
+    [Fact]
+    public async Task StartAnalysisAsync_InvalidReportContext_ShouldFailWithoutInvokingPlanner()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1}}""");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new CapturingPlannerAgent();
+        var orchestrator = new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner,
+            new FinancialReportContextResolver());
+
+        var result = await orchestrator.StartAnalysisAsync(
+            session.Id,
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Status.Should().Be(nameof(AnalysisSessionStatus.Failed));
+        planner.RunCalls.Should().Be(0);
+        session.Status.Should().Be(AnalysisSessionStatus.Failed);
+        session.CurrentAgent.Should().BeNull();
+        session.FailureReason.Should().Be("Financial report summary is invalid.");
+        publisher.PublishedEvents.Should().ContainSingle(evt =>
+            evt.Type == "financial_report_context_invalid" &&
+            evt.Agent == "Orchestrator");
+        var persisted = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        persisted.Status.Should().Be(AnalysisSessionStatus.Failed);
+    }
+
+    [Theory]
+    [InlineData(AnalysisSessionStatus.Completed)]
+    [InlineData(AnalysisSessionStatus.Failed)]
+    public async Task StartAnalysisAsync_TerminalSessionWithInvalidReport_ShouldPreserveState(
+        AnalysisSessionStatus terminalStatus)
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        const string originalContext = """{"financialReport":{"reportName":""}}""";
+        session.SetContext(originalContext);
+        session.SetCurrentAgent("ExistingAgent");
+
+        if (terminalStatus == AnalysisSessionStatus.Failed)
+        {
+            session.MarkFailed("Existing failure");
+        }
+        else
+        {
+            session.SetStatus(terminalStatus);
+        }
+
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var originalFailureReason = session.FailureReason;
+        var originalUpdatedAt = session.UpdatedAt;
+        var originalCompletedAt = session.CompletedAt;
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new CapturingPlannerAgent();
+        var orchestrator = new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner,
+            new FinancialReportContextResolver());
+
+        Func<Task> act = async () => await orchestrator.StartAnalysisAsync(
+            session.Id,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"Invalid transition: {terminalStatus} -> Start");
+        planner.RunCalls.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
+        session.Status.Should().Be(terminalStatus);
+        session.ContextJson.Should().Be(originalContext);
+        session.FailureReason.Should().Be(originalFailureReason);
+        session.CurrentAgent.Should().Be("ExistingAgent");
+        session.UpdatedAt.Should().Be(originalUpdatedAt);
+        session.CompletedAt.Should().Be(originalCompletedAt);
+
+        var persisted = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        persisted.Status.Should().Be(terminalStatus);
+        persisted.ContextJson.Should().Be(originalContext);
+        persisted.FailureReason.Should().Be(originalFailureReason);
+        persisted.CurrentAgent.Should().Be("ExistingAgent");
+    }
+
     [Fact]
     public void BuildAnalysisContext_Should_include_planner_reasoning()
     {
@@ -413,6 +513,12 @@ public class AnalysisOrchestratorContextTests
     {
         const string existingContextJson = """
         {
+          "financialReport": {
+            "reportName": "persisted-report.pdf",
+            "totalAmount": 842350.75,
+            "transactionCount": 187,
+            "submittedAt": "2026-07-12T18:30:00Z"
+          },
           "structuredFinancialMetrics": {
             "documentId": "uploaded-json-metrics-test",
             "company": "Uploaded JSON Test Co",
@@ -443,6 +549,14 @@ public class AnalysisOrchestratorContextTests
 
         using var document = JsonDocument.Parse(contextJson);
         var structuredMetrics = document.RootElement.GetProperty("structuredFinancialMetrics");
+        var financialReport = document.RootElement.GetProperty("financialReport");
+
+        financialReport.GetProperty("reportName").GetString()
+            .Should()
+            .Be("persisted-report.pdf");
+        financialReport.GetProperty("totalAmount").GetDecimal()
+            .Should()
+            .Be(842350.75m);
 
         structuredMetrics.GetProperty("documentId").GetString()
             .Should()
@@ -496,5 +610,18 @@ public class AnalysisOrchestratorContextTests
             ),
             ToolPlan: toolPlan
         );
+    }
+
+    private sealed class CapturingPlannerAgent : IPlannerAgent
+    {
+        public int RunCalls { get; private set; }
+
+        public Task<PlannerAgentResult> RunAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            RunCalls++;
+            throw new InvalidOperationException("Planner must not run for invalid context.");
+        }
     }
 }

@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Shared;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public sealed record FinancialMetricsSessionSaveResult(
@@ -5,5 +7,6 @@ public sealed record FinancialMetricsSessionSaveResult(
     bool IsValid,
     StructuredFinancialMetricsContext? Context,
     IReadOnlyList<FinancialMetricsValidationIssue> Errors,
-    IReadOnlyList<FinancialMetricsValidationIssue> Warnings
+    IReadOnlyList<FinancialMetricsValidationIssue> Warnings,
+    FinancialReportSummary? ReportSummary = null
 );

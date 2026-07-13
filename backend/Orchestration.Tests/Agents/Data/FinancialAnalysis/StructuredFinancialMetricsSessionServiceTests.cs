@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Infrastructure.Persistence;
 using Orchestration.Tests.Agents;
@@ -43,6 +44,7 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         result.Should().NotBeNull();
         result!.IsValid.Should().BeTrue();
         result.Context.Should().NotBeNull();
+        result.ReportSummary.Should().Be(NormalizedReportSummary);
         result.Context!.Metrics.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new
             {
@@ -58,6 +60,15 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
 
         using var document = JsonDocument.Parse(session.ContextJson);
         var context = document.RootElement.GetProperty("structuredFinancialMetrics");
+        var report = document.RootElement.GetProperty("financialReport");
+        report.GetProperty("reportName").GetString()
+            .Should().Be(NormalizedReportSummary.ReportName);
+        report.GetProperty("totalAmount").GetDecimal()
+            .Should().Be(NormalizedReportSummary.TotalAmount);
+        report.GetProperty("transactionCount").GetInt32()
+            .Should().Be(NormalizedReportSummary.TransactionCount);
+        report.GetProperty("submittedAt").GetDateTimeOffset()
+            .Should().Be(NormalizedReportSummary.SubmittedAt);
         context.GetProperty("documentId").GetString().Should().Be("vista-energy-structured-input");
         context.GetProperty("metrics")[0].GetProperty("name").GetString().Should().Be("revenue");
         context.GetProperty("metrics")[0].GetProperty("sourcePage").GetInt32().Should().Be(18);
@@ -288,6 +299,34 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
     }
 
     [Fact]
+    public async Task SaveAsync_InvalidReportSummary_ShouldLeaveContextByteIdentical()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        const string originalContext =
+            "{\"planner\":{\"summary\":\"keep\"},\"custom\":{\"value\":7}}";
+        session.SetContext(originalContext);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        var invalidInput = CreateInput() with
+        {
+            ReportSummary = TestReportSummary.Input with { TotalAmount = -1m }
+        };
+
+        var result = await service.SaveAsync(
+            session.Id,
+            invalidInput,
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.IsValid.Should().BeFalse();
+        result.ReportSummary.Should().BeNull();
+        result.Errors.Should().Contain(issue => issue.Code == "TOTAL_AMOUNT_INVALID");
+        session.ContextJson.Should().Be(originalContext);
+    }
+
+    [Fact]
     public async Task SaveAsync_Should_preserve_existing_context_blocks()
     {
         await using var dbContext = CreateDbContext();
@@ -312,6 +351,46 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
             .GetString().Should().Be("keep anomaly");
         document.RootElement.TryGetProperty("structuredFinancialMetrics", out _)
             .Should().BeTrue();
+        document.RootElement.GetProperty("financialReport")
+            .GetProperty("reportName").GetString()
+            .Should().Be(NormalizedReportSummary.ReportName);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ShouldReplaceOnlyFinancialInputRoots()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""
+            {
+              "financialReport": {
+                "reportName": "old",
+                "totalAmount": 1,
+                "transactionCount": 1,
+                "submittedAt": "2025-01-01T00:00:00Z"
+              },
+              "structuredFinancialMetrics": { "documentId": "old", "metrics": [] },
+              "planner": { "summary": "keep" },
+              "custom": { "value": 7 }
+            }
+            """);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        await service.SaveAsync(session.Id, CreateInput(), CancellationToken.None);
+
+        using var document = JsonDocument.Parse(session.ContextJson);
+        document.RootElement.GetProperty("financialReport")
+            .GetProperty("reportName").GetString()
+            .Should().Be(NormalizedReportSummary.ReportName);
+        document.RootElement.GetProperty("structuredFinancialMetrics")
+            .GetProperty("documentId").GetString()
+            .Should().Be("vista-energy-structured-input");
+        document.RootElement.GetProperty("planner")
+            .GetProperty("summary").GetString().Should().Be("keep");
+        document.RootElement.GetProperty("custom")
+            .GetProperty("value").GetInt32().Should().Be(7);
     }
 
     [Fact]
@@ -348,6 +427,131 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
         context.Should().NotBeNull();
         context!.DocumentId.Should().Be("vista-energy-structured-input");
         context.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+    }
+
+    [Fact]
+    public async Task GetSessionContextAsync_PersistedInput_ShouldReturnCoherentExactPair()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        await service.SaveAsync(session.Id, CreateInput(), CancellationToken.None);
+
+        var snapshot = await service.GetSessionContextAsync(
+            session.Id,
+            CancellationToken.None);
+
+        snapshot.Metrics.Should().NotBeNull();
+        snapshot.Metrics!.DocumentId.Should().Be("vista-energy-structured-input");
+        snapshot.Metrics.Metrics.Should().ContainSingle(metric => metric.Name == "revenue");
+        snapshot.ReportSummary.Should().Be(NormalizedReportSummary);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("{not-json")]
+    [InlineData("{\"financialReport\":\"invalid\",\"structuredFinancialMetrics\":\"invalid\"}")]
+    public async Task GetSessionContextAsync_MissingOrMalformedContext_ShouldReturnNullPair(
+        string contextJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(contextJson);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var snapshot = await service.GetSessionContextAsync(
+            session.Id,
+            CancellationToken.None);
+
+        snapshot.Metrics.Should().BeNull();
+        snapshot.ReportSummary.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetReportSummaryAsync_ShouldReturnExactPersistedSummary()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        await service.SaveAsync(session.Id, CreateInput(), CancellationToken.None);
+
+        var summary = await service.GetReportSummaryAsync(
+            session.Id,
+            CancellationToken.None);
+
+        summary.Should().Be(NormalizedReportSummary);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{not-json")]
+    [InlineData("{\"financialReport\":\"invalid\"}")]
+    public async Task GetReportSummaryAsync_LegacyOrMalformedContext_ShouldReturnNull(
+        string contextJson)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(contextJson);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+
+        var summary = await service.GetReportSummaryAsync(
+            session.Id,
+            CancellationToken.None);
+
+        summary.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetReportSummaryAsync_TwoSessions_ShouldRemainIsolated()
+    {
+        await using var dbContext = CreateDbContext();
+        var sessionA = AnalysisSession.Create(Guid.NewGuid());
+        var sessionB = AnalysisSession.Create(Guid.NewGuid());
+        dbContext.AnalysisSessions.AddRange(sessionA, sessionB);
+        await dbContext.SaveChangesAsync();
+        var service = CreateService(dbContext);
+        var summaryA = TestReportSummary.Input with { ReportName = "session-a.pdf" };
+        var summaryB = TestReportSummary.Input with
+        {
+            ReportName = "session-b.pdf",
+            TotalAmount = 999m,
+            TransactionCount = 9
+        };
+        await service.SaveAsync(
+            sessionA.Id,
+            CreateInput() with { ReportSummary = summaryA },
+            CancellationToken.None);
+        await service.SaveAsync(
+            sessionB.Id,
+            CreateInput() with { ReportSummary = summaryB },
+            CancellationToken.None);
+
+        var persistedA = await service.GetReportSummaryAsync(
+            sessionA.Id,
+            CancellationToken.None);
+        var persistedB = await service.GetReportSummaryAsync(
+            sessionB.Id,
+            CancellationToken.None);
+
+        persistedA.Should().Be(new FinancialReportSummary(
+            "session-a.pdf",
+            TestReportSummary.Input.TotalAmount!.Value,
+            TestReportSummary.Input.TransactionCount!.Value,
+            TestReportSummary.Input.SubmittedAt!.Value));
+        persistedB.Should().Be(new FinancialReportSummary(
+            "session-b.pdf",
+            999m,
+            9,
+            TestReportSummary.Input.SubmittedAt!.Value));
     }
 
     [Fact]
@@ -433,9 +637,16 @@ public sealed class StructuredFinancialMetricsSessionServiceTests
                     SourcePage: 18,
                     Confidence: 0.9m
                 )
-            ]
+            ],
+            ReportSummary: TestReportSummary.Input
         );
     }
+
+    private static FinancialReportSummary NormalizedReportSummary => new(
+        TestReportSummary.Input.ReportName!.Trim(),
+        TestReportSummary.Input.TotalAmount!.Value,
+        TestReportSummary.Input.TransactionCount!.Value,
+        TestReportSummary.Input.SubmittedAt!.Value);
 
     internal sealed class CountingOrchestrationDbContext(
         DbContextOptions<OrchestrationDbContext> options)

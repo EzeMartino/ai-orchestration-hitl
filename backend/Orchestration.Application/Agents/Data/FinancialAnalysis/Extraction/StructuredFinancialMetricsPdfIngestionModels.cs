@@ -1,4 +1,5 @@
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
 
@@ -19,7 +20,8 @@ public sealed record StructuredFinancialMetricsPdfIngestionRequest(
     string? Unit,
     string OriginalFileName,
     long FileSizeBytes,
-    string ContentHash);
+    string ContentHash,
+    FinancialReportSummaryInput? ReportSummary = null);
 
 public sealed record StructuredFinancialMetricsPdfIngestionResult(
     FinancialMetricsFileOutcome Outcome,

@@ -376,7 +376,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
         var saveResult = await _sessionService.SaveAsync(
             new SaveStructuredFinancialMetricsRequest(
                 request.SessionId,
-                input,
+                input with { ReportSummary = request.ReportSummary },
                 CreateProvenance(request, ingestionMethod)),
             cancellationToken);
 
@@ -494,7 +494,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionService
     {
         var payload = new FinancialMetricsExtractionDraftPayload(
             FinancialMetricsExtractionDraftPayload.CurrentSchemaVersion,
-            proposedInput,
+            proposedInput with { ReportSummary = request.ReportSummary },
             candidates,
             conflicts,
             missingFields,

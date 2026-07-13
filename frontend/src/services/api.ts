@@ -5,6 +5,7 @@ import type {
   AnalysisSessionStartPreflightResult,
   FinancialMetricsExtractionDraft,
   FinancialMetricsExtractionDraftIdentity,
+  ConfirmFinancialMetricsExtractionDraftRequest,
   GetFinancialMetricsResponse,
   SaveFinancialMetricsResponse,
   StructuredFinancialMetricsInput,
@@ -152,12 +153,14 @@ export async function updateFinancialMetricsReview(
 
 export async function confirmFinancialMetricsReview(
   sessionId: string,
-  draftId: string
+  draftId: string,
+  request: ConfirmFinancialMetricsExtractionDraftRequest
 ): Promise<FinancialMetricsExtractionDraft | FinancialMetricsExtractionDraftIdentity> {
   const response = await authenticatedFetch(
     `${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/review/${draftId}/confirm`,
     {
       method: "POST",
+      body: JSON.stringify(request),
     }
   );
   if (!response.ok) {
@@ -278,6 +281,18 @@ export async function uploadFinancialMetricsFile(
   }
   if (metadata.unit?.trim()) {
     formData.append("unit", metadata.unit.trim());
+  }
+  if (metadata.reportSummary?.reportName?.trim()) {
+    formData.append("ReportName", metadata.reportSummary.reportName.trim());
+  }
+  if (metadata.reportSummary?.totalAmount !== null && metadata.reportSummary?.totalAmount !== undefined) {
+    formData.append("TotalAmount", String(metadata.reportSummary.totalAmount));
+  }
+  if (metadata.reportSummary?.transactionCount !== null && metadata.reportSummary?.transactionCount !== undefined) {
+    formData.append("TransactionCount", String(metadata.reportSummary.transactionCount));
+  }
+  if (metadata.reportSummary?.submittedAt) {
+    formData.append("SubmittedAt", metadata.reportSummary.submittedAt);
   }
 
   const response = await authenticatedFetch(`${apiBaseUrl}/api/analysis-sessions/${sessionId}/financial-metrics/file`, {

@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Shared;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public sealed record StructuredFinancialMetricsCsvInput(
@@ -5,5 +7,6 @@ public sealed record StructuredFinancialMetricsCsvInput(
     string? Company,
     string? Currency,
     string? Unit,
-    string Csv
+    string Csv,
+    FinancialReportSummaryInput? ReportSummary = null
 );

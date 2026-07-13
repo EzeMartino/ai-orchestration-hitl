@@ -4,12 +4,16 @@ import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
   applyMetadataCandidateRejection,
+  applyReportSummaryToDraft,
+  getDraftReportSummaryForm,
   isCurrentSessionRequest,
+  isFinancialReviewInteractionDisabled,
   mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   shouldLoadFinancialMetricsReview,
   validateReviewDraft,
 } from "../src/utils/financialMetricsReview.ts";
+import { validateFinancialReportSummary } from "../src/utils/financialReportSummary.ts";
 
 function createDraft(candidateOverrides = [], overrides = {}) {
   return {
@@ -258,4 +262,73 @@ test("shouldLoadFinancialMetricsReview blocks stale sessions and same-session up
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", null), true);
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-b", null), false);
   assert.equal(shouldLoadFinancialMetricsReview("session-a", "session-a", "session-a"), false);
+});
+
+test("financial review interactions are disabled while loading or saving", () => {
+  assert.equal(isFinancialReviewInteractionDisabled(false, false), false);
+  assert.equal(isFinancialReviewInteractionDisabled(true, false), true);
+  assert.equal(isFinancialReviewInteractionDisabled(false, true), true);
+  assert.equal(isFinancialReviewInteractionDisabled(true, true), true);
+});
+
+test("version 1 review drafts start with empty explicit report summary fields", () => {
+  const draft = createDraft([{ reviewState: "accepted" }]);
+
+  assert.deepEqual(getDraftReportSummaryForm(draft), {
+    reportName: "",
+    totalAmount: "",
+    transactionCount: "",
+    submittedAt: "",
+  });
+});
+
+test("version 2 review drafts prepopulate exact proposed report summary", () => {
+  const draft = createDraft([{ reviewState: "accepted" }]);
+  draft.payload.schemaVersion = 2;
+  draft.payload.proposedInput.reportSummary = {
+    reportName: "Q2 report",
+    totalAmount: 842350.75,
+    transactionCount: 187,
+    submittedAt: "2026-07-12T18:30:00.000Z",
+  };
+
+  const form = getDraftReportSummaryForm(draft);
+  assert.equal(form.reportName, "Q2 report");
+  assert.equal(form.totalAmount, "842350.75");
+  assert.equal(form.transactionCount, "187");
+  assert.equal(
+    validateFinancialReportSummary(form).value?.submittedAt,
+    "2026-07-12T18:30:00.000Z",
+  );
+});
+
+test("report summary validation remains an independent confirmation gate", () => {
+  const draft = createDraft([{ reviewState: "accepted" }]);
+  const invalidSummary = validateFinancialReportSummary({
+    reportName: "",
+    totalAmount: "10",
+    transactionCount: "1",
+    submittedAt: "2026-07-12T18:30",
+  });
+
+  const result = validateReviewDraft(draft, { reportSummary: invalidSummary });
+
+  assert.equal(result.canConfirm, false);
+  assert.deepEqual(result.reportSummaryIssues.map((issue) => issue.code), [
+    "REPORT_NAME_REQUIRED",
+  ]);
+});
+
+test("corrected summary is copied into proposed input for update and confirmation", () => {
+  const draft = createDraft([{ reviewState: "accepted" }]);
+  const summary = {
+    reportName: "corrected.pdf",
+    totalAmount: 99.5,
+    transactionCount: 4,
+    submittedAt: "2026-07-12T18:30:00.000Z",
+  };
+
+  const updated = applyReportSummaryToDraft(draft, summary);
+
+  assert.deepEqual(updated.payload.proposedInput.reportSummary, summary);
 });

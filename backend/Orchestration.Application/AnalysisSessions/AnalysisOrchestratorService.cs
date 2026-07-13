@@ -7,6 +7,7 @@ using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Shared;
 using System.Text.Json.Nodes;
 
 namespace Orchestration.Application.AnalysisSessions
@@ -17,17 +18,20 @@ namespace Orchestration.Application.AnalysisSessions
         private readonly AnalysisSessionWorkflowService _workflow;
         private readonly IActivityEventPublisher _activityPublisher;
         private readonly IPlannerAgent _plannerAgent;
+        private readonly IFinancialReportContextResolver _reportContextResolver;
 
         public AnalysisOrchestratorService(
             IOrchestrationDbContext dbContext,
             AnalysisSessionWorkflowService workflow,
             IActivityEventPublisher activityPublisher,
-            IPlannerAgent plannerAgent)
+            IPlannerAgent plannerAgent,
+            IFinancialReportContextResolver reportContextResolver)
         {
             _dbContext = dbContext;
             _workflow = workflow;
             _activityPublisher = activityPublisher;
             _plannerAgent = plannerAgent;
+            _reportContextResolver = reportContextResolver;
         }
 
         public async Task<AnalysisSessionDto?> StartAnalysisAsync(
@@ -42,17 +46,34 @@ namespace Orchestration.Application.AnalysisSessions
                 return null;
             }
 
+            var dataGatheringStatus = _workflow.ApplyTrigger(
+                session,
+                AnalysisSessionTrigger.Start
+            );
+
+            var reportResolution = _reportContextResolver.Resolve(session);
+
+            if (!reportResolution.IsValid || reportResolution.Report is null)
+            {
+                session.SetCurrentAgent(null);
+                session.MarkFailed(reportResolution.ErrorMessage!);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await PublishAsync(
+                    session.Id,
+                    "financial_report_context_invalid",
+                    "Orchestrator",
+                    reportResolution.ErrorMessage!,
+                    cancellationToken);
+
+                return ToDto(session);
+            }
+
             await PublishAsync(
                 session.Id,
                 "state_transition_requested",
                 "Orchestrator",
                 "Iniciando sesión de análisis.",
                 cancellationToken
-            );
-
-            var dataGatheringStatus = _workflow.ApplyTrigger(
-                session,
-                AnalysisSessionTrigger.Start
             );
 
             session.SetStatus(dataGatheringStatus);
@@ -69,7 +90,7 @@ namespace Orchestration.Application.AnalysisSessions
             );
 
             var plannerResult = await _plannerAgent.RunAsync(
-                session,
+                reportResolution.Report,
                 cancellationToken
             );
 
@@ -537,22 +558,24 @@ namespace Orchestration.Application.AnalysisSessions
             try
             {
                 var existingRoot = JsonNode.Parse(existingContextJson) as JsonObject;
-                var structuredMetrics = existingRoot?["structuredFinancialMetrics"];
-
-                if (structuredMetrics is null)
-                {
-                    return contextJson;
-                }
-
                 var contextRoot = JsonNode.Parse(contextJson) as JsonObject;
 
-                if (contextRoot is null)
+                if (existingRoot is null || contextRoot is null)
                 {
                     return contextJson;
                 }
 
-                contextRoot["structuredFinancialMetrics"] =
-                    JsonNode.Parse(structuredMetrics.ToJsonString());
+                foreach (var propertyName in new[]
+                {
+                    "financialReport",
+                    "structuredFinancialMetrics"
+                })
+                {
+                    if (existingRoot[propertyName] is { } value)
+                    {
+                        contextRoot[propertyName] = JsonNode.Parse(value.ToJsonString());
+                    }
+                }
 
                 return contextRoot.ToJsonString();
             }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
@@ -271,6 +272,9 @@ Return this JSON shape:
             input.ReportName,
             input.TotalAmount,
             input.TransactionCount,
+            submittedAt = input.SubmittedAt.ToString(
+                "O",
+                CultureInfo.InvariantCulture),
             dataAgent = new
             {
                 summary = input.DataSummary,

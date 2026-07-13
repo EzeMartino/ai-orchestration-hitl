@@ -10,16 +10,25 @@ import type {
   StructuredFinancialMetricInput,
   StructuredFinancialMetricsInput,
   UpdateFinancialMetricsExtractionDraftRequest,
+  ConfirmFinancialMetricsExtractionDraftRequest,
 } from "../types/domain.types";
 import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
   applyMetadataCandidateRejection,
   applyProposedMetadataEdit,
+  applyReportSummaryToDraft,
+  getDraftReportSummaryForm,
+  isFinancialReviewInteractionDisabled,
   mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
+import {
+  mapFinancialReportSummaryErrorsByField,
+  validateFinancialReportSummary,
+} from "../utils/financialReportSummary";
+import type { FinancialReportSummaryFormState } from "../utils/financialReportSummary";
 
 interface FinancialMetricsReviewPanelProps {
   draft?: FinancialMetricsExtractionDraft | null;
@@ -30,7 +39,10 @@ interface FinancialMetricsReviewPanelProps {
     draftId: string,
     request: UpdateFinancialMetricsExtractionDraftRequest
   ) => Promise<FinancialMetricsExtractionDraft | null>;
-  onConfirm: (draftId: string) => Promise<void>;
+  onConfirm: (
+    draftId: string,
+    request: ConfirmFinancialMetricsExtractionDraftRequest,
+  ) => Promise<void>;
   onDiscard: (draftId: string) => Promise<void>;
   onRetry: () => void;
 }
@@ -348,9 +360,13 @@ export function FinancialMetricsReviewPanel({
     currency: "",
     unit: "",
   });
+  const [reportSummary, setReportSummary] = useState<FinancialReportSummaryFormState>(
+    getDraftReportSummaryForm(draft),
+  );
 
   useEffect(() => {
     setWorkingDraft(draft ?? null);
+    setReportSummary(getDraftReportSummaryForm(draft));
     setMetricAdditions([]);
     setMetricAdditionForm({
       name: "",
@@ -366,12 +382,25 @@ export function FinancialMetricsReviewPanel({
     [workingDraft]
   );
   const validation = workingDraft
-    ? validateReviewDraft(workingDraft, { metricAdditionCount: metricAdditions.length })
-    : { canConfirm: false, blockingCandidateIds: [], missingFields: [] };
+    ? validateReviewDraft(workingDraft, {
+        metricAdditionCount: metricAdditions.length,
+        reportSummary: validateFinancialReportSummary(reportSummary),
+      })
+    : { canConfirm: false, blockingCandidateIds: [], missingFields: [], reportSummaryIssues: [] };
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
-  const dirty = isDraftDirty(draft ?? null, workingDraft) || metricAdditions.length > 0;
+  const isInteractionDisabled = isFinancialReviewInteractionDisabled(
+    isSaving,
+    isLoading,
+  );
+  const summaryErrorMessages = mapFinancialReportSummaryErrorsByField(
+    validation.reportSummaryIssues,
+  );
+  const dirty =
+    isDraftDirty(draft ?? null, workingDraft) ||
+    metricAdditions.length > 0 ||
+    JSON.stringify(getDraftReportSummaryForm(draft)) !== JSON.stringify(reportSummary);
 
   if (isLoading && !workingDraft) {
     return (
@@ -555,9 +584,17 @@ export function FinancialMetricsReviewPanel({
       return null;
     }
 
+    const summaryValidation = validateFinancialReportSummary(reportSummary);
+    if (!summaryValidation.isValid || !summaryValidation.value) {
+      return null;
+    }
+    const draftWithSummary = applyReportSummaryToDraft(
+      workingDraft,
+      summaryValidation.value,
+    );
     const updated = await onUpdate(
       workingDraft.id,
-      createUpdateRequest(workingDraft, metricAdditions)
+      createUpdateRequest(draftWithSummary, metricAdditions)
     );
     if (updated) {
       setWorkingDraft(updated);
@@ -577,7 +614,12 @@ export function FinancialMetricsReviewPanel({
       return;
     }
 
-    await onConfirm(saved.id);
+    const summaryValidation = validateFinancialReportSummary(reportSummary);
+    if (!summaryValidation.isValid || !summaryValidation.value) {
+      return;
+    }
+
+    await onConfirm(saved.id, { reportSummary: summaryValidation.value });
   }
 
   const blockingMessages = [
@@ -587,6 +629,9 @@ export function FinancialMetricsReviewPanel({
     validation.missingFields.length > 0
       ? `Campos faltantes: ${validation.missingFields.join(", ")}.`
       : null,
+    validation.reportSummaryIssues.length > 0
+      ? `Resumen del informe: ${validation.reportSummaryIssues.map((issue) => issue.code).join(", ")}.`
+      : null,
   ].filter(Boolean);
   const blockingReason = blockingMessages.length > 0
     ? blockingMessages.join(" ")
@@ -595,7 +640,11 @@ export function FinancialMetricsReviewPanel({
         : undefined;
 
   return (
-    <section className="financialMetricsReviewPanel" aria-labelledby="financialMetricsReviewTitle">
+    <section
+      className="financialMetricsReviewPanel"
+      aria-labelledby="financialMetricsReviewTitle"
+      aria-busy={isLoading}
+    >
       <div className="financialMetricsReviewHeader">
         <div>
           <p className="financialMetricsReviewEyebrow">Revisión de extracción PDF</p>
@@ -627,12 +676,80 @@ export function FinancialMetricsReviewPanel({
         </div>
       )}
 
+      <fieldset
+        className="financialMetricsReviewInteractionGate"
+        disabled={isInteractionDisabled}
+      >
+        <legend className="srOnly">Controles de revisión financiera</legend>
+
       <div className="financialMetricsReviewMeta">
         <span>Archivo: {workingDraft.originalFileName}</span>
         <span>Candidatos: {workingDraft.payload.candidates.length}</span>
         <span>Metadatos: {workingDraft.payload.metadataCandidates?.length ?? 0}</span>
         <span>Estado: {workingDraft.status}</span>
       </div>
+
+      <fieldset className="financialReportSummaryForm financialReportSummaryReview">
+        <legend>Resumen del informe confirmado</legend>
+        {workingDraft.payload.schemaVersion === 1 && (
+          <p role="note">
+            Este borrador v1 no contiene un resumen confiable. Complete los cuatro campos antes de confirmar.
+          </p>
+        )}
+        <div className="financialReportSummaryGrid">
+          <label>
+            Nombre del informe
+            <input
+              value={reportSummary.reportName}
+              onChange={(event) => setReportSummary((current) => ({ ...current, reportName: event.target.value }))}
+              aria-invalid={Boolean(summaryErrorMessages.reportName)}
+              aria-describedby={summaryErrorMessages.reportName ? "review-financial-report-name-error" : undefined}
+              disabled={isSaving || isLoading}
+            />
+            {summaryErrorMessages.reportName && <span id="review-financial-report-name-error" className="fieldError">{summaryErrorMessages.reportName}</span>}
+          </label>
+          <label>
+            Importe total
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={reportSummary.totalAmount}
+              onChange={(event) => setReportSummary((current) => ({ ...current, totalAmount: event.target.value }))}
+              aria-invalid={Boolean(summaryErrorMessages.totalAmount)}
+              aria-describedby={summaryErrorMessages.totalAmount ? "review-financial-report-total-error" : undefined}
+              disabled={isSaving || isLoading}
+            />
+            {summaryErrorMessages.totalAmount && <span id="review-financial-report-total-error" className="fieldError">{summaryErrorMessages.totalAmount}</span>}
+          </label>
+          <label>
+            Cantidad de transacciones
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={reportSummary.transactionCount}
+              onChange={(event) => setReportSummary((current) => ({ ...current, transactionCount: event.target.value }))}
+              aria-invalid={Boolean(summaryErrorMessages.transactionCount)}
+              aria-describedby={summaryErrorMessages.transactionCount ? "review-financial-report-count-error" : undefined}
+              disabled={isSaving || isLoading}
+            />
+            {summaryErrorMessages.transactionCount && <span id="review-financial-report-count-error" className="fieldError">{summaryErrorMessages.transactionCount}</span>}
+          </label>
+          <label>
+            Fecha de envío
+            <input
+              type="datetime-local"
+              value={reportSummary.submittedAt}
+              onChange={(event) => setReportSummary((current) => ({ ...current, submittedAt: event.target.value }))}
+              aria-invalid={Boolean(summaryErrorMessages.submittedAt)}
+              aria-describedby={summaryErrorMessages.submittedAt ? "review-financial-report-date-error" : undefined}
+              disabled={isSaving || isLoading}
+            />
+            {summaryErrorMessages.submittedAt && <span id="review-financial-report-date-error" className="fieldError">{summaryErrorMessages.submittedAt}</span>}
+          </label>
+        </div>
+      </fieldset>
 
       <div className="financialMetricsReviewDocumentFields">
         <h3>Metadatos del documento</h3>
@@ -993,13 +1110,13 @@ export function FinancialMetricsReviewPanel({
       </div>
 
       <div className="financialMetricsReviewActions">
-        <button type="button" onClick={handleSave} disabled={!dirty || isSaving}>
+        <button type="button" onClick={handleSave} disabled={!dirty || isInteractionDisabled}>
           {isSaving ? "Guardando..." : "Guardar cambios"}
         </button>
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={!canConfirm || isSaving}
+          disabled={!canConfirm || isInteractionDisabled}
           title={blockingReason}
         >
           {isSaving ? "Guardando..." : "Confirmar y guardar"}
@@ -1008,11 +1125,12 @@ export function FinancialMetricsReviewPanel({
           type="button"
           className="financialMetricsReviewDiscard"
           onClick={() => onDiscard(workingDraft.id)}
-          disabled={isSaving}
+          disabled={isInteractionDisabled}
         >
           Descartar borrador
         </button>
       </div>
+      </fieldset>
     </section>
   );
 }

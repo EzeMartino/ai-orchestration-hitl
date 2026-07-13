@@ -1,3 +1,5 @@
+using Orchestration.Application.Agents.Shared;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public interface IStructuredFinancialMetricsSessionService
@@ -16,6 +18,14 @@ public interface IStructuredFinancialMetricsSessionService
         CancellationToken cancellationToken);
 
     Task<StructuredFinancialMetricsContext?> GetAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken);
+
+    Task<FinancialReportSummary?> GetReportSummaryAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken);
+
+    Task<StructuredFinancialMetricsSessionContext> GetSessionContextAsync(
         Guid sessionId,
         CancellationToken cancellationToken);
 }

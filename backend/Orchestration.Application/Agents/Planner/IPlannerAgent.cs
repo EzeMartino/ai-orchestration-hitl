@@ -5,7 +5,7 @@ namespace Orchestration.Application.Agents.Planner;
 public interface IPlannerAgent
 {
     Task<PlannerAgentResult> RunAsync(
-        AnalysisSession session,
+        Orchestration.Application.Agents.Shared.FinancialReportContext report,
         CancellationToken cancellationToken
     );
 }
