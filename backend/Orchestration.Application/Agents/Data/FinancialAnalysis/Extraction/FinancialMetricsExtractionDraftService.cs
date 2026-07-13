@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.FinancialMetricsExtraction;
@@ -341,6 +342,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         Guid draftId,
         Guid sessionId,
         Guid userId,
+        ConfirmFinancialMetricsExtractionDraftRequest request,
         CancellationToken cancellationToken)
     {
         if (draftId == Guid.Empty || sessionId == Guid.Empty || userId == Guid.Empty)
@@ -378,12 +380,16 @@ public sealed class FinancialMetricsExtractionDraftService(
                 "A discarded draft cannot be confirmed.");
         }
 
+        var confirmedInput = payload.ProposedInput with
+        {
+            ReportSummary = request?.ReportSummary
+        };
         var blockingCandidates = payload.Candidates
             .Any(candidate => !IsResolvedReviewState(candidate.ReviewState)) ||
             payload.MetadataCandidates
                 .Any(candidate => !IsResolvedReviewState(candidate.ReviewState));
-        var recomputedMissingFields = ComputeMissingFields(payload.ProposedInput);
-        var validation = _validator.Validate(payload.ProposedInput);
+        var recomputedMissingFields = ComputeMissingFields(confirmedInput);
+        var validation = _validator.Validate(confirmedInput);
         var validationIssues = validation.Errors
             .Concat(validation.Warnings)
             .ToArray();
@@ -405,7 +411,7 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
 
         if (!TryValidateCanonicalProposedInput(
-                payload.ProposedInput,
+                confirmedInput,
                 validation,
                 out var canonicalIssue))
         {
@@ -415,12 +421,42 @@ public sealed class FinancialMetricsExtractionDraftService(
         }
 
         if (!TryValidateSelectedCandidateCoherence(
-                payload.ProposedInput,
+                confirmedInput,
                 payload.Candidates,
                 payload.MetadataCandidates,
                 out var coherenceError))
         {
             return FinancialMetricsExtractionDraftServiceResult.Invalid(coherenceError);
+        }
+
+        var normalizedSummary = validation.ReportSummary
+            ?? throw new InvalidOperationException(
+                "A valid reviewed input must include a report summary.");
+        confirmedInput = confirmedInput with
+        {
+            ReportSummary = new FinancialReportSummaryInput(
+                normalizedSummary.ReportName,
+                normalizedSummary.TotalAmount,
+                normalizedSummary.TransactionCount,
+                normalizedSummary.SubmittedAt)
+        };
+        var confirmedPayload = payload with
+        {
+            SchemaVersion = FinancialMetricsExtractionDraftPayload.CurrentSchemaVersion,
+            ProposedInput = confirmedInput
+        };
+
+        string confirmedPayloadJson;
+
+        try
+        {
+            confirmedPayloadJson = JsonSerializer.Serialize(confirmedPayload, JsonOptions);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or NotSupportedException)
+        {
+            return FinancialMetricsExtractionDraftServiceResult.Invalid(
+                "Confirmed draft payload could not be serialized.");
         }
 
         FinancialMetricsSessionSaveResult? saveResult;
@@ -430,7 +466,7 @@ public sealed class FinancialMetricsExtractionDraftService(
             saveResult = await _sessionService.StageAsync(
                 new SaveStructuredFinancialMetricsRequest(
                     SessionId: sessionId,
-                    Input: payload.ProposedInput,
+                    Input: confirmedInput,
                     Provenance: new StructuredFinancialMetricsProvenanceInput(
                         IngestionMethod: "pdf_file_reviewed",
                         OriginalFileName: draft.OriginalFileName,
@@ -469,7 +505,9 @@ public sealed class FinancialMetricsExtractionDraftService(
 
         try
         {
-            draft.Confirm(userId, DateTimeOffset.UtcNow);
+            var now = DateTimeOffset.UtcNow;
+            draft.UpdatePayload(confirmedPayloadJson, now);
+            draft.Confirm(userId, now);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
@@ -495,7 +533,7 @@ public sealed class FinancialMetricsExtractionDraftService(
             cancellationToken);
 
         return FinancialMetricsExtractionDraftServiceResult.Success(
-            ToDto(draft, payload));
+            ToDto(draft, confirmedPayload));
     }
 
     public async Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(
@@ -1525,7 +1563,7 @@ public sealed class FinancialMetricsExtractionDraftService(
             return FailPayload("Draft payload is required.", out normalized, out error);
         }
 
-        if (payload.SchemaVersion !=
+        if (payload.SchemaVersion is not 1 and not
             FinancialMetricsExtractionDraftPayload.CurrentSchemaVersion)
         {
             return FailPayload(

@@ -479,6 +479,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken) => NotFound();
 
         public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(

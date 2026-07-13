@@ -110,6 +110,7 @@ public class AnalysisSessionControllerIsolationTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken) => NotFound();
 
         public Task<FinancialMetricsExtractionDraftServiceResult> DiscardAsync(

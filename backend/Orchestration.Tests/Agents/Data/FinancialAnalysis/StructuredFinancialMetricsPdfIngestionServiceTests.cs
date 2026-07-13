@@ -112,6 +112,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
         result.ReviewDraft.Should().NotBeNull();
         fixture.SessionService.SaveRequests.Should().BeEmpty();
         fixture.DraftService.Requests.Should().ContainSingle();
+        fixture.DraftService.Requests.Single().Payload.SchemaVersion.Should().Be(2);
         fixture.DraftService.Requests.Single().Payload.ProposedInput.ReportSummary
             .Should().BeSameAs(TestReportSummary.Input);
         fixture.DraftService.Requests.Single().Payload.Candidates
@@ -721,6 +722,7 @@ public sealed class StructuredFinancialMetricsPdfIngestionServiceTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 

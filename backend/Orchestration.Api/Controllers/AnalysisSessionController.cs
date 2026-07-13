@@ -476,12 +476,19 @@ public class AnalysisSessionsController(
     public async Task<IActionResult> ConfirmFinancialMetricsReview(
         Guid id,
         Guid draftId,
+        [FromBody] ConfirmFinancialMetricsExtractionDraftRequest request,
         CancellationToken cancellationToken)
     {
+        if (request is null)
+        {
+            return BadRequest();
+        }
+
         var result = await _financialMetricsExtractionDraftService.ConfirmAsync(
             draftId,
             id,
             CurrentUserId,
+            request,
             cancellationToken
         );
 

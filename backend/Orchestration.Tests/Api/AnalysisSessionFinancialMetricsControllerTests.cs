@@ -1213,10 +1213,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             ConfirmResult = FinancialMetricsExtractionDraftServiceResult.Success(identity)
         };
         var controller = CreateController(dbContext, draftService: draftService);
+        var confirmRequest = new ConfirmFinancialMetricsExtractionDraftRequest(
+            ApiReportSummaryInput);
 
         var result = await controller.ConfirmFinancialMetricsReview(
             session.Id,
             draftId,
+            confirmRequest,
             CancellationToken.None
         );
 
@@ -1225,6 +1228,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         draftService.LastDraftId.Should().Be(draftId);
         draftService.LastSessionId.Should().Be(session.Id);
         draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastConfirmRequest.Should().BeSameAs(confirmRequest);
     }
 
     [Fact]
@@ -1278,7 +1282,11 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         };
         var controller = CreateController(dbContext, draftService: draftService);
 
-        var confirm = await controller.ConfirmFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
+        var confirm = await controller.ConfirmFinancialMetricsReview(
+            session.Id,
+            draftId,
+            new ConfirmFinancialMetricsExtractionDraftRequest(ApiReportSummaryInput),
+            CancellationToken.None);
         var discard = await controller.DiscardFinancialMetricsReview(session.Id, draftId, CancellationToken.None);
 
         confirm.Should().BeOfType<OkObjectResult>()
@@ -1313,6 +1321,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var result = await controller.ConfirmFinancialMetricsReview(
             session.Id,
             Guid.Parse("00000000-0000-0000-0000-000000000099"),
+            new ConfirmFinancialMetricsExtractionDraftRequest(ApiReportSummaryInput),
             CancellationToken.None
         );
 
@@ -1937,6 +1946,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         public Guid? LastSessionId { get; private set; }
         public Guid? LastUserId { get; private set; }
         public UpdateFinancialMetricsExtractionDraftRequest? LastUpdateRequest { get; private set; }
+        public ConfirmFinancialMetricsExtractionDraftRequest? LastConfirmRequest { get; private set; }
 
         public Task<FinancialMetricsExtractionDraftServiceResult> CreateOrReplaceAsync(
             Guid sessionId,
@@ -1977,11 +1987,13 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             Guid draftId,
             Guid sessionId,
             Guid userId,
+            ConfirmFinancialMetricsExtractionDraftRequest request,
             CancellationToken cancellationToken)
         {
             LastDraftId = draftId;
             LastSessionId = sessionId;
             LastUserId = userId;
+            LastConfirmRequest = request;
 
             return Task.FromResult(ConfirmResult);
         }
