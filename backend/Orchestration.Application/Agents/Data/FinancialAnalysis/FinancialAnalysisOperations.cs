@@ -7,13 +7,13 @@ public static class FinancialAnalysisOperations
     public const string Signals = "signals";
     public const string Summary = "summary";
 
-    public static IReadOnlyList<string> All { get; } =
+    public static IReadOnlyList<string> All { get; } = Array.AsReadOnly<string>(
     [
         Ratios,
         Comparisons,
         Signals,
         Summary
-    ];
+    ]);
 }
 
 public static class FinancialAnalysisFailureCodes

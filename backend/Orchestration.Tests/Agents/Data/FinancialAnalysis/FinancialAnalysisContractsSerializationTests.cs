@@ -194,6 +194,84 @@ public class FinancialAnalysisContractsSerializationTests
     }
 
     [Fact]
+    public void Operations_catalog_Should_not_expose_a_mutable_array()
+    {
+        var exposedArray = FinancialAnalysisOperations.All as string[];
+
+        exposedArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void FromStages_Should_snapshot_its_input()
+    {
+        var inputStages = CreateSucceededStages().ToArray();
+        var execution = FinancialAnalysisExecution.FromStages(inputStages);
+
+        inputStages[0] = inputStages[0] with
+        {
+            Status = FinancialAnalysisExecutionStatus.Failed
+        };
+
+        execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        execution.Stages[0].Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public void FromStages_Should_not_expose_a_mutable_stage_array()
+    {
+        var execution = FinancialAnalysisExecution.FromStages(CreateSucceededStages());
+
+        var exposedArray = execution.Stages as FinancialAnalysisStageExecution[];
+
+        exposedArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void Execution_constructor_Should_snapshot_its_stage_input()
+    {
+        var inputStages = CreateSucceededStages().ToArray();
+        var execution = new FinancialAnalysisExecution(
+            FinancialAnalysisExecutionStatus.Succeeded,
+            inputStages
+        );
+
+        inputStages[0] = inputStages[0] with
+        {
+            Status = FinancialAnalysisExecutionStatus.Failed
+        };
+
+        execution.Stages[0].Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public void Execution_constructor_Should_not_expose_a_mutable_stage_array()
+    {
+        var execution = new FinancialAnalysisExecution(
+            FinancialAnalysisExecutionStatus.Succeeded,
+            CreateSucceededStages().ToArray()
+        );
+
+        var exposedArray = execution.Stages as FinancialAnalysisStageExecution[];
+
+        exposedArray.Should().BeNull();
+    }
+
+    [Fact]
+    public void Execution_Should_round_trip_as_json_after_snapshotting_stages()
+    {
+        var execution = FinancialAnalysisExecution.FromStages(CreateSucceededStages());
+
+        var json = JsonSerializer.Serialize(execution, JsonOptions);
+        var roundTripped = JsonSerializer.Deserialize<FinancialAnalysisExecution>(
+            json,
+            JsonOptions
+        );
+
+        roundTripped.Should().BeEquivalentTo(execution);
+        (roundTripped!.Stages as FinancialAnalysisStageExecution[]).Should().BeNull();
+    }
+
+    [Fact]
     public void Request_session_id_Should_be_omitted_from_all_python_json_contracts()
     {
         var sessionId = Guid.NewGuid();

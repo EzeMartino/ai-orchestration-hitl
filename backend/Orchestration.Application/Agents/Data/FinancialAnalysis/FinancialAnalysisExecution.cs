@@ -4,6 +4,9 @@ public sealed record FinancialAnalysisExecution(
     FinancialAnalysisExecutionStatus OverallStatus,
     IReadOnlyList<FinancialAnalysisStageExecution> Stages)
 {
+    public IReadOnlyList<FinancialAnalysisStageExecution> Stages { get; } =
+        Array.AsReadOnly(Stages.ToArray());
+
     public static FinancialAnalysisExecution LegacyUnknown { get; } = new(
         FinancialAnalysisExecutionStatus.LegacyUnknown,
         []
