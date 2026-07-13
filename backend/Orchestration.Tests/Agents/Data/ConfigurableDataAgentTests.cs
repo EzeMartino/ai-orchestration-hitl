@@ -62,7 +62,15 @@ public sealed class ConfigurableDataAgentTests
     [Fact]
     public async Task AnalyzeAsync_Should_fallback_to_legacy_when_financial_workflow_fails_and_fallback_is_enabled()
     {
-        var legacy = new FakeLegacyDataAgent();
+        var legacy = new FakeLegacyDataAgent
+        {
+            Result = new DataAgentResult(
+                HasAnomaly: false,
+                Severity: "Low",
+                Summary: "Legacy analysis completed without anomaly.",
+                Engine: "Legacy DataAgent",
+                Evidence: [])
+        };
         var workflow = new FakeFinancialAnalysisWorkflow
         {
             ThrowOnAnalyze = true
@@ -85,10 +93,11 @@ public sealed class ConfigurableDataAgentTests
         legacy.WasCalled.Should().BeTrue();
         workflow.WasCalled.Should().BeTrue();
         result.Engine.Should().Be("Legacy DataAgent (respaldo legacy)");
-        result.HasAnomaly.Should().BeTrue();
-        result.Severity.Should().Be("High");
-        result.Evidence.Should().ContainSingle();
+        result.HasAnomaly.Should().BeFalse();
+        result.Severity.Should().Be("Low");
+        result.Evidence.Should().BeEmpty();
         result.RequiresHumanReview.Should().BeTrue();
+        result.Summary.Should().StartWith("Legacy analysis completed without anomaly.");
         result.Summary.Should().Contain("No se pudo completar el análisis financiero estructurado");
         result.Summary.Should().Contain("requiere revisión humana");
     }
@@ -229,13 +238,15 @@ public sealed class ConfigurableDataAgentTests
     {
         public bool WasCalled { get; private set; }
 
+        public DataAgentResult? Result { get; init; }
+
         public Task<DataAgentResult> AnalyzeAsync(
             FinancialReportContext report,
             CancellationToken cancellationToken)
         {
             WasCalled = true;
 
-            return Task.FromResult(new DataAgentResult(
+            return Task.FromResult(Result ?? new DataAgentResult(
                 HasAnomaly: true,
                 Severity: "High",
                 Summary: "Legacy anomaly detection completed.",

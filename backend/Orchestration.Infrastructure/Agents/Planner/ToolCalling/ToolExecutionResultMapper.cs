@@ -35,14 +35,24 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
                 JsonOptions
             );
 
-            if (result?.FinancialAnalysis is not null &&
-                result.FinancialAnalysis.Execution.OverallStatus !=
-                    FinancialAnalysisExecutionStatus.Succeeded)
+            if (result?.FinancialAnalysis is not { } financialAnalysis)
             {
-                return result with { RequiresHumanReview = true };
+                return result;
             }
 
-            return result;
+            var execution = financialAnalysis.Execution
+                ?? FinancialAnalysisExecution.LegacyUnknown;
+            var normalizedFinancialAnalysis = financialAnalysis.Execution is null
+                ? financialAnalysis with { Execution = execution }
+                : financialAnalysis;
+            var requiresHumanReview = result.RequiresHumanReview ||
+                execution.OverallStatus != FinancialAnalysisExecutionStatus.Succeeded;
+
+            return result with
+            {
+                FinancialAnalysis = normalizedFinancialAnalysis,
+                RequiresHumanReview = requiresHumanReview
+            };
         }
         catch (JsonException)
         {

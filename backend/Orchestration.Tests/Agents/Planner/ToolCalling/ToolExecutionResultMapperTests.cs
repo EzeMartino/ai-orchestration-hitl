@@ -206,6 +206,48 @@ public class ToolExecutionResultMapperTests
         result.RequiresHumanReview.Should().BeFalse();
     }
 
+    [Fact]
+    public void TryMapDataResult_Should_normalize_null_financial_execution_to_legacy_unknown_review()
+    {
+        const string outputJson = """
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Partial financial result.",
+              "engine": "Financial Workflow",
+              "evidence": [],
+              "financialAnalysis": {
+                "engine": "Financial Workflow",
+                "documentId": "document-1",
+                "company": "Acme",
+                "ratios": [],
+                "comparisons": [],
+                "riskSignals": [],
+                "riskEvidence": [],
+                "warnings": ["Preserved warning."],
+                "limitations": [],
+                "execution": null
+              },
+              "requiresHumanReview": false
+            }
+            """;
+
+        var result = new ToolExecutionResultMapper().TryMapDataResult(
+        [
+            CreateExecutionResult("data.analyze_transactions", outputJson)
+        ]);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.DocumentId.Should().Be("document-1");
+        result.FinancialAnalysis.Company.Should().Be("Acme");
+        result.FinancialAnalysis.Warnings.Should().ContainSingle()
+            .Which.Should().Be("Preserved warning.");
+        result.FinancialAnalysis.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+    }
+
     private static DataAgentResult? MapDataResult(DataAgentResult dataResult)
     {
         return new ToolExecutionResultMapper().TryMapDataResult(
