@@ -128,17 +128,11 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 failureResponse);
         }
 
+        TResponse response;
+
         try
         {
-            var response = map(responseJson);
-            var execution = new FinancialAnalysisStageExecution(
-                operation,
-                FinancialAnalysisExecutionStatus.Succeeded,
-                stopwatch.ElapsedMilliseconds);
-
-            LogSuccess(sessionId, execution);
-
-            return attachExecution(response, execution);
+            response = map(responseJson);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -154,6 +148,15 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 exception,
                 failureResponse);
         }
+
+        var execution = new FinancialAnalysisStageExecution(
+            operation,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            stopwatch.ElapsedMilliseconds);
+
+        LogSuccess(sessionId, execution);
+
+        return attachExecution(response, execution);
     }
 
     private TResponse Fail<TResponse>(

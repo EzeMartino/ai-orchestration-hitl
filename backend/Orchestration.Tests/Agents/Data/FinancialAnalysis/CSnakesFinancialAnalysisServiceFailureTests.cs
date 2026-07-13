@@ -34,8 +34,10 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
         result.Execution.Operation.Should().Be(operation);
         result.Execution.FailureCode.Should().Be(FinancialAnalysisFailureCodes.PythonInvocationFailed);
         result.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
-        result.Warnings.Should().OnlyContain(warning =>
-            !warning.Contains("sensitive adapter detail", StringComparison.Ordinal));
+        result.Warnings.Should().NotBeEmpty()
+            .And.OnlyContain(warning =>
+                !string.IsNullOrWhiteSpace(warning) &&
+                !warning.Contains("sensitive adapter detail", StringComparison.Ordinal));
 
         if (operation is FinancialAnalysisOperations.Signals or FinancialAnalysisOperations.Summary)
         {
@@ -76,6 +78,24 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
         AssertStructuredLog(log, FinancialAnalysisOperations.Ratios,
             FinancialAnalysisExecutionStatus.Succeeded, null);
         AssertNoRawPayload(log);
+    }
+
+    [Fact]
+    public async Task ComputeFinancialRatiosAsync_ValidResponseSuccessLogThrows_PropagatesLoggerFailure()
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            """{"ratios":[],"warnings":[],"limitations":[]}""");
+        var service = new CSnakesFinancialAnalysisService(
+            invoker,
+            new ThrowingInformationLogger<CSnakesFinancialAnalysisService>());
+
+        await FluentActions.Awaiting(() => service.ComputeFinancialRatiosAsync(
+                CreateRatiosRequest(),
+                CancellationToken.None))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("success logger failure");
+
+        invoker.Calls.Should().ContainSingle();
     }
 
     [Theory]
@@ -256,4 +276,31 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
     }
 
     private sealed record Invocation(string Operation, string RequestJson);
+
+    private sealed class ThrowingInformationLogger<T> : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Information)
+            {
+                throw new InvalidOperationException("success logger failure");
+            }
+        }
+    }
 }
