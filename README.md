@@ -678,6 +678,23 @@ When `DataAgent__AiReviewEnabled=true` and `Llm__Enabled=true`, Semantic Kernel 
 
 Ratio calculation, period comparison, financial-risk detection, and quantitative-evidence summarization execute as deterministic internal `DataAgent` operations. The Planner receives their aggregate, traceable `DataAgentResult`; it does not call these operations independently.
 
+#### Execution Status, Business Risk, and HITL
+
+Technical execution status is independent from calculated business risk. The workflow preserves valid partial evidence and fails closed when a required stage cannot be trusted:
+
+| Execution | Meaning | Business risk | HITL |
+|---|---|---|---|
+| `succeeded` | All required stages completed. | Calculated normally. | Based on business evidence. |
+| `degraded` | Some required stages failed; valid evidence is retained. | A partial calculation may exist. | Required. |
+| `failed` | Signal and risk assessment is unavailable. | `Unknown`. | Required. |
+| `legacy_unknown` | Historical execution metadata is absent. | Do not infer success. | Required for new executions. |
+
+The stable technical failure codes are `PYTHON_INVOCATION_FAILED` for a failed Python call, `PYTHON_RESPONSE_INVALID` for malformed or structurally invalid Python output, and `FINANCIAL_ANALYSIS_UNEXPECTED_FAILURE` for an otherwise unclassified failure caught at the workflow boundary.
+
+Structured operation logs contain `SessionId`, operation, duration, execution status, and failure code. They do not log serialized requests, Python responses, metric values, or document content. The dashboard and Activity Feed expose only curated status, affected operation labels, and stable failure codes; they never expose raw payloads, metric values, or exception text.
+
+Warnings returned by a successful operation describe domain or data-quality conditions. Warnings alone are not a technical failure and do not change a successful execution status. A successful analysis with no risk signals remains a legitimate Low-risk result; a technical failure is never represented as Low risk.
+
 ### Current Limitations
 
 This phase does not include:

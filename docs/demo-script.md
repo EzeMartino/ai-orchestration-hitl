@@ -159,12 +159,29 @@ Expected result:
 - Metrics source is `Session context`.
 - Document and company come from the attached metrics.
 - Fixture fallback warning is absent.
+- A successful execution has no degraded or failed execution banner.
 - Risk signals include metric, period, observed value, threshold, and reason.
 - Threshold profile and thresholds used are visible.
 
 Reference screenshot:
 
 ![Financial Risk Evidence from Session Context](screenshots/financial-risk-evidence-session-context.png)
+
+### Fail-Closed Degraded Path Check
+
+Use the deterministic production-like E2E scenario to simulate a failed ratio stage while the signal stage succeeds with no business-risk evidence:
+
+```bash
+dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~ProductionLikeWorkflow_DegradedFinancialAnalysis_ShouldPersistReviewStateAcrossApiReload" --verbosity minimal
+```
+
+Expected result:
+
+- Execution status is `degraded`, and the failed stage exposes only its operation and stable failure code.
+- The session pauses at `AwaitingHumanApproval` even though no anomaly or legal risk was detected.
+- The dashboard presents the incomplete-analysis banner and requires human review; retained valid evidence remains visible.
+- Reloading the session preserves `financialAnalysis.execution`, including its aggregate status and stage records.
+- No raw payload, metric value, or exception text appears in the dashboard or Activity Feed.
 
 ## Review DataAgent AI Review
 
@@ -244,6 +261,7 @@ Expected result:
 - Status remains `Completed`.
 - `structuredFinancialMetrics` is restored.
 - `financialAnalysis` and `financialAnalysis.aiReview` are restored.
+- `financialAnalysis.execution` and its stage records are restored.
 - `compliance` and `compliance.legalReview` are restored.
 - `planner` and `toolPlan` are restored.
 - Activity Feed history is restored.
