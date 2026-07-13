@@ -9,6 +9,74 @@ test("successful execution has no banner", () => {
   );
 });
 
+test("successful status with null stages fails closed as neutral", () => {
+  const banner = getFinancialAnalysisExecutionBanner({
+    overallStatus: "succeeded",
+    stages: null,
+  });
+
+  assert.equal(banner?.tone, "neutral");
+});
+
+test("successful status with a contradictory failed stage fails closed", () => {
+  const banner = getFinancialAnalysisExecutionBanner({
+    overallStatus: "succeeded",
+    stages: [{ operation: "signals", status: "failed" }],
+  });
+
+  assert.equal(banner?.tone, "neutral");
+  assert.deepEqual(banner?.affectedStages, []);
+});
+
+test("successful complete unique stage metadata has no banner", () => {
+  assert.equal(
+    getFinancialAnalysisExecutionBanner({
+      overallStatus: "succeeded",
+      stages: [
+        { operation: "ratios", status: "succeeded" },
+        { operation: "comparisons", status: "succeeded" },
+        { operation: "signals", status: "succeeded" },
+        { operation: "summary", status: "succeeded" },
+      ],
+    }),
+    null,
+  );
+});
+
+test("successful nonempty stage metadata must be exact and well formed", () => {
+  const cases = [
+    [{ operation: "ratios", status: "succeeded" }],
+    [
+      { operation: "ratios", status: "succeeded" },
+      { operation: "comparisons", status: "succeeded" },
+      { operation: "signals", status: "succeeded" },
+      { operation: "unknown", status: "succeeded" },
+    ],
+    [
+      { operation: "ratios", status: "succeeded" },
+      { operation: "comparisons", status: "succeeded" },
+      { operation: "signals", status: "succeeded" },
+      null,
+    ],
+    [
+      { operation: "ratios", status: "succeeded" },
+      { operation: "comparisons", status: "succeeded" },
+      { operation: "signals", status: "succeeded" },
+      { operation: "signals", status: "succeeded" },
+    ],
+  ];
+
+  for (const stages of cases) {
+    const banner = getFinancialAnalysisExecutionBanner({
+      overallStatus: "succeeded",
+      stages,
+    } as never);
+
+    assert.equal(banner?.tone, "neutral");
+    assert.deepEqual(banner?.affectedStages, []);
+  }
+});
+
 test("degraded execution requires review and keeps only safe stage labels", () => {
   const banner = getFinancialAnalysisExecutionBanner({
     overallStatus: "degraded",
@@ -129,4 +197,26 @@ test("malformed stage collections do not break historical evidence rendering", (
 
   assert.equal(banner?.tone, "warning");
   assert.deepEqual(banner?.affectedStages, []);
+});
+
+test("duplicate failed operations produce one affected stage label", () => {
+  const banner = getFinancialAnalysisExecutionBanner({
+    overallStatus: "degraded",
+    stages: [
+      {
+        operation: "ratios",
+        status: "failed",
+        failureCode: "PYTHON_INVOCATION_FAILED",
+      },
+      {
+        operation: "ratios",
+        status: "failed",
+        failureCode: "PYTHON_RESPONSE_INVALID",
+      },
+    ],
+  });
+
+  assert.deepEqual(banner?.affectedStages, [
+    "Ratios financieros — PYTHON_INVOCATION_FAILED",
+  ]);
 });

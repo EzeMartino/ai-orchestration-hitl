@@ -35,10 +35,51 @@ function getStageLabel(operation: string): string | null {
   }
 }
 
+function isStageObject(
+  value: unknown,
+): value is FinancialAnalysisStageExecutionContext {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasTrustworthySucceededStages(stages: unknown): boolean {
+  if (!Array.isArray(stages)) {
+    return false;
+  }
+
+  if (stages.length === 0) {
+    return true;
+  }
+
+  if (stages.length !== 4) {
+    return false;
+  }
+
+  const operations = new Set<string>();
+  for (const stage of stages) {
+    if (
+      !isStageObject(stage) ||
+      typeof stage.operation !== "string" ||
+      getStageLabel(stage.operation) === null ||
+      stage.status !== "succeeded" ||
+      operations.has(stage.operation)
+    ) {
+      return false;
+    }
+
+    operations.add(stage.operation);
+  }
+
+  return operations.size === 4;
+}
+
 function formatAffectedStage(
-  stage: FinancialAnalysisStageExecutionContext,
+  stage: unknown,
 ): string | null {
-  if (stage.status !== "failed" || !stage.operation) {
+  if (
+    !isStageObject(stage) ||
+    stage.status !== "failed" ||
+    typeof stage.operation !== "string"
+  ) {
     return null;
   }
 
@@ -52,19 +93,44 @@ function formatAffectedStage(
     : label;
 }
 
+function getAffectedStages(stages: unknown): string[] {
+  if (!Array.isArray(stages)) {
+    return [];
+  }
+
+  const affectedStages: string[] = [];
+  const affectedOperations = new Set<string>();
+
+  for (const stage of stages) {
+    if (
+      !isStageObject(stage) ||
+      typeof stage.operation !== "string" ||
+      affectedOperations.has(stage.operation)
+    ) {
+      continue;
+    }
+
+    const affectedStage = formatAffectedStage(stage);
+    if (affectedStage) {
+      affectedOperations.add(stage.operation);
+      affectedStages.push(affectedStage);
+    }
+  }
+
+  return affectedStages;
+}
+
 export function getFinancialAnalysisExecutionBanner(
   execution?: FinancialAnalysisExecutionContext | null,
 ): FinancialAnalysisExecutionBanner | null {
-  if (execution?.overallStatus === "succeeded") {
+  if (
+    execution?.overallStatus === "succeeded" &&
+    hasTrustworthySucceededStages(execution.stages)
+  ) {
     return null;
   }
 
-  const stages = Array.isArray(execution?.stages) ? execution.stages : [];
-  const affectedStages = stages
-    .map((stage) =>
-      stage && typeof stage === "object" ? formatAffectedStage(stage) : null,
-    )
-    .filter((stage): stage is string => stage !== null);
+  const affectedStages = getAffectedStages(execution?.stages);
 
   if (execution?.overallStatus === "degraded") {
     return {
