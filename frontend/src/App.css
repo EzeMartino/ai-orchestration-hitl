@@ -795,6 +795,63 @@ code {
   padding: 0.25rem;
 }
 
+.financialReportSummaryForm {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(124, 151, 178, 0.32);
+  border-radius: 12px;
+  background: rgba(8, 22, 36, 0.48);
+}
+
+.financialReportSummaryForm legend {
+  padding: 0 0.45rem;
+  color: #e8f1f8;
+  font-weight: 700;
+}
+
+.financialReportSummaryForm p {
+  margin: 0 0 0.8rem;
+  color: #b8c8d6;
+  line-height: 1.45;
+}
+
+.financialReportSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.financialReportSummaryGrid label {
+  display: grid;
+  gap: 0.35rem;
+  color: #d9e5ee;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.financialReportSummaryGrid input[aria-invalid="true"] {
+  border-color: #ff8d8d;
+  box-shadow: 0 0 0 2px rgba(255, 98, 98, 0.18);
+}
+
+.financialReportPersisted {
+  margin-top: 0.85rem !important;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(124, 151, 178, 0.22);
+}
+
+@media (max-width: 900px) {
+  .financialReportSummaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .financialReportSummaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .metricsModeToggle button {
   border-radius: 10px;
   background: transparent;

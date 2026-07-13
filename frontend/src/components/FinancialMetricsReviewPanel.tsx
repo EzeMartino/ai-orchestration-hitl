@@ -10,16 +10,21 @@ import type {
   StructuredFinancialMetricInput,
   StructuredFinancialMetricsInput,
   UpdateFinancialMetricsExtractionDraftRequest,
+  ConfirmFinancialMetricsExtractionDraftRequest,
 } from "../types/domain.types";
 import {
   applyCandidateEdit,
   applyMetadataCandidateEdit,
   applyMetadataCandidateRejection,
   applyProposedMetadataEdit,
+  applyReportSummaryToDraft,
+  getDraftReportSummaryForm,
   mapCandidateToStructuredMetric,
   parseFiniteMetricValue,
   validateReviewDraft,
 } from "../utils/financialMetricsReview";
+import { validateFinancialReportSummary } from "../utils/financialReportSummary";
+import type { FinancialReportSummaryFormState } from "../utils/financialReportSummary";
 
 interface FinancialMetricsReviewPanelProps {
   draft?: FinancialMetricsExtractionDraft | null;
@@ -30,7 +35,10 @@ interface FinancialMetricsReviewPanelProps {
     draftId: string,
     request: UpdateFinancialMetricsExtractionDraftRequest
   ) => Promise<FinancialMetricsExtractionDraft | null>;
-  onConfirm: (draftId: string) => Promise<void>;
+  onConfirm: (
+    draftId: string,
+    request: ConfirmFinancialMetricsExtractionDraftRequest,
+  ) => Promise<void>;
   onDiscard: (draftId: string) => Promise<void>;
   onRetry: () => void;
 }
@@ -348,9 +356,13 @@ export function FinancialMetricsReviewPanel({
     currency: "",
     unit: "",
   });
+  const [reportSummary, setReportSummary] = useState<FinancialReportSummaryFormState>(
+    getDraftReportSummaryForm(draft),
+  );
 
   useEffect(() => {
     setWorkingDraft(draft ?? null);
+    setReportSummary(getDraftReportSummaryForm(draft));
     setMetricAdditions([]);
     setMetricAdditionForm({
       name: "",
@@ -366,12 +378,18 @@ export function FinancialMetricsReviewPanel({
     [workingDraft]
   );
   const validation = workingDraft
-    ? validateReviewDraft(workingDraft, { metricAdditionCount: metricAdditions.length })
-    : { canConfirm: false, blockingCandidateIds: [], missingFields: [] };
+    ? validateReviewDraft(workingDraft, {
+        metricAdditionCount: metricAdditions.length,
+        reportSummary: validateFinancialReportSummary(reportSummary),
+      })
+    : { canConfirm: false, blockingCandidateIds: [], missingFields: [], reportSummaryIssues: [] };
   const hasUnresolvedConflicts = (workingDraft?.payload.conflicts ?? [])
     .some((conflict) => workingDraft && !isConflictResolvedLocally(conflict, workingDraft));
   const canConfirm = validation.canConfirm && !hasUnresolvedConflicts;
-  const dirty = isDraftDirty(draft ?? null, workingDraft) || metricAdditions.length > 0;
+  const dirty =
+    isDraftDirty(draft ?? null, workingDraft) ||
+    metricAdditions.length > 0 ||
+    JSON.stringify(getDraftReportSummaryForm(draft)) !== JSON.stringify(reportSummary);
 
   if (isLoading && !workingDraft) {
     return (
@@ -555,9 +573,17 @@ export function FinancialMetricsReviewPanel({
       return null;
     }
 
+    const summaryValidation = validateFinancialReportSummary(reportSummary);
+    if (!summaryValidation.isValid || !summaryValidation.value) {
+      return null;
+    }
+    const draftWithSummary = applyReportSummaryToDraft(
+      workingDraft,
+      summaryValidation.value,
+    );
     const updated = await onUpdate(
       workingDraft.id,
-      createUpdateRequest(workingDraft, metricAdditions)
+      createUpdateRequest(draftWithSummary, metricAdditions)
     );
     if (updated) {
       setWorkingDraft(updated);
@@ -577,7 +603,12 @@ export function FinancialMetricsReviewPanel({
       return;
     }
 
-    await onConfirm(saved.id);
+    const summaryValidation = validateFinancialReportSummary(reportSummary);
+    if (!summaryValidation.isValid || !summaryValidation.value) {
+      return;
+    }
+
+    await onConfirm(saved.id, { reportSummary: summaryValidation.value });
   }
 
   const blockingMessages = [
@@ -586,6 +617,9 @@ export function FinancialMetricsReviewPanel({
       : null,
     validation.missingFields.length > 0
       ? `Campos faltantes: ${validation.missingFields.join(", ")}.`
+      : null,
+    validation.reportSummaryIssues.length > 0
+      ? `Resumen del informe: ${validation.reportSummaryIssues.map((issue) => issue.code).join(", ")}.`
       : null,
   ].filter(Boolean);
   const blockingReason = blockingMessages.length > 0
@@ -633,6 +667,60 @@ export function FinancialMetricsReviewPanel({
         <span>Metadatos: {workingDraft.payload.metadataCandidates?.length ?? 0}</span>
         <span>Estado: {workingDraft.status}</span>
       </div>
+
+      <fieldset className="financialReportSummaryForm financialReportSummaryReview">
+        <legend>Resumen del informe confirmado</legend>
+        {workingDraft.payload.schemaVersion === 1 && (
+          <p role="note">
+            Este borrador v1 no contiene un resumen confiable. Complete los cuatro campos antes de confirmar.
+          </p>
+        )}
+        <div className="financialReportSummaryGrid">
+          <label>
+            Nombre del informe
+            <input
+              value={reportSummary.reportName}
+              onChange={(event) => setReportSummary((current) => ({ ...current, reportName: event.target.value }))}
+              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "reportName")}
+              disabled={isSaving}
+            />
+          </label>
+          <label>
+            Importe total
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={reportSummary.totalAmount}
+              onChange={(event) => setReportSummary((current) => ({ ...current, totalAmount: event.target.value }))}
+              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "totalAmount")}
+              disabled={isSaving}
+            />
+          </label>
+          <label>
+            Cantidad de transacciones
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={reportSummary.transactionCount}
+              onChange={(event) => setReportSummary((current) => ({ ...current, transactionCount: event.target.value }))}
+              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "transactionCount")}
+              disabled={isSaving}
+            />
+          </label>
+          <label>
+            Fecha de envío
+            <input
+              type="datetime-local"
+              value={reportSummary.submittedAt}
+              onChange={(event) => setReportSummary((current) => ({ ...current, submittedAt: event.target.value }))}
+              aria-invalid={validation.reportSummaryIssues.some((issue) => issue.field === "submittedAt")}
+              disabled={isSaving}
+            />
+          </label>
+        </div>
+      </fieldset>
 
       <div className="financialMetricsReviewDocumentFields">
         <h3>Metadatos del documento</h3>

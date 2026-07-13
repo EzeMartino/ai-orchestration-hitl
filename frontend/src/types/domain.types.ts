@@ -247,12 +247,27 @@ export type StructuredFinancialMetricInput = {
   confidence?: number | null;
 };
 
+export type FinancialReportSummaryInput = {
+  reportName?: string | null;
+  totalAmount?: number | null;
+  transactionCount?: number | null;
+  submittedAt?: string | null;
+};
+
+export type FinancialReportSummary = {
+  reportName: string;
+  totalAmount: number;
+  transactionCount: number;
+  submittedAt: string;
+};
+
 export type StructuredFinancialMetricsInput = {
   documentId: string;
   company?: string | null;
   currency?: string | null;
   unit?: string | null;
   metrics: StructuredFinancialMetricInput[];
+  reportSummary?: FinancialReportSummaryInput | null;
 };
 
 export type StructuredFinancialMetricsCsvInput = {
@@ -261,6 +276,7 @@ export type StructuredFinancialMetricsCsvInput = {
   currency?: string | null;
   unit?: string | null;
   csv: string;
+  reportSummary?: FinancialReportSummaryInput | null;
 };
 
 export type StructuredFinancialMetricsFileMetadata = {
@@ -268,6 +284,7 @@ export type StructuredFinancialMetricsFileMetadata = {
   company?: string | null;
   currency?: string | null;
   unit?: string | null;
+  reportSummary?: FinancialReportSummaryInput | null;
 };
 
 export type FinancialMetricsValidationIssue = {
@@ -424,6 +441,10 @@ export type UpdateFinancialMetricsExtractionDraftRequest = {
   metadataAdditions?: FinancialDocumentMetadataCandidateAddition[];
 };
 
+export type ConfirmFinancialMetricsExtractionDraftRequest = {
+  reportSummary?: FinancialReportSummaryInput | null;
+};
+
 export type StructuredFinancialMetricContext = {
   name: string;
   period: string;
@@ -467,11 +488,13 @@ export type SaveFinancialMetricsResponse = {
   fileSizeBytes?: number;
   outcome?: FinancialMetricsFileOutcome;
   reviewDraft?: FinancialMetricsExtractionDraft | null;
+  reportSummary?: FinancialReportSummary | null;
 };
 
 export type GetFinancialMetricsResponse = {
   sessionId: string;
   context?: StructuredFinancialMetricsContext | null;
+  reportSummary?: FinancialReportSummary | null;
 };
 
 export type FileUploadErrorResponse = {
