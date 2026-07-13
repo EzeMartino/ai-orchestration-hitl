@@ -47,6 +47,46 @@ public sealed class ProductionLikeWorkflowE2ETests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
+    public async Task ProductionLikeWorkflow_DegradedFinancialAnalysis_ShouldPersistReviewStateAcrossApiReload()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(degradedRatios: true),
+            new FakeProductionCnvRegulationMcpClient(noEvidence: true));
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        var startResult = await controller.StartSession(session.Id, CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        dbContext.ChangeTracker.Clear();
+        var reloadedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        reloadedSession.Status.Should().Be(AnalysisSessionStatus.AwaitingHumanApproval);
+        using (var persistedContext = JsonDocument.Parse(reloadedSession.ContextJson))
+        {
+            AssertDegradedExecutionContext(persistedContext.RootElement);
+        }
+
+        var getResult = await controller.GetSession(session.Id, CancellationToken.None);
+        var payload = getResult.Should().BeOfType<OkObjectResult>().Which.Value;
+        using var apiDocument = JsonDocument.Parse(JsonSerializer.Serialize(payload, JsonOptions));
+        var apiContextJson = apiDocument.RootElement.GetProperty("contextJson").GetString();
+        apiContextJson.Should().NotBeNullOrWhiteSpace();
+        using var apiContext = JsonDocument.Parse(apiContextJson!);
+        AssertDegradedExecutionContext(apiContext.RootElement);
+    }
+
+    [Fact]
     public async Task ProductionLikeWorkflow_Should_preserve_context_and_complete_after_human_approval()
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
@@ -600,6 +640,10 @@ public sealed class ProductionLikeWorkflowE2ETests
         financialAnalysis.GetProperty("thresholdProfile").GetString().Should().NotBeNullOrWhiteSpace();
         financialAnalysis.GetProperty("thresholdsUsed").GetArrayLength().Should().BeGreaterThan(0);
         financialAnalysis.GetProperty("aiReview").GetProperty("usedFallback").GetBoolean().Should().BeTrue();
+        var execution = financialAnalysis.GetProperty("execution");
+        execution.GetProperty("overallStatus").GetString().Should().Be("succeeded");
+        execution.GetProperty("stages").EnumerateArray().Should().HaveCount(4)
+            .And.OnlyContain(stage => stage.GetProperty("status").GetString() == "succeeded");
 
         var riskSignals = financialAnalysis.GetProperty("riskSignals").EnumerateArray().ToArray();
         riskSignals.Should().NotBeEmpty();
@@ -640,6 +684,35 @@ public sealed class ProductionLikeWorkflowE2ETests
         toolPlan.GetProperty("executedCalls").EnumerateArray()
             .Should()
             .OnlyContain(call => call.GetProperty("status").GetString() == "SkippedAlreadySatisfied");
+    }
+
+    private static void AssertDegradedExecutionContext(JsonElement root)
+    {
+        var anomaly = root.GetProperty("anomaly");
+        anomaly.GetProperty("detected").GetBoolean().Should().BeFalse();
+        anomaly.GetProperty("assessmentStatus").GetString().Should().Be("inconclusive");
+        anomaly.GetProperty("requiresHumanReview").GetBoolean().Should().BeTrue();
+
+        var financialAnalysis = root.GetProperty("financialAnalysis");
+        financialAnalysis.GetProperty("riskSignals").GetArrayLength().Should().Be(0);
+        var execution = financialAnalysis.GetProperty("execution");
+        execution.GetProperty("overallStatus").GetString().Should().Be("degraded");
+        var stages = execution.GetProperty("stages").EnumerateArray().ToArray();
+        stages.Should().HaveCount(4);
+        var ratios = stages.Single(stage =>
+            stage.GetProperty("operation").GetString() == FinancialAnalysisOperations.Ratios);
+        ratios.GetProperty("status").GetString().Should().Be("failed");
+        ratios.GetProperty("failureCode").GetString()
+            .Should().Be(FinancialAnalysisFailureCodes.PythonInvocationFailed);
+        ratios.GetProperty("durationMilliseconds").GetInt64().Should().BeGreaterThanOrEqualTo(0);
+        stages.Single(stage =>
+                stage.GetProperty("operation").GetString() == FinancialAnalysisOperations.Signals)
+            .GetProperty("status").GetString().Should().Be("succeeded");
+
+        var compliance = root.GetProperty("compliance");
+        compliance.GetProperty("riskDetected").GetBoolean().Should().BeFalse();
+        compliance.GetProperty("evidence").GetArrayLength().Should().Be(0);
+        execution.GetRawText().ToLowerInvariant().Should().NotContain("exception");
     }
 
     private static void AssertPlanDrivenContext(JsonElement root)
@@ -889,13 +962,22 @@ public sealed class ProductionLikeWorkflowE2ETests
     private sealed class FakeProductionPythonFinancialAnalysisService
         : IPythonFinancialAnalysisService
     {
+        private readonly bool _degradedRatios;
+
+        public FakeProductionPythonFinancialAnalysisService(bool degradedRatios = false)
+        {
+            _degradedRatios = degradedRatios;
+        }
+
         public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
             ComputeFinancialRatiosRequest request,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(new ComputeFinancialRatiosResponse(
+            var response = new ComputeFinancialRatiosResponse(
                 Engine: "Fake Python/Pandas",
-                Ratios:
+                Ratios: _degradedRatios
+                    ? []
+                    :
                 [
                     new FinancialRatio(
                         Name: "current_ratio",
@@ -917,7 +999,14 @@ public sealed class ProductionLikeWorkflowE2ETests
                     )
                 ],
                 Warnings: []
-            ));
+            )
+            {
+                Execution = _degradedRatios
+                    ? FailedExecution(FinancialAnalysisOperations.Ratios)
+                    : SucceededExecution(FinancialAnalysisOperations.Ratios)
+            };
+
+            return Task.FromResult(response);
         }
 
         public Task<ComparePeriodsResponse> ComparePeriodsAsync(
@@ -941,7 +1030,10 @@ public sealed class ProductionLikeWorkflowE2ETests
                     )
                 ],
                 Warnings: []
-            ));
+            )
+            {
+                Execution = SucceededExecution(FinancialAnalysisOperations.Comparisons)
+            });
         }
 
         public Task<DetectFinancialRiskSignalsResponse> DetectFinancialRiskSignalsAsync(
@@ -950,6 +1042,23 @@ public sealed class ProductionLikeWorkflowE2ETests
         {
             var currentRatioThreshold = FindThreshold(request, "LOW_CURRENT_RATIO");
             var leverageThreshold = FindThreshold(request, "HIGH_NET_DEBT_TO_EBITDA");
+
+            if (_degradedRatios)
+            {
+                return Task.FromResult(new DetectFinancialRiskSignalsResponse(
+                    Engine: "Fake Python/Pandas",
+                    Signals: [],
+                    Result: new FinancialAnalysisToolResult(
+                        HasRiskSignals: false,
+                        RiskLevel: "Low",
+                        Summary: "No financial risk signals were detected.",
+                        Engine: "Fake Python/Pandas",
+                        Evidence: [],
+                        Warnings: []))
+                {
+                    Execution = SucceededExecution(FinancialAnalysisOperations.Signals)
+                });
+            }
 
             return Task.FromResult(new DetectFinancialRiskSignalsResponse(
                 Engine: "Fake Python/Pandas",
@@ -1010,13 +1119,33 @@ public sealed class ProductionLikeWorkflowE2ETests
                     Evidence: [],
                     Warnings: []
                 )
-            ));
+            )
+            {
+                Execution = SucceededExecution(FinancialAnalysisOperations.Signals)
+            });
         }
 
         public Task<SummarizeQuantitativeEvidenceResponse> SummarizeQuantitativeEvidenceAsync(
             SummarizeQuantitativeEvidenceRequest request,
             CancellationToken cancellationToken)
         {
+            if (_degradedRatios)
+            {
+                return Task.FromResult(new SummarizeQuantitativeEvidenceResponse(
+                    Engine: "Fake Python/Pandas",
+                    Narrative: "No conclusive quantitative summary was produced.",
+                    Result: new FinancialAnalysisToolResult(
+                        HasRiskSignals: false,
+                        RiskLevel: "Low",
+                        Summary: "No conclusive quantitative evidence.",
+                        Engine: "Fake Python/Pandas",
+                        Evidence: [],
+                        Warnings: []))
+                {
+                    Execution = SucceededExecution(FinancialAnalysisOperations.Summary)
+                });
+            }
+
             return Task.FromResult(new SummarizeQuantitativeEvidenceResponse(
                 Engine: "Fake Python/Pandas",
                 Narrative: "High-severity quantitative evidence was identified from session structured metrics.",
@@ -1038,8 +1167,21 @@ public sealed class ProductionLikeWorkflowE2ETests
                     ],
                     Warnings: []
                 )
-            ));
+            )
+            {
+                Execution = SucceededExecution(FinancialAnalysisOperations.Summary)
+            });
         }
+
+        private static FinancialAnalysisStageExecution SucceededExecution(string operation) =>
+            new(operation, FinancialAnalysisExecutionStatus.Succeeded, 1);
+
+        private static FinancialAnalysisStageExecution FailedExecution(string operation) =>
+            new(
+                operation,
+                FinancialAnalysisExecutionStatus.Failed,
+                1,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed);
 
         private static FinancialRiskThreshold FindThreshold(
             DetectFinancialRiskSignalsRequest request,
@@ -1053,6 +1195,13 @@ public sealed class ProductionLikeWorkflowE2ETests
 
     private sealed class FakeProductionCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
+        private readonly bool _noEvidence;
+
+        public FakeProductionCnvRegulationMcpClient(bool noEvidence = false)
+        {
+            _noEvidence = noEvidence;
+        }
+
         public List<CnvRegulationSearchRequest> ReceivedRequests { get; } = [];
 
         public bool IsConnected => true;
@@ -1065,6 +1214,14 @@ public sealed class ProductionLikeWorkflowE2ETests
             CancellationToken cancellationToken)
         {
             ReceivedRequests.Add(request);
+
+            if (_noEvidence)
+            {
+                return Task.FromResult(new CnvRegulationSearchResponse(
+                    Query: request.Query,
+                    Results: [],
+                    Warnings: []));
+            }
 
             return Task.FromResult(new CnvRegulationSearchResponse(
                 Query: request.Query,

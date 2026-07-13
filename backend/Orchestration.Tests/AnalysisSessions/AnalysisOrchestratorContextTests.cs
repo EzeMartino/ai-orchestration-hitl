@@ -488,7 +488,73 @@ public class AnalysisOrchestratorContextTests
         context.Should().NotBeNull();
         context!.ThresholdProfile.Should().BeNull();
         context.ThresholdsUsed.Should().NotBeNull().And.BeEmpty();
+        context.Execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.LegacyUnknown);
+        context.Execution.Stages.Should().BeEmpty();
         context.DocumentId.Should().Be("old-session");
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_persist_inconclusive_degraded_execution_evidence()
+    {
+        var execution = FinancialAnalysisExecution.FromStages(
+        [
+            new FinancialAnalysisStageExecution(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisExecutionStatus.Failed,
+                17,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed),
+            new FinancialAnalysisStageExecution(
+                FinancialAnalysisOperations.Comparisons,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                8),
+            new FinancialAnalysisStageExecution(
+                FinancialAnalysisOperations.Signals,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                5),
+            new FinancialAnalysisStageExecution(
+                FinancialAnalysisOperations.Summary,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                3)
+        ]);
+        var financialContext = new FinancialAnalysisContext(
+            Engine: "Test financial engine",
+            DocumentId: "degraded-document",
+            Company: "Degraded Co",
+            Ratios: [],
+            Comparisons: [],
+            RiskSignals: [],
+            RiskEvidence: [],
+            Warnings: [],
+            Limitations: [])
+        {
+            Execution = execution
+        };
+        var plannerResult = CreatePlannerResult(
+            ToolPlanAuditResult.Empty,
+            financialContext,
+            hasAnomaly: false,
+            requiresHumanReview: true);
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        var anomaly = document.RootElement.GetProperty("anomaly");
+        anomaly.GetProperty("detected").GetBoolean().Should().BeFalse();
+        anomaly.GetProperty("assessmentStatus").GetString().Should().Be("inconclusive");
+        anomaly.GetProperty("requiresHumanReview").GetBoolean().Should().BeTrue();
+
+        var persistedExecution = document.RootElement
+            .GetProperty("financialAnalysis")
+            .GetProperty("execution");
+        persistedExecution.GetProperty("overallStatus").GetString().Should().Be("degraded");
+        var ratioStage = persistedExecution.GetProperty("stages")
+            .EnumerateArray()
+            .Single(stage => stage.GetProperty("operation").GetString() == FinancialAnalysisOperations.Ratios);
+        ratioStage.GetProperty("status").GetString().Should().Be("failed");
+        ratioStage.GetProperty("durationMilliseconds").GetInt64().Should().Be(17);
+        ratioStage.GetProperty("failureCode").GetString()
+            .Should().Be(FinancialAnalysisFailureCodes.PythonInvocationFailed);
+        persistedExecution.GetRawText().ToLowerInvariant().Should().NotContain("exception");
     }
 
     [Fact]
@@ -575,18 +641,21 @@ public class AnalysisOrchestratorContextTests
 
     private static PlannerAgentResult CreatePlannerResult(
         ToolPlanAuditResult toolPlan,
-        FinancialAnalysisContext? financialAnalysisContext = null)
+        FinancialAnalysisContext? financialAnalysisContext = null,
+        bool hasAnomaly = true,
+        bool requiresHumanReview = false)
     {
         return new PlannerAgentResult(
             RequiresHumanApproval: true,
             Summary: "Human approval required.",
             DataResult: new DataAgentResult(
-                HasAnomaly: true,
-                Severity: "High",
+                HasAnomaly: hasAnomaly,
+                Severity: hasAnomaly ? "High" : "Unknown",
                 Summary: "Anomaly detected.",
                 Engine: "TestDataEngine",
                 Evidence: [],
-                FinancialAnalysis: financialAnalysisContext
+                FinancialAnalysis: financialAnalysisContext,
+                RequiresHumanReview: requiresHumanReview
             ),
             LegalResult: new LegalAgentResult(
                 HasComplianceRisk: true,
