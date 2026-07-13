@@ -206,6 +206,34 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
         }
     }
 
+    [Fact]
+    public async Task SignalWithoutOptionalEvidence_RemainsSuccessful()
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            """
+            {
+              "signals": [
+                {
+                  "name": "LOW_CURRENT_RATIO",
+                  "severity": "High",
+                  "period": "2025E",
+                  "summary": "Risk"
+                }
+              ]
+            }
+            """);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var response = await service.DetectFinancialRiskSignalsAsync(
+            new DetectFinancialRiskSignalsRequest([], [], [], SessionId: SessionId),
+            CancellationToken.None);
+
+        response.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        response.Signals.Should().ContainSingle()
+            .Which.Evidence.Should().BeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task OperationAsync_PreCancelledToken_DoesNotInvokePython(

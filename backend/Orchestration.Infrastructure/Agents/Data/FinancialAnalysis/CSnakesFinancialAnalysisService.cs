@@ -303,7 +303,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         using var document = JsonDocument.Parse(responseJson);
         var root = document.RootElement;
         var narrative = GetRequiredString(root, "summary");
-        var evidence = MapEvidence(root);
+        var evidence = MapEvidence(root, required: true);
         var severities = GetRequiredArray(root, "evidence")
             .Select(item => GetString(item, "severity", defaultValue: "Info"));
         var riskLevel = ResolveRiskLevel(severities);
@@ -323,11 +323,16 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         );
     }
 
-    private static List<RiskEvidenceItem> MapEvidence(JsonElement element)
+    private static List<RiskEvidenceItem> MapEvidence(
+        JsonElement element,
+        bool required = false)
     {
         var evidence = new List<RiskEvidenceItem>();
+        var items = required
+            ? GetRequiredArray(element, "evidence")
+            : GetOptionalArray(element, "evidence");
 
-        foreach (var item in GetRequiredArray(element, "evidence"))
+        foreach (var item in items)
         {
             evidence.Add(new RiskEvidenceItem(
                 MetricName: GetRequiredString(item, "metricName"),
@@ -471,6 +476,20 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         }
 
         return property.EnumerateArray().ToArray();
+    }
+
+    private static IReadOnlyList<JsonElement> GetOptionalArray(
+        JsonElement element,
+        string propertyName)
+    {
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.Array)
+        {
+            return property.EnumerateArray().ToArray();
+        }
+
+        return [];
     }
 
     private static IReadOnlyList<string> GetStringArray(
