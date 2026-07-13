@@ -167,21 +167,56 @@ Reference screenshot:
 
 ![Financial Risk Evidence from Session Context](screenshots/financial-risk-evidence-session-context.png)
 
-### Fail-Closed Degraded Path Check
+### Fail-Closed Degraded Path Checks
 
-Use the deterministic production-like E2E scenario to simulate a failed ratio stage while the signal stage succeeds with no business-risk evidence:
+There is no production runtime configuration switch that injects a failed financial-analysis stage. The degraded path is reproducible through the deterministic test fixture and frontend presenter tests; do not add failure injection to a demo deployment.
+
+#### Backend Workflow and Persistence
+
+Use the production-like E2E fixture to simulate a failed ratio stage while the signal stage succeeds with no business-risk evidence:
 
 ```bash
 dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~ProductionLikeWorkflow_DegradedFinancialAnalysis_ShouldPersistReviewStateAcrossApiReload" --verbosity minimal
 ```
 
+This backend test verifies:
+
+- The session pauses at `AwaitingHumanApproval` with `anomaly.detected=false`, an inconclusive assessment, and human review required.
+- Persisted context and the API-reloaded context both retain `financialAnalysis.execution`, its `degraded` aggregate status, and all stage records.
+- The failed ratio stage contains its safe operation, `failed` status, duration, and `PYTHON_INVOCATION_FAILED`; the successful signal stage remains explicit.
+- Persisted execution metadata contains no exception text.
+
+This test does not launch the dashboard or inspect the Activity Feed.
+
+#### Activity Privacy
+
+Run the focused workflow test that injects sensitive warning, metric, and exception-like details into a failed signal stage:
+
+```bash
+dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~DataAgentFinancialAnalysisWorkflowTests.AnalyzeAsync_Should_fail_closed_when_signal_stage_fails" --verbosity minimal
+```
+
 Expected result:
 
-- Execution status is `degraded`, and the failed stage exposes only its operation and stable failure code.
-- The session pauses at `AwaitingHumanApproval` even though no anomaly or legal risk was detected.
-- The dashboard presents the incomplete-analysis banner and requires human review; retained valid evidence remains visible.
-- Reloading the session preserves `financialAnalysis.execution`, including its aggregate status and stage records.
-- No raw payload, metric value, or exception text appears in the dashboard or Activity Feed.
+- The Activity Feed event is correlated to the session and contains the safe operation and stable failure code.
+- Sensitive adapter text, exception-like failure text, metric names, and metric values are excluded from the event message.
+- Valid financial evidence displayed elsewhere is not hidden by this technical-message privacy rule.
+
+#### Frontend Presenter
+
+Run the execution-banner presenter tests:
+
+```bash
+node --test frontend/tests/financialAnalysisExecution.test.ts
+```
+
+Expected result:
+
+- A complete `succeeded` execution has no warning banner.
+- A `degraded` execution produces the human-review warning with allowlisted stage labels and stable failure codes.
+- Unknown operations, raw failure text, and duration are not rendered as technical failure details.
+
+For a live successful session, reload it, open `Financial Risk Evidence`, confirm no degraded/failed banner is present, and confirm valid metric evidence remains visible. A live degraded dashboard requires a test fixture or test host that returns the persisted degraded context; the standard demo configuration cannot inject that failure. Use the deterministic backend fixture and frontend presenter tests above for the reproducible degraded-path demonstration.
 
 ## Review DataAgent AI Review
 

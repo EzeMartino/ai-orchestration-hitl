@@ -691,7 +691,7 @@ Technical execution status is independent from calculated business risk. The wor
 
 The stable technical failure codes are `PYTHON_INVOCATION_FAILED` for a failed Python call, `PYTHON_RESPONSE_INVALID` for malformed or structurally invalid Python output, and `FINANCIAL_ANALYSIS_UNEXPECTED_FAILURE` for an otherwise unclassified failure caught at the workflow boundary.
 
-Structured operation logs contain `SessionId`, operation, duration, execution status, and failure code. They do not log serialized requests, Python responses, metric values, or document content. The dashboard and Activity Feed expose only curated status, affected operation labels, and stable failure codes; they never expose raw payloads, metric values, or exception text.
+Structured operation logs contain `SessionId`, operation, duration, execution status, and failure code. They do not log serialized requests, Python responses, metric values, or document content. The technical execution banner and financial-analysis Activity Feed events expose only curated status, affected operation labels, and stable failure codes; they never use raw payloads, metric values as failure detail, or exception text. This safety boundary does not hide valid financial evidence: successfully calculated metrics and retained partial evidence remain visible in `Financial Risk Evidence`.
 
 Warnings returned by a successful operation describe domain or data-quality conditions. Warnings alone are not a technical failure and do not change a successful execution status. A successful analysis with no risk signals remains a legitimate Low-risk result; a technical failure is never represented as Low risk.
 
