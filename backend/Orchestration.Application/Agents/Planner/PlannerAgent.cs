@@ -555,6 +555,7 @@ public sealed class PlannerAgent : IPlannerAgent
             ReportName: report.ReportName,
             TotalAmount: report.TotalAmount,
             TransactionCount: report.TransactionCount,
+            SubmittedAt: report.SubmittedAt,
             DataSummary: dataResult.Summary,
             DataSeverity: dataResult.Severity,
             DataEngine: dataResult.Engine,

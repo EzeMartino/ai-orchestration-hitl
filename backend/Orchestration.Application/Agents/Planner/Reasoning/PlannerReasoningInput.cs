@@ -5,6 +5,7 @@ public sealed record PlannerReasoningInput(
     string ReportName,
     decimal TotalAmount,
     int TransactionCount,
+    DateTimeOffset SubmittedAt,
     string DataSummary,
     string DataSeverity,
     string DataEngine,

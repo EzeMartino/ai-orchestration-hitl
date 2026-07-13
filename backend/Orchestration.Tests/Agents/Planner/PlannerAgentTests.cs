@@ -54,7 +54,8 @@ public class PlannerAgentTests
             report.SessionId,
             report.ReportName,
             report.TotalAmount,
-            report.TransactionCount
+            report.TransactionCount,
+            report.SubmittedAt
         });
         proposalService.Input.Should().BeEquivalentTo(new
         {

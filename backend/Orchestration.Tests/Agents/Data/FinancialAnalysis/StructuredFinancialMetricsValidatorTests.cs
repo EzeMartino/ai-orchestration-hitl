@@ -80,6 +80,89 @@ public sealed class StructuredFinancialMetricsValidatorTests
     }
 
     [Fact]
+    public void Structured_input_json_Malformed_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        var input = JsonSerializer.Deserialize<StructuredFinancialMetricsInput>(
+            """
+            {
+              "documentId": "json-input",
+              "metrics": [],
+              "reportSummary": {
+                "reportName": "report.json",
+                "totalAmount": 10,
+                "transactionCount": 1,
+                "submittedAt": "not-an-iso-timestamp"
+              }
+            }
+            """,
+            JsonOptions);
+
+        var result = FinancialReportSummaryValidator.Validate(input!.ReportSummary);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Code.Should().Be("SUBMITTED_AT_INVALID");
+    }
+
+    [Fact]
+    public void Csv_input_json_Malformed_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        var input = JsonSerializer.Deserialize<StructuredFinancialMetricsCsvInput>(
+            """
+            {
+              "documentId": "csv-input",
+              "csv": "name,period,value\nRevenue,2024A,10",
+              "reportSummary": {
+                "reportName": "report.csv",
+                "totalAmount": 10,
+                "transactionCount": 1,
+                "submittedAt": "not-an-iso-timestamp"
+              }
+            }
+            """,
+            JsonOptions);
+
+        var result = FinancialReportSummaryValidator.Validate(input!.ReportSummary);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Code.Should().Be("SUBMITTED_AT_INVALID");
+    }
+
+    [Fact]
+    public void Summary_json_Valid_timestamp_Should_preserve_exact_offset()
+    {
+        var input = JsonSerializer.Deserialize<FinancialReportSummaryInput>(
+            """
+            {
+              "reportName": "report.json",
+              "totalAmount": 10,
+              "transactionCount": 1,
+              "submittedAt": "2026-07-12T18:30:00-03:00"
+            }
+            """,
+            JsonOptions);
+
+        input!.SubmittedAt.Should().Be(new DateTimeOffset(
+            2026, 7, 12, 18, 30, 0, TimeSpan.FromHours(-3)));
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"submittedAt\":null}")]
+    public void Summary_json_Missing_or_null_timestamp_Should_return_required_issue(
+        string json)
+    {
+        var input = JsonSerializer.Deserialize<FinancialReportSummaryInput>(
+            json,
+            JsonOptions);
+
+        input!.SubmittedAt.Should().BeNull();
+        FinancialReportSummaryValidator.Validate(input).Errors
+            .Should().Contain(issue => issue.Code == "SUBMITTED_AT_REQUIRED");
+    }
+
+    [Fact]
     public void Validate_Invalid_report_summary_Should_map_summary_issues()
     {
         var input = CreateInput() with

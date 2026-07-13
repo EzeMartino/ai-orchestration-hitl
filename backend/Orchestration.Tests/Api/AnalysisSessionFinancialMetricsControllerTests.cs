@@ -383,6 +383,42 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     }
 
     [Fact]
+    public async Task SaveFinancialMetricsFile_Malformed_json_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.json",
+                """
+                {
+                  "documentId": "json-file-input",
+                  "reportSummary": {
+                    "reportName": "report.json",
+                    "totalAmount": 10,
+                    "transactionCount": 1,
+                    "submittedAt": "not-an-iso-timestamp"
+                  },
+                  "metrics": [{ "name": "Revenue", "period": "2024A", "value": 10 }]
+                }
+                """),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
+    }
+
+    [Fact]
     public async Task SaveFinancialMetricsFile_Should_use_form_metadata_as_json_fallback()
     {
         await using var dbContext = CreateDbContext();
@@ -872,6 +908,36 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         csvParser.LastInput.Should().NotBeNull();
         csvParser.LastInput!.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
         session.ContextJson.Should().Contain("structuredFinancialMetrics");
+    }
+
+    [Fact]
+    public async Task SaveFinancialMetricsFile_Malformed_form_summary_timestamp_Should_return_stable_invalid_issue()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var controller = CreateController(dbContext);
+
+        var result = await controller.SaveFinancialMetricsFile(
+            session.Id,
+            CreateFileUploadRequest(
+                "metrics.csv",
+                """
+                name,period,value
+                Revenue,2024A,10
+                """,
+                documentId: "csv-file-input",
+                submittedAt: "not-an-iso-timestamp"),
+            CancellationToken.None);
+
+        var response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<SaveFinancialMetricsFileResponse>()
+            .Subject;
+        response.IsValid.Should().BeFalse();
+        response.Errors.Should().ContainSingle(issue =>
+            issue.Code == "SUBMITTED_AT_INVALID");
+        session.ContextJson.Should().Be("{}");
     }
 
     [Fact]
@@ -1601,10 +1667,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId = null,
         string? company = null,
         string? currency = null,
-        string? unit = null)
+        string? unit = null,
+        string? submittedAt = null)
     {
         var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
-        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+        return CreateFileUploadRequest(
+            fileName, stream, documentId, company, currency, unit, submittedAt);
     }
 
     private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
@@ -1613,10 +1681,12 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId = null,
         string? company = null,
         string? currency = null,
-        string? unit = null)
+        string? unit = null,
+        string? submittedAt = null)
     {
         var stream = new MemoryStream(content);
-        return CreateFileUploadRequest(fileName, stream, documentId, company, currency, unit);
+        return CreateFileUploadRequest(
+            fileName, stream, documentId, company, currency, unit, submittedAt);
     }
 
     private static StructuredFinancialMetricsFileUploadRequest CreateFileUploadRequest(
@@ -1625,7 +1695,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string? documentId,
         string? company,
         string? currency,
-        string? unit)
+        string? unit,
+        string? submittedAt)
     {
         var file = new FormFile(stream, 0, stream.Length, "file", fileName);
 
@@ -1639,7 +1710,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             ReportName = ApiReportSummaryInput.ReportName,
             TotalAmount = ApiReportSummaryInput.TotalAmount,
             TransactionCount = ApiReportSummaryInput.TransactionCount,
-            SubmittedAt = ApiReportSummaryInput.SubmittedAt
+            SubmittedAt = submittedAt ??
+                ApiReportSummaryInput.SubmittedAt!.Value.ToString("O")
         };
     }
 

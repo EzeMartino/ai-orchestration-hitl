@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -816,7 +817,23 @@ public class AnalysisSessionsController(
             request.ReportName,
             request.TotalAmount,
             request.TransactionCount,
-            request.SubmittedAt);
+            ParseSubmittedAt(request.SubmittedAt));
+    }
+
+    private static DateTimeOffset? ParseSubmittedAt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind,
+            out var submittedAt)
+            ? submittedAt
+            : DateTimeOffset.MinValue;
     }
 
     private static SaveFinancialMetricsFileResponse CreateFileResponse(
@@ -982,7 +999,7 @@ public sealed class StructuredFinancialMetricsFileUploadRequest
 
     public int? TransactionCount { get; init; }
 
-    public DateTimeOffset? SubmittedAt { get; init; }
+    public string? SubmittedAt { get; init; }
 }
 
 public sealed record SaveFinancialMetricsFileResponse(

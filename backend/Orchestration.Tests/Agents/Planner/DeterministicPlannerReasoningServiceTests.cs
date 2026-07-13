@@ -16,6 +16,8 @@ public class DeterministicPlannerReasoningServiceTests
                 ReportName: "financial-report",
                 TotalAmount: 125000m,
                 TransactionCount: 42,
+                SubmittedAt: new DateTimeOffset(
+                    2026, 7, 12, 18, 30, 0, TimeSpan.FromHours(-3)),
                 DataSummary: "Anomaly detected.",
                 DataSeverity: "High",
                 DataEngine: "TestDataEngine",
