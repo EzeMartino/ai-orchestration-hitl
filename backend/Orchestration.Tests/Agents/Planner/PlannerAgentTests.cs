@@ -18,6 +18,55 @@ namespace Orchestration.Tests.Agents.Planner;
 public class PlannerAgentTests
 {
     [Fact]
+    public async Task RunAsync_PersistedReport_ShouldPropagateExactValuesToEveryConsumer()
+    {
+        var financialAnalysis = CreateFinancialAnalysisContext();
+        var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: true) with
+        {
+            FinancialAnalysis = financialAnalysis
+        });
+        var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
+        var reasoningService = new FakePlannerReasoningService();
+        var proposalService = new FakeToolPlanProposalService();
+        var plannerAgent = new PlannerAgent(
+            dataAgent,
+            legalAgent,
+            new FakeActivityEventPublisher(),
+            reasoningService,
+            proposalService,
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions());
+        var report = TestFinancialReport.CreateContext();
+
+        await plannerAgent.RunAsync(report, CancellationToken.None);
+
+        dataAgent.ReceivedReport.Should().BeSameAs(report);
+        legalAgent.ReceivedReport.Should().Be(report with
+        {
+            FinancialAnalysis = financialAnalysis
+        });
+        reasoningService.Input.Should().BeEquivalentTo(new
+        {
+            report.SessionId,
+            report.ReportName,
+            report.TotalAmount,
+            report.TransactionCount
+        });
+        proposalService.Input.Should().BeEquivalentTo(new
+        {
+            report.SessionId,
+            report.ReportName,
+            report.TotalAmount,
+            report.TransactionCount
+        });
+        legalAgent.ReceivedReport!.SubmittedAt.Should().Be(report.SubmittedAt);
+    }
+
+    [Fact]
     public async Task RunAsync_Should_call_reasoning_service()
     {
         var reasoningService = new FakePlannerReasoningService();
@@ -36,7 +85,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -68,7 +117,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -97,7 +146,7 @@ public class PlannerAgentTests
         );
 
         await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -129,7 +178,7 @@ public class PlannerAgentTests
         );
 
         await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -167,7 +216,7 @@ public class PlannerAgentTests
         );
 
         await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -223,7 +272,7 @@ public class PlannerAgentTests
         );
 
         await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -253,7 +302,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -291,7 +340,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -323,7 +372,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -368,7 +417,7 @@ public class PlannerAgentTests
         );
 
         await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -416,7 +465,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -490,7 +539,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -531,7 +580,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -599,7 +648,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -666,7 +715,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -718,7 +767,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -758,7 +807,7 @@ public class PlannerAgentTests
         );
 
         var result = await plannerAgent.RunAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateContext(),
             CancellationToken.None
         );
 
@@ -939,6 +988,7 @@ public class PlannerAgentTests
         private readonly DataAgentResult _result;
 
         public bool WasCalled { get; private set; }
+        public FinancialReportContext? ReceivedReport { get; private set; }
 
         public FakeDataAgent(DataAgentResult result)
         {
@@ -950,6 +1000,7 @@ public class PlannerAgentTests
             CancellationToken cancellationToken)
         {
             WasCalled = true;
+            ReceivedReport = report;
 
             return Task.FromResult(_result);
         }
@@ -1006,6 +1057,7 @@ public class PlannerAgentTests
     private sealed class FakeToolPlanProposalService : IToolPlanProposalService
     {
         private readonly ToolPlan _result;
+        public ToolPlanProposalInput? Input { get; private set; }
 
         public FakeToolPlanProposalService(
             ToolPlan? result = null)
@@ -1017,6 +1069,7 @@ public class PlannerAgentTests
             ToolPlanProposalInput input,
             CancellationToken cancellationToken)
         {
+            Input = input;
             return Task.FromResult(_result);
         }
     }
@@ -1150,5 +1203,20 @@ public class PlannerAgentTests
             Model: null,
             FailureReason: null
         );
+    }
+
+    private static FinancialAnalysisContext CreateFinancialAnalysisContext()
+    {
+        return new FinancialAnalysisContext(
+            Engine: "Test financial engine",
+            DocumentId: "financial-doc",
+            Company: "Financial Co",
+            Ratios: [],
+            Comparisons: [],
+            RiskSignals: [],
+            RiskEvidence: [],
+            Warnings: [],
+            Limitations: [],
+            MetricsInputSource: FinancialMetricsInputSources.SessionContext);
     }
 }

@@ -17,6 +17,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.Extraction;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Application.Agents.Legal.Cnv;
@@ -345,13 +346,16 @@ public sealed class ProductionLikeWorkflowE2ETests
             dbContext,
             new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
             activityPublisher,
-            planner
+            planner,
+            new FinancialReportContextResolver()
         );
 
         var controller = new AnalysisSessionsController(
             dbContext,
             orchestrator,
-            new AnalysisSessionStartPreflightValidator(Options.Create(dataAgentOptions)),
+            new AnalysisSessionStartPreflightValidator(
+                Options.Create(dataAgentOptions),
+                new FinancialReportContextResolver()),
             activityPublisher,
             metricsSessionService,
             new StructuredFinancialMetricsCsvParser(),

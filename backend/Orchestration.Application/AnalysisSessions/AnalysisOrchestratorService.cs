@@ -7,6 +7,7 @@ using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Shared;
 using System.Text.Json.Nodes;
 
 namespace Orchestration.Application.AnalysisSessions
@@ -17,17 +18,20 @@ namespace Orchestration.Application.AnalysisSessions
         private readonly AnalysisSessionWorkflowService _workflow;
         private readonly IActivityEventPublisher _activityPublisher;
         private readonly IPlannerAgent _plannerAgent;
+        private readonly IFinancialReportContextResolver _reportContextResolver;
 
         public AnalysisOrchestratorService(
             IOrchestrationDbContext dbContext,
             AnalysisSessionWorkflowService workflow,
             IActivityEventPublisher activityPublisher,
-            IPlannerAgent plannerAgent)
+            IPlannerAgent plannerAgent,
+            IFinancialReportContextResolver reportContextResolver)
         {
             _dbContext = dbContext;
             _workflow = workflow;
             _activityPublisher = activityPublisher;
             _plannerAgent = plannerAgent;
+            _reportContextResolver = reportContextResolver;
         }
 
         public async Task<AnalysisSessionDto?> StartAnalysisAsync(
@@ -40,6 +44,23 @@ namespace Orchestration.Application.AnalysisSessions
             if (session is null)
             {
                 return null;
+            }
+
+            var reportResolution = _reportContextResolver.Resolve(session);
+
+            if (!reportResolution.IsValid || reportResolution.Report is null)
+            {
+                session.SetCurrentAgent(null);
+                session.MarkFailed(reportResolution.ErrorMessage!);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await PublishAsync(
+                    session.Id,
+                    "financial_report_context_invalid",
+                    "Orchestrator",
+                    reportResolution.ErrorMessage!,
+                    cancellationToken);
+
+                return ToDto(session);
             }
 
             await PublishAsync(
@@ -69,7 +90,7 @@ namespace Orchestration.Application.AnalysisSessions
             );
 
             var plannerResult = await _plannerAgent.RunAsync(
-                session,
+                reportResolution.Report,
                 cancellationToken
             );
 

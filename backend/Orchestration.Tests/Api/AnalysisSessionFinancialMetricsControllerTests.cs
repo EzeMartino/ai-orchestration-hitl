@@ -1327,6 +1327,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(
@@ -1452,6 +1453,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -1495,7 +1497,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             dbContext,
             orchestrator: orchestrator!,
             new AnalysisSessionStartPreflightValidator(
-                Options.Create(dataAgentOptions ?? new DataAgentOptions())
+                Options.Create(dataAgentOptions ?? new DataAgentOptions()),
+                new FinancialReportContextResolver()
             ),
             publisher,
             financialMetricsSessionService ??
@@ -1546,7 +1549,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             dbContext,
             new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
             publisher,
-            planner
+            planner,
+            new FinancialReportContextResolver()
         );
     }
 
@@ -1790,7 +1794,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         public bool? LastCancellationTokenCanBeCanceled { get; private set; }
 
         public Task<PlannerAgentResult> RunAsync(
-            AnalysisSession session,
+            FinancialReportContext report,
             CancellationToken cancellationToken)
         {
             RunCalls++;

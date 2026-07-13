@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.AnalysisSessions;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Domain.FinancialMetricsExtraction;
 using Orchestration.Infrastructure.Persistence;
@@ -15,6 +16,46 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         "FINANCIAL_METRICS_REVIEW_REQUIRED";
 
     [Fact]
+    public async Task ValidateAsync_MissingReportSummary_ShouldBlockBeforeDataAgentOptions()
+    {
+        await using var dbContext = CreateDbContext();
+        var validator = CreateValidator(new DataAgentOptions
+        {
+            FinancialAnalysisToolsEnabled = false,
+            RequireSessionFinancialMetrics = false
+        }, dbContext);
+
+        var result = await validator.ValidateAsync(
+            AnalysisSession.Create(Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.CanStart.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            Code = FinancialReportContextResolver.RequiredCode,
+            Severity = "Error"
+        });
+    }
+
+    [Fact]
+    public async Task ValidateAsync_InvalidReportSummary_ShouldReturnInvalidCode()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1}}""");
+        var validator = CreateValidator(new DataAgentOptions(), dbContext);
+
+        var result = await validator.ValidateAsync(session, CancellationToken.None);
+
+        result.CanStart.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            Code = FinancialReportContextResolver.InvalidCode,
+            Severity = "Error"
+        });
+    }
+
+    [Fact]
     public async Task ValidateAsync_Should_allow_start_when_financial_analysis_is_disabled()
     {
         await using var dbContext = CreateDbContext();
@@ -25,7 +66,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         }, dbContext);
 
         var result = await validator.ValidateAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateSession(),
             CancellationToken.None
         );
 
@@ -44,7 +85,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         }, dbContext);
 
         var result = await validator.ValidateAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateSession(),
             CancellationToken.None
         );
 
@@ -56,8 +97,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
     public async Task ValidateAsync_Should_allow_start_when_required_metrics_exist()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create();
-        session.SetContext(CreateStructuredMetricsContextJson());
+        var session = TestFinancialReport.CreateSession(includeStructuredMetrics: true);
         var validator = CreateValidator(new DataAgentOptions
         {
             FinancialAnalysisToolsEnabled = true,
@@ -74,8 +114,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
     public async Task ValidateAsync_Should_block_start_while_pdf_review_is_pending()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.NewGuid());
-        session.SetContext(CreateStructuredMetricsContextJson());
+        var session = TestFinancialReport.CreateSession(includeStructuredMetrics: true);
         dbContext.FinancialMetricsExtractionDrafts.Add(CreateDraft(
             session.Id,
             FinancialMetricsExtractionDraftStatus.PendingReview));
@@ -105,8 +144,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         bool requireSessionFinancialMetrics)
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.NewGuid());
-        session.SetContext(CreateStructuredMetricsContextJson());
+        var session = TestFinancialReport.CreateSession(includeStructuredMetrics: true);
         dbContext.FinancialMetricsExtractionDrafts.Add(CreateDraft(
             session.Id,
             FinancialMetricsExtractionDraftStatus.PendingReview));
@@ -129,8 +167,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
     public async Task ValidateAsync_Should_allow_start_when_pdf_review_drafts_are_confirmed_or_discarded()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.NewGuid());
-        session.SetContext(CreateStructuredMetricsContextJson());
+        var session = TestFinancialReport.CreateSession(includeStructuredMetrics: true);
         dbContext.FinancialMetricsExtractionDrafts.Add(CreateDraft(
             session.Id,
             FinancialMetricsExtractionDraftStatus.Confirmed));
@@ -162,7 +199,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         }, dbContext);
 
         var result = await validator.ValidateAsync(
-            AnalysisSession.Create(),
+            TestFinancialReport.CreateSession(),
             CancellationToken.None
         );
 
@@ -185,6 +222,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
     {
         return new AnalysisSessionStartPreflightValidator(
             Options.Create(options),
+            new FinancialReportContextResolver(),
             dbContext);
     }
 

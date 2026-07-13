@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
@@ -7,13 +8,53 @@ using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.AnalysisSessions;
 using Orchestration.Application.FinancialAnalysis.Thresholds;
+using Orchestration.Domain.AnalysisSessions;
+using Orchestration.Tests.Agents;
+using Orchestration.Tests.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Tests.AnalysisSessions;
 
 public class AnalysisOrchestratorContextTests
 {
+    [Fact]
+    public async Task StartAnalysisAsync_InvalidReportContext_ShouldFailWithoutInvokingPlanner()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1}}""");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new CapturingPlannerAgent();
+        var orchestrator = new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner,
+            new FinancialReportContextResolver());
+
+        var result = await orchestrator.StartAnalysisAsync(
+            session.Id,
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Status.Should().Be(nameof(AnalysisSessionStatus.Failed));
+        planner.RunCalls.Should().Be(0);
+        session.Status.Should().Be(AnalysisSessionStatus.Failed);
+        session.CurrentAgent.Should().BeNull();
+        session.FailureReason.Should().Be("Financial report summary is invalid.");
+        publisher.PublishedEvents.Should().ContainSingle(evt =>
+            evt.Type == "financial_report_context_invalid" &&
+            evt.Agent == "Orchestrator");
+        var persisted = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        persisted.Status.Should().Be(AnalysisSessionStatus.Failed);
+    }
+
     [Fact]
     public void BuildAnalysisContext_Should_include_planner_reasoning()
     {
@@ -496,5 +537,18 @@ public class AnalysisOrchestratorContextTests
             ),
             ToolPlan: toolPlan
         );
+    }
+
+    private sealed class CapturingPlannerAgent : IPlannerAgent
+    {
+        public int RunCalls { get; private set; }
+
+        public Task<PlannerAgentResult> RunAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            RunCalls++;
+            throw new InvalidOperationException("Planner must not run for invalid context.");
+        }
     }
 }

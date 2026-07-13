@@ -43,7 +43,8 @@ public class AnalysisSessionControllerIsolationTests
             dbContext,
             orchestrator: null!, // Not executing backend service orchestrator logic, controller checks take precedence
             new AnalysisSessionStartPreflightValidator(
-                Options.Create(new DataAgentOptions())
+                Options.Create(new DataAgentOptions()),
+                new FinancialReportContextResolver()
             ),
             publisher,
             StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext, publisher),

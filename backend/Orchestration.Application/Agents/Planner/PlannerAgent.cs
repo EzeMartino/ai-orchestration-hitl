@@ -50,30 +50,28 @@ public sealed class PlannerAgent : IPlannerAgent
     }
 
     public async Task<PlannerAgentResult> RunAsync(
-        AnalysisSession session,
+        FinancialReportContext report,
         CancellationToken cancellationToken)
     {
         await PublishAsync(
-            session.Id,
+            report.SessionId,
             "agent_started",
             "PlannerAgent",
             "PlannerAgent (Agente Planificador) inicializado. Construyendo plan de ejecución.",
             cancellationToken
         );
 
-        var report = BuildReportContext(session);
-
         if (IsPlanDrivenMode())
         {
             return await RunPlanDrivenModeAsync(
-                session.Id,
+                report.SessionId,
                 report,
                 cancellationToken
             );
         }
 
         return await RunShadowModeAsync(
-            session.Id,
+            report.SessionId,
             report,
             cancellationToken
         );
@@ -545,18 +543,6 @@ public sealed class PlannerAgent : IPlannerAgent
         }
 
         return "Razonamiento del Planificador completado usando la alternativa determinista.";
-    }
-
-    private static FinancialReportContext BuildReportContext(
-        AnalysisSession session)
-    {
-        return new FinancialReportContext(
-            SessionId: session.Id,
-            ReportName: $"financial-report-{session.Id}",
-            TotalAmount: 125000m,
-            TransactionCount: 42,
-            SubmittedAt: session.CreatedAt
-        );
     }
 
     private static PlannerReasoningInput BuildReasoningInput(
