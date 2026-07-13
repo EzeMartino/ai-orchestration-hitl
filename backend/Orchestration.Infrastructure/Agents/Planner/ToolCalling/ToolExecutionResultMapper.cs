@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
@@ -30,8 +31,11 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
         try
         {
-            var result = JsonSerializer.Deserialize<DataAgentResult>(
+            var normalizedJson = NormalizeFinancialExecutionJson(
                 call.OutputJson,
+                out var executionMetadataValid);
+            var result = JsonSerializer.Deserialize<DataAgentResult>(
+                normalizedJson,
                 JsonOptions
             );
 
@@ -40,12 +44,19 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
                 return result;
             }
 
-            var execution = financialAnalysis.Execution
-                ?? FinancialAnalysisExecution.LegacyUnknown;
-            var normalizedFinancialAnalysis = financialAnalysis.Execution is null
-                ? financialAnalysis with { Execution = execution }
-                : financialAnalysis;
+            var receivedExecution = financialAnalysis.Execution;
+            var execution = executionMetadataValid && receivedExecution is not null
+                ? FinancialAnalysisExecution.FromStages(receivedExecution.Stages)
+                : FinancialAnalysisExecution.LegacyUnknown;
+            var statusContradiction = executionMetadataValid &&
+                receivedExecution is not null &&
+                receivedExecution.OverallStatus != execution.OverallStatus;
+            var normalizedFinancialAnalysis = financialAnalysis with
+            {
+                Execution = execution
+            };
             var requiresHumanReview = result.RequiresHumanReview ||
+                statusContradiction ||
                 execution.OverallStatus != FinancialAnalysisExecutionStatus.Succeeded;
 
             return result with
@@ -58,6 +69,108 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         {
             return null;
         }
+    }
+
+    private static string NormalizeFinancialExecutionJson(
+        string outputJson,
+        out bool executionMetadataValid)
+    {
+        var root = JsonNode.Parse(outputJson);
+        if (root is not JsonObject rootObject ||
+            rootObject["financialAnalysis"] is not JsonObject financialAnalysis)
+        {
+            executionMetadataValid = true;
+            return outputJson;
+        }
+
+        executionMetadataValid = IsValidExecutionMetadata(
+            financialAnalysis["execution"]);
+        if (executionMetadataValid)
+        {
+            return outputJson;
+        }
+
+        financialAnalysis["execution"] = null;
+        return root.ToJsonString(JsonOptions);
+    }
+
+    private static bool IsValidExecutionMetadata(JsonNode? executionNode)
+    {
+        if (executionNode is not JsonObject execution ||
+            !IsAggregateStatus(execution["overallStatus"]) ||
+            execution["stages"] is not JsonArray stages ||
+            stages.Count != FinancialAnalysisOperations.All.Count)
+        {
+            return false;
+        }
+
+        var operations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var stageNode in stages)
+        {
+            if (stageNode is not JsonObject stage ||
+                !TryGetString(stage["operation"], out var operation) ||
+                !FinancialAnalysisOperations.All.Contains(operation, StringComparer.Ordinal) ||
+                !operations.Add(operation) ||
+                !TryGetString(stage["status"], out var status) ||
+                !IsStageStatus(status) ||
+                !TryGetNonNegativeDuration(stage["durationMilliseconds"]) ||
+                !IsValidFailureCode(stage["failureCode"], status))
+            {
+                return false;
+            }
+        }
+
+        return operations.Count == FinancialAnalysisOperations.All.Count;
+    }
+
+    private static bool IsAggregateStatus(JsonNode? statusNode)
+    {
+        return TryGetString(statusNode, out var status) && status is
+            "legacy_unknown" or "succeeded" or "degraded" or "failed";
+    }
+
+    private static bool IsStageStatus(string status)
+    {
+        return status is "legacy_unknown" or "succeeded" or "failed";
+    }
+
+    private static bool TryGetNonNegativeDuration(JsonNode? durationNode)
+    {
+        return durationNode is JsonValue durationValue &&
+            durationValue.TryGetValue<long>(out var duration) &&
+            duration >= 0;
+    }
+
+    private static bool IsValidFailureCode(
+        JsonNode? failureCodeNode,
+        string status)
+    {
+        return failureCodeNode is null
+            ? status != "failed"
+            : TryGetNonEmptyString(failureCodeNode, out _);
+    }
+
+    private static bool TryGetNonEmptyString(
+        JsonNode? node,
+        out string value)
+    {
+        return TryGetString(node, out value) && !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool TryGetString(
+        JsonNode? node,
+        out string value)
+    {
+        if (node is JsonValue jsonValue &&
+            jsonValue.TryGetValue<string>(out var text) &&
+            text is not null)
+        {
+            value = text;
+            return true;
+        }
+
+        value = string.Empty;
+        return false;
     }
 
     public LegalAgentResult? TryMapLegalResult(
