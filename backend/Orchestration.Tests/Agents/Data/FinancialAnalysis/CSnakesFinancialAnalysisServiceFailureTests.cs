@@ -269,6 +269,43 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
     }
 
     [Theory]
+    [InlineData("high", "High", "High")]
+    [InlineData("HIGH", "High", "High")]
+    [InlineData("  High  ", "High", "High")]
+    [InlineData("Info", "Info", "Low")]
+    public async Task SupportedSignalSeverity_IsNormalized(
+        string severity,
+        string expectedSeverity,
+        string expectedRiskLevel)
+    {
+        var responseJson = $$"""
+            {
+              "signals": [
+                {
+                  "name": "LOW_CURRENT_RATIO",
+                  "severity": "{{severity}}",
+                  "period": "2025E",
+                  "summary": "Risk",
+                  "evidence": []
+                }
+              ]
+            }
+            """;
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ => responseJson);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var response = await service.DetectFinancialRiskSignalsAsync(
+            new DetectFinancialRiskSignalsRequest([], [], [], SessionId: SessionId),
+            CancellationToken.None);
+
+        response.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        response.Signals.Should().ContainSingle()
+            .Which.Severity.Should().Be(expectedSeverity);
+        response.Result.RiskLevel.Should().Be(expectedRiskLevel);
+    }
+
+    [Theory]
     [MemberData(nameof(Operations))]
     public async Task OperationAsync_PreCancelledToken_DoesNotInvokePython(
         string operation)
