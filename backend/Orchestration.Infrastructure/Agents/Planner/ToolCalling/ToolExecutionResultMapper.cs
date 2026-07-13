@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
@@ -29,10 +30,19 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
         try
         {
-            return JsonSerializer.Deserialize<DataAgentResult>(
+            var result = JsonSerializer.Deserialize<DataAgentResult>(
                 call.OutputJson,
                 JsonOptions
             );
+
+            if (result?.FinancialAnalysis is not null &&
+                result.FinancialAnalysis.Execution.OverallStatus !=
+                    FinancialAnalysisExecutionStatus.Succeeded)
+            {
+                return result with { RequiresHumanReview = true };
+            }
+
+            return result;
         }
         catch (JsonException)
         {

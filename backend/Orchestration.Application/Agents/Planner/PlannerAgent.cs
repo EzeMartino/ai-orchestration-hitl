@@ -324,6 +324,7 @@ public sealed class PlannerAgent : IPlannerAgent
     {
         var requiresHumanApproval =
             dataResult.HasAnomaly ||
+            dataResult.RequiresHumanReview ||
             legalResult.HasComplianceRisk;
 
         var summary = requiresHumanApproval

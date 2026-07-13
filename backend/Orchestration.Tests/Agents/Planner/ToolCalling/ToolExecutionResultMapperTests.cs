@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -165,6 +166,73 @@ public class ToolExecutionResultMapperTests
         );
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_preserve_explicit_human_review()
+    {
+        var result = MapDataResult(CreateDataResult(requiresHumanReview: true));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisExecutionStatus.Failed)]
+    [InlineData(FinancialAnalysisExecutionStatus.Degraded)]
+    [InlineData(FinancialAnalysisExecutionStatus.LegacyUnknown)]
+    public void TryMapDataResult_Should_require_review_for_incomplete_financial_execution(
+        FinancialAnalysisExecutionStatus status)
+    {
+        var result = MapDataResult(CreateDataResult(status: status));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_preserve_false_review_for_succeeded_financial_execution()
+    {
+        var result = MapDataResult(CreateDataResult(
+            status: FinancialAnalysisExecutionStatus.Succeeded));
+
+        result!.RequiresHumanReview.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_not_force_review_for_legacy_result_without_financial_analysis()
+    {
+        var result = MapDataResult(CreateDataResult());
+
+        result!.FinancialAnalysis.Should().BeNull();
+        result.RequiresHumanReview.Should().BeFalse();
+    }
+
+    private static DataAgentResult? MapDataResult(DataAgentResult dataResult)
+    {
+        return new ToolExecutionResultMapper().TryMapDataResult(
+        [
+            CreateExecutionResult(
+                "data.analyze_transactions",
+                JsonSerializer.Serialize(dataResult, JsonOptions))
+        ]);
+    }
+
+    private static DataAgentResult CreateDataResult(
+        FinancialAnalysisExecutionStatus? status = null,
+        bool requiresHumanReview = false)
+    {
+        FinancialAnalysisContext? financialAnalysis = null;
+        if (status is not null)
+        {
+            financialAnalysis = new FinancialAnalysisContext(
+                "Financial Workflow", "document", null, [], [], [], [], [], [])
+            {
+                Execution = new FinancialAnalysisExecution(status.Value, [])
+            };
+        }
+
+        return new DataAgentResult(
+            false, "Low", "No anomaly.", "Test", [],
+            financialAnalysis, requiresHumanReview);
     }
 
     private static ToolExecutionResult CreateExecutionResult(
