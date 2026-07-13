@@ -1,5 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
-using CSnakes.Runtime;
+using Microsoft.Extensions.Logging;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
@@ -13,11 +14,15 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IPythonEnvironment _pythonEnvironment;
+    private readonly IFinancialAnalysisPythonInvoker _pythonInvoker;
+    private readonly ILogger<CSnakesFinancialAnalysisService> _logger;
 
-    public CSnakesFinancialAnalysisService(IPythonEnvironment pythonEnvironment)
+    internal CSnakesFinancialAnalysisService(
+        IFinancialAnalysisPythonInvoker pythonInvoker,
+        ILogger<CSnakesFinancialAnalysisService> logger)
     {
-        _pythonEnvironment = pythonEnvironment;
+        _pythonInvoker = pythonInvoker;
+        _logger = logger;
     }
 
     public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
@@ -26,18 +31,16 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        try
-        {
-            var responseJson = _pythonEnvironment
-                .FinancialAnalysis()
-                .ComputeFinancialRatios(JsonSerializer.Serialize(request, JsonOptions));
+        var requestJson = JsonSerializer.Serialize(request, JsonOptions);
 
-            return Task.FromResult(MapRatios(responseJson));
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            return Task.FromResult(SafeRatiosResponse());
-        }
+        return Task.FromResult(Execute(
+            FinancialAnalysisOperations.Ratios,
+            request.SessionId,
+            cancellationToken,
+            () => _pythonInvoker.ComputeFinancialRatios(requestJson),
+            MapRatios,
+            SafeRatiosResponse,
+            static (response, execution) => response with { Execution = execution }));
     }
 
     public Task<ComparePeriodsResponse> ComparePeriodsAsync(
@@ -46,18 +49,16 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        try
-        {
-            var responseJson = _pythonEnvironment
-                .FinancialAnalysis()
-                .ComparePeriods(JsonSerializer.Serialize(request, JsonOptions));
+        var requestJson = JsonSerializer.Serialize(request, JsonOptions);
 
-            return Task.FromResult(MapComparisons(responseJson));
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            return Task.FromResult(SafeComparePeriodsResponse());
-        }
+        return Task.FromResult(Execute(
+            FinancialAnalysisOperations.Comparisons,
+            request.SessionId,
+            cancellationToken,
+            () => _pythonInvoker.ComparePeriods(requestJson),
+            MapComparisons,
+            SafeComparePeriodsResponse,
+            static (response, execution) => response with { Execution = execution }));
     }
 
     public Task<DetectFinancialRiskSignalsResponse> DetectFinancialRiskSignalsAsync(
@@ -66,18 +67,16 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        try
-        {
-            var responseJson = _pythonEnvironment
-                .FinancialAnalysis()
-                .DetectFinancialRiskSignals(JsonSerializer.Serialize(request, JsonOptions));
+        var requestJson = JsonSerializer.Serialize(request, JsonOptions);
 
-            return Task.FromResult(MapRiskSignals(responseJson));
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            return Task.FromResult(SafeRiskSignalsResponse());
-        }
+        return Task.FromResult(Execute(
+            FinancialAnalysisOperations.Signals,
+            request.SessionId,
+            cancellationToken,
+            () => _pythonInvoker.DetectFinancialRiskSignals(requestJson),
+            MapRiskSignals,
+            SafeRiskSignalsResponse,
+            static (response, execution) => response with { Execution = execution }));
     }
 
     public Task<SummarizeQuantitativeEvidenceResponse> SummarizeQuantitativeEvidenceAsync(
@@ -86,18 +85,114 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        var requestJson = JsonSerializer.Serialize(request, JsonOptions);
+
+        return Task.FromResult(Execute(
+            FinancialAnalysisOperations.Summary,
+            request.SessionId,
+            cancellationToken,
+            () => _pythonInvoker.SummarizeQuantitativeEvidence(requestJson),
+            MapEvidenceSummary,
+            SafeEvidenceSummaryResponse,
+            static (response, execution) => response with { Execution = execution }));
+    }
+
+    private TResponse Execute<TResponse>(
+        string operation,
+        Guid? sessionId,
+        CancellationToken cancellationToken,
+        Func<string> invoke,
+        Func<string, TResponse> map,
+        Func<FinancialAnalysisStageExecution, TResponse> failureResponse,
+        Func<TResponse, FinancialAnalysisStageExecution, TResponse> attachExecution)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        string responseJson;
+
         try
         {
-            var responseJson = _pythonEnvironment
-                .FinancialAnalysis()
-                .SummarizeQuantitativeEvidence(JsonSerializer.Serialize(request, JsonOptions));
-
-            return Task.FromResult(MapEvidenceSummary(responseJson));
+            responseJson = invoke();
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return Task.FromResult(SafeEvidenceSummaryResponse());
+            throw;
         }
+        catch (Exception exception)
+        {
+            return Fail(
+                operation,
+                sessionId,
+                stopwatch.ElapsedMilliseconds,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed,
+                exception,
+                failureResponse);
+        }
+
+        try
+        {
+            var response = map(responseJson);
+            var execution = new FinancialAnalysisStageExecution(
+                operation,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                stopwatch.ElapsedMilliseconds);
+
+            LogSuccess(sessionId, execution);
+
+            return attachExecution(response, execution);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return Fail(
+                operation,
+                sessionId,
+                stopwatch.ElapsedMilliseconds,
+                FinancialAnalysisFailureCodes.PythonResponseInvalid,
+                exception,
+                failureResponse);
+        }
+    }
+
+    private TResponse Fail<TResponse>(
+        string operation,
+        Guid? sessionId,
+        long durationMilliseconds,
+        string failureCode,
+        Exception exception,
+        Func<FinancialAnalysisStageExecution, TResponse> failureResponse)
+    {
+        var execution = new FinancialAnalysisStageExecution(
+            operation,
+            FinancialAnalysisExecutionStatus.Failed,
+            durationMilliseconds,
+            failureCode);
+
+        _logger.LogError(
+            exception,
+            "Financial analysis operation {Operation} completed with status {ExecutionStatus} for session {SessionId} in {DurationMilliseconds} ms. Failure code: {FailureCode}",
+            execution.Operation,
+            execution.Status,
+            sessionId,
+            execution.DurationMilliseconds,
+            execution.FailureCode);
+
+        return failureResponse(execution);
+    }
+
+    private void LogSuccess(
+        Guid? sessionId,
+        FinancialAnalysisStageExecution execution)
+    {
+        _logger.LogInformation(
+            "Financial analysis operation {Operation} completed with status {ExecutionStatus} for session {SessionId} in {DurationMilliseconds} ms. Failure code: {FailureCode}",
+            execution.Operation,
+            execution.Status,
+            sessionId,
+            execution.DurationMilliseconds,
+            execution.FailureCode);
     }
 
     private static ComputeFinancialRatiosResponse MapRatios(string responseJson)
@@ -244,7 +339,8 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         return evidence;
     }
 
-    private static ComputeFinancialRatiosResponse SafeRatiosResponse()
+    private static ComputeFinancialRatiosResponse SafeRatiosResponse(
+        FinancialAnalysisStageExecution execution)
     {
         return new ComputeFinancialRatiosResponse(
             Engine: Engine,
@@ -254,10 +350,11 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 "Falló el cálculo de ratios financieros en Python.",
                 "No se pudieron calcular los ratios financieros a partir de las métricas provistas."
             ]
-        );
+        ) { Execution = execution };
     }
 
-    private static ComparePeriodsResponse SafeComparePeriodsResponse()
+    private static ComparePeriodsResponse SafeComparePeriodsResponse(
+        FinancialAnalysisStageExecution execution)
     {
         return new ComparePeriodsResponse(
             Engine: Engine,
@@ -267,17 +364,18 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                 "Falló la comparación de periodos en Python.",
                 "No se pudieron calcular comparaciones entre periodos a partir de las métricas provistas."
             ]
-        );
+        ) { Execution = execution };
     }
 
-    private static DetectFinancialRiskSignalsResponse SafeRiskSignalsResponse()
+    private static DetectFinancialRiskSignalsResponse SafeRiskSignalsResponse(
+        FinancialAnalysisStageExecution execution)
     {
         return new DetectFinancialRiskSignalsResponse(
             Engine: Engine,
             Signals: [],
             Result: new FinancialAnalysisToolResult(
                 HasRiskSignals: false,
-                RiskLevel: "Low",
+                RiskLevel: "Unknown",
                 Summary: "No se pudieron calcular señales de riesgo financiero a partir de las métricas provistas.",
                 Engine: Engine,
                 Evidence: [],
@@ -287,10 +385,11 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                     "No se pudieron calcular señales de riesgo a partir de las métricas provistas."
                 ]
             )
-        );
+        ) { Execution = execution };
     }
 
-    private static SummarizeQuantitativeEvidenceResponse SafeEvidenceSummaryResponse()
+    private static SummarizeQuantitativeEvidenceResponse SafeEvidenceSummaryResponse(
+        FinancialAnalysisStageExecution execution)
     {
         const string narrative = "No se pudo resumir la evidencia cuantitativa a partir de las métricas provistas.";
 
@@ -299,7 +398,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
             Narrative: narrative,
             Result: new FinancialAnalysisToolResult(
                 HasRiskSignals: false,
-                RiskLevel: "Low",
+                RiskLevel: "Unknown",
                 Summary: narrative,
                 Engine: Engine,
                 Evidence: [],
@@ -309,7 +408,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
                     "No se pudo resumir la evidencia cuantitativa a partir de las métricas provistas."
                 ]
             )
-        );
+        ) { Execution = execution };
     }
 
     private static string BuildRiskSignalSummary(

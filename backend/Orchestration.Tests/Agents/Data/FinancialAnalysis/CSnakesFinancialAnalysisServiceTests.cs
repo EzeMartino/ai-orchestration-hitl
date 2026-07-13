@@ -38,6 +38,11 @@ public sealed class CSnakesFinancialAnalysisServiceTests
         );
 
         response.Engine.Should().Be("Python/CSnakes Financial Analysis");
+        response.Execution.Should().BeEquivalentTo(new FinancialAnalysisStageExecution(
+            FinancialAnalysisOperations.Ratios,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            response.Execution.DurationMilliseconds));
+        response.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
         response.Warnings.Should().BeEmpty();
         response.Ratios.Should().Contain(ratio =>
             ratio.Name == "gross_margin" &&
@@ -121,6 +126,11 @@ public sealed class CSnakesFinancialAnalysisServiceTests
 
         var comparison = response.Comparisons.Should().ContainSingle().Subject;
 
+        response.Execution.Should().BeEquivalentTo(new FinancialAnalysisStageExecution(
+            FinancialAnalysisOperations.Comparisons,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            response.Execution.DurationMilliseconds));
+        response.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
         comparison.MetricName.Should().Be("revenue");
         comparison.FromPeriod.Should().Be("2024A");
         comparison.ToPeriod.Should().Be("2025E");
@@ -203,6 +213,11 @@ public sealed class CSnakesFinancialAnalysisServiceTests
         );
 
         response.Result.HasRiskSignals.Should().BeTrue();
+        response.Execution.Should().BeEquivalentTo(new FinancialAnalysisStageExecution(
+            FinancialAnalysisOperations.Signals,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            response.Execution.DurationMilliseconds));
+        response.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
         response.Result.RiskLevel.Should().Be("High");
         response.Signals.Should().Contain(signal => signal.Name == "LOW_CURRENT_RATIO");
         response.Signals.Should().Contain(signal => signal.Name == "HIGH_NET_DEBT_TO_EBITDA");
@@ -362,6 +377,11 @@ public sealed class CSnakesFinancialAnalysisServiceTests
         );
 
         response.Narrative.Should().Contain("severidad alta");
+        response.Execution.Should().BeEquivalentTo(new FinancialAnalysisStageExecution(
+            FinancialAnalysisOperations.Summary,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            response.Execution.DurationMilliseconds));
+        response.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
         response.Result.Evidence.Should().ContainSingle()
             .Which.MetricName.Should().Be("net_debt_to_ebitda");
         response.Result.RiskLevel.Should().Be("High");

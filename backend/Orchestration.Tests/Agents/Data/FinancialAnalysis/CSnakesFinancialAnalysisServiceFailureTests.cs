@@ -1,0 +1,259 @@
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Infrastructure.Agents.Data.FinancialAnalysis;
+
+namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
+
+public sealed class CSnakesFinancialAnalysisServiceFailureTests
+{
+    private static readonly Guid SessionId = Guid.Parse("7f4b62cf-c8b1-459c-a881-e135c80f7f3d");
+
+    public static TheoryData<string> Operations => new()
+    {
+        FinancialAnalysisOperations.Ratios,
+        FinancialAnalysisOperations.Comparisons,
+        FinancialAnalysisOperations.Signals,
+        FinancialAnalysisOperations.Summary
+    };
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task OperationAsync_InvokerThrows_ReturnsSafeFailureAndStructuredLog(
+        string operation)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            throw new InvalidOperationException("sensitive adapter detail"));
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var result = await InvokeAsync(service, operation, CancellationToken.None);
+
+        result.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.Execution.Operation.Should().Be(operation);
+        result.Execution.FailureCode.Should().Be(FinancialAnalysisFailureCodes.PythonInvocationFailed);
+        result.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
+        result.Warnings.Should().OnlyContain(warning =>
+            !warning.Contains("sensitive adapter detail", StringComparison.Ordinal));
+
+        if (operation is FinancialAnalysisOperations.Signals or FinancialAnalysisOperations.Summary)
+        {
+            result.RiskLevel.Should().Be("Unknown");
+        }
+
+        invoker.Calls.Should().ContainSingle().Which.Operation.Should().Be(operation);
+
+        var log = logger.Entries.Should().ContainSingle().Subject;
+        log.Level.Should().Be(LogLevel.Error);
+        log.Exception.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Be("sensitive adapter detail");
+        AssertStructuredLog(log, operation, FinancialAnalysisExecutionStatus.Failed,
+            FinancialAnalysisFailureCodes.PythonInvocationFailed);
+        AssertNoRawPayload(log);
+    }
+
+    [Fact]
+    public async Task ComputeFinancialRatiosAsync_ValidResponse_LogsSucceededMetadata()
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            """{"ratios":[],"warnings":[],"limitations":[]}""");
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var response = await service.ComputeFinancialRatiosAsync(
+            CreateRatiosRequest(),
+            CancellationToken.None);
+
+        response.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        response.Execution.Operation.Should().Be(FinancialAnalysisOperations.Ratios);
+        response.Execution.FailureCode.Should().BeNull();
+        response.Execution.DurationMilliseconds.Should().BeGreaterThanOrEqualTo(0);
+
+        var log = logger.Entries.Should().ContainSingle().Subject;
+        log.Level.Should().Be(LogLevel.Information);
+        log.Exception.Should().BeNull();
+        AssertStructuredLog(log, FinancialAnalysisOperations.Ratios,
+            FinancialAnalysisExecutionStatus.Succeeded, null);
+        AssertNoRawPayload(log);
+    }
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task OperationAsync_MalformedJson_ReturnsInvalidResponseFailure(
+        string operation)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ => "not-json-sensitive-response");
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var result = await InvokeAsync(service, operation, CancellationToken.None);
+
+        result.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.Execution.Operation.Should().Be(operation);
+        result.Execution.FailureCode.Should().Be(FinancialAnalysisFailureCodes.PythonResponseInvalid);
+        result.Warnings.Should().OnlyContain(warning =>
+            !warning.Contains("not-json-sensitive-response", StringComparison.Ordinal));
+        logger.Entries.Should().ContainSingle().Which.Exception.Should().BeAssignableTo<JsonException>();
+        AssertStructuredLog(
+            logger.Entries.Single(),
+            operation,
+            FinancialAnalysisExecutionStatus.Failed,
+            FinancialAnalysisFailureCodes.PythonResponseInvalid);
+        AssertNoRawPayload(logger.Entries.Single());
+    }
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task OperationAsync_PreCancelledToken_DoesNotInvokePython(
+        string operation)
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            """{"ratios":[],"comparisons":[],"signals":[],"evidence":[],"summary":"ok"}""");
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await FluentActions.Awaiting(() => InvokeAsync(service, operation, cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        invoker.Calls.Should().BeEmpty();
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ComputeFinancialRatiosAsync_InvokerCancelsSuppliedToken_PropagatesCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
+        });
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        await FluentActions.Awaiting(() => service.ComputeFinancialRatiosAsync(
+                CreateRatiosRequest(),
+                cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        invoker.Calls.Should().ContainSingle();
+        logger.Entries.Should().BeEmpty();
+    }
+
+    private static async Task<OperationResult> InvokeAsync(
+        IPythonFinancialAnalysisService service,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        switch (operation)
+        {
+            case FinancialAnalysisOperations.Ratios:
+            {
+                var response = await service.ComputeFinancialRatiosAsync(
+                    CreateRatiosRequest(), cancellationToken);
+                return new OperationResult(response.Execution, response.Warnings, null);
+            }
+            case FinancialAnalysisOperations.Comparisons:
+            {
+                var response = await service.ComparePeriodsAsync(
+                    new ComparePeriodsRequest(
+                        [CreateSensitiveMetric()], "2024A", "2025E", ["secret-metric-name"], SessionId),
+                    cancellationToken);
+                return new OperationResult(response.Execution, response.Warnings, null);
+            }
+            case FinancialAnalysisOperations.Signals:
+            {
+                var response = await service.DetectFinancialRiskSignalsAsync(
+                    new DetectFinancialRiskSignalsRequest(
+                        [CreateSensitiveMetric()], [], [], SessionId: SessionId),
+                    cancellationToken);
+                return new OperationResult(
+                    response.Execution, response.Result.Warnings, response.Result.RiskLevel);
+            }
+            case FinancialAnalysisOperations.Summary:
+            {
+                var response = await service.SummarizeQuantitativeEvidenceAsync(
+                    new SummarizeQuantitativeEvidenceRequest(
+                        [CreateSensitiveMetric()], [], [], [], SessionId: SessionId),
+                    cancellationToken);
+                return new OperationResult(
+                    response.Execution, response.Result.Warnings, response.Result.RiskLevel);
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(operation), operation, null);
+        }
+    }
+
+    private static ComputeFinancialRatiosRequest CreateRatiosRequest()
+    {
+        return new ComputeFinancialRatiosRequest(
+            [CreateSensitiveMetric()], ["secret-ratio-name"], SessionId);
+    }
+
+    private static FinancialMetric CreateSensitiveMetric()
+    {
+        return new FinancialMetric(
+            "secret-metric-name", "2025E", 123456.789m, "secret-unit", "secret-statement", "secret-source");
+    }
+
+    private static void AssertStructuredLog(
+        CapturedLogEntry log,
+        string operation,
+        FinancialAnalysisExecutionStatus status,
+        string? failureCode)
+    {
+        log.State["Operation"].Should().Be(operation);
+        log.State["SessionId"].Should().Be(SessionId);
+        log.State["DurationMilliseconds"].Should().BeOfType<long>()
+            .Which.Should().BeGreaterThanOrEqualTo(0);
+        log.State["ExecutionStatus"].Should().Be(status);
+        log.State.Should().ContainKey("FailureCode").WhoseValue.Should().Be(failureCode);
+    }
+
+    private static void AssertNoRawPayload(CapturedLogEntry log)
+    {
+        var exposedText = string.Join(
+            " ",
+            log.State.Values.Select(value => value?.ToString()).Append(log.Message));
+
+        exposedText.Should().NotContain("secret-metric-name");
+        exposedText.Should().NotContain("secret-ratio-name");
+        exposedText.Should().NotContain("123456.789");
+        exposedText.Should().NotContain("not-json-sensitive-response");
+        exposedText.Should().NotContain("{\"");
+    }
+
+    private sealed record OperationResult(
+        FinancialAnalysisStageExecution Execution,
+        IReadOnlyList<string> Warnings,
+        string? RiskLevel);
+
+    private sealed class FakeFinancialAnalysisPythonInvoker(Func<string, string> invoke)
+        : IFinancialAnalysisPythonInvoker
+    {
+        public List<Invocation> Calls { get; } = [];
+
+        public string ComputeFinancialRatios(string requestJson) =>
+            Invoke(FinancialAnalysisOperations.Ratios, requestJson);
+
+        public string ComparePeriods(string requestJson) =>
+            Invoke(FinancialAnalysisOperations.Comparisons, requestJson);
+
+        public string DetectFinancialRiskSignals(string requestJson) =>
+            Invoke(FinancialAnalysisOperations.Signals, requestJson);
+
+        public string SummarizeQuantitativeEvidence(string requestJson) =>
+            Invoke(FinancialAnalysisOperations.Summary, requestJson);
+
+        private string Invoke(string operation, string requestJson)
+        {
+            Calls.Add(new Invocation(operation, requestJson));
+            return invoke(requestJson);
+        }
+    }
+
+    private sealed record Invocation(string Operation, string RequestJson);
+}

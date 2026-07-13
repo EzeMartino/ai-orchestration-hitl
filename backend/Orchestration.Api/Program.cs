@@ -79,7 +79,7 @@ builder.Services.Configure<FinancialMetricsExtractionOptions>(
 );
 builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
-builder.Services.AddScoped<IPythonFinancialAnalysisService, CSnakesFinancialAnalysisService>();
+builder.Services.AddPythonFinancialAnalysis();
 builder.Services.AddDataAgentAiReview(builder.Configuration);
 builder.Services.AddScoped<SemanticKernelDataAgent>();
 builder.Services.AddScoped<ILegacyDataAgent>(provider =>
