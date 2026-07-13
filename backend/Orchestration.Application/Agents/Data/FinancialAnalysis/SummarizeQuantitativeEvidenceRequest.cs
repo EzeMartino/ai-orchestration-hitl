@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 public sealed record SummarizeQuantitativeEvidenceRequest(
@@ -5,5 +7,6 @@ public sealed record SummarizeQuantitativeEvidenceRequest(
     IReadOnlyList<FinancialRatio> Ratios,
     IReadOnlyList<FinancialPeriodComparison> Comparisons,
     IReadOnlyList<FinancialRiskSignal> Signals,
-    int MaxItems = 5
+    int MaxItems = 5,
+    [property: JsonIgnore] Guid? SessionId = null
 );

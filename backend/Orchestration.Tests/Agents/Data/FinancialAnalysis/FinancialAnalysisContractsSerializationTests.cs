@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 
 namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
@@ -7,6 +8,242 @@ namespace Orchestration.Tests.Agents.Data.FinancialAnalysis;
 public class FinancialAnalysisContractsSerializationTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Theory]
+    [InlineData(FinancialAnalysisExecutionStatus.LegacyUnknown, "legacy_unknown")]
+    [InlineData(FinancialAnalysisExecutionStatus.Succeeded, "succeeded")]
+    [InlineData(FinancialAnalysisExecutionStatus.Degraded, "degraded")]
+    [InlineData(FinancialAnalysisExecutionStatus.Failed, "failed")]
+    public void Execution_status_Should_round_trip_as_lowercase_json(
+        FinancialAnalysisExecutionStatus status,
+        string expectedJsonValue)
+    {
+        var json = JsonSerializer.Serialize(status, JsonOptions);
+        var roundTripped = JsonSerializer.Deserialize<FinancialAnalysisExecutionStatus>(
+            json,
+            JsonOptions
+        );
+
+        json.Should().Be($"\"{expectedJsonValue}\"");
+        roundTripped.Should().Be(status);
+    }
+
+    [Theory]
+    [InlineData("\"future_status\"")]
+    [InlineData("42")]
+    [InlineData("{\"unexpected\":true}")]
+    public void Execution_status_Should_default_unknown_or_non_string_json_to_legacy_unknown(
+        string json)
+    {
+        var status = JsonSerializer.Deserialize<FinancialAnalysisExecutionStatus>(
+            json,
+            JsonOptions
+        );
+
+        status.Should().Be(FinancialAnalysisExecutionStatus.LegacyUnknown);
+    }
+
+    [Fact]
+    public void Old_response_json_without_execution_Should_default_each_operation_to_legacy_unknown()
+    {
+        const string resultJson = """
+        {
+          "hasRiskSignals": false,
+          "riskLevel": "Low",
+          "summary": "Legacy result.",
+          "engine": "Legacy",
+          "evidence": [],
+          "warnings": []
+        }
+        """;
+        var ratios = JsonSerializer.Deserialize<ComputeFinancialRatiosResponse>(
+            """{"engine":"Legacy","ratios":[],"warnings":[]}""",
+            JsonOptions
+        );
+        var comparisons = JsonSerializer.Deserialize<ComparePeriodsResponse>(
+            """{"engine":"Legacy","comparisons":[],"warnings":[]}""",
+            JsonOptions
+        );
+        var signals = JsonSerializer.Deserialize<DetectFinancialRiskSignalsResponse>(
+            $$"""{"engine":"Legacy","signals":[],"result":{{resultJson}}}""",
+            JsonOptions
+        );
+        var summary = JsonSerializer.Deserialize<SummarizeQuantitativeEvidenceResponse>(
+            $$"""{"engine":"Legacy","narrative":"Legacy summary.","result":{{resultJson}}}""",
+            JsonOptions
+        );
+
+        ratios!.Execution.Should().Be(
+            FinancialAnalysisStageExecution.LegacyUnknown(FinancialAnalysisOperations.Ratios)
+        );
+        comparisons!.Execution.Should().Be(
+            FinancialAnalysisStageExecution.LegacyUnknown(FinancialAnalysisOperations.Comparisons)
+        );
+        signals!.Execution.Should().Be(
+            FinancialAnalysisStageExecution.LegacyUnknown(FinancialAnalysisOperations.Signals)
+        );
+        summary!.Execution.Should().Be(
+            FinancialAnalysisStageExecution.LegacyUnknown(FinancialAnalysisOperations.Summary)
+        );
+    }
+
+    [Fact]
+    public void Old_financial_analysis_context_json_without_execution_Should_default_to_legacy_unknown()
+    {
+        const string json = """
+        {
+          "engine": "Legacy",
+          "documentId": "document-1",
+          "company": null,
+          "ratios": [],
+          "comparisons": [],
+          "riskSignals": [],
+          "riskEvidence": [],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+
+        var context = JsonSerializer.Deserialize<FinancialAnalysisContext>(json, JsonOptions);
+
+        context!.Execution.Should().Be(FinancialAnalysisExecution.LegacyUnknown);
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisOperations.Ratios)]
+    [InlineData(FinancialAnalysisOperations.Comparisons)]
+    [InlineData(FinancialAnalysisOperations.Summary)]
+    public void FromStages_Should_degrade_when_a_non_signal_stage_fails(string failedOperation)
+    {
+        var stages = CreateSucceededStages()
+            .Select(stage => stage.Operation == failedOperation
+                ? stage with { Status = FinancialAnalysisExecutionStatus.Failed }
+                : stage);
+
+        var execution = FinancialAnalysisExecution.FromStages(stages);
+
+        execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Degraded);
+    }
+
+    [Fact]
+    public void FromStages_Should_fail_when_the_signals_stage_fails()
+    {
+        var stages = CreateSucceededStages()
+            .Select(stage => stage.Operation == FinancialAnalysisOperations.Signals
+                ? stage with { Status = FinancialAnalysisExecutionStatus.Failed }
+                : stage);
+
+        var execution = FinancialAnalysisExecution.FromStages(stages);
+
+        execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+    }
+
+    [Fact]
+    public void FromStages_Should_succeed_when_every_stage_succeeds()
+    {
+        var execution = FinancialAnalysisExecution.FromStages(CreateSucceededStages());
+
+        execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        execution.Stages.Select(stage => stage.Operation)
+            .Should()
+            .Equal(FinancialAnalysisOperations.All);
+    }
+
+    [Fact]
+    public void FromStages_Should_degrade_and_normalize_when_a_stage_is_missing_or_unknown()
+    {
+        var missing = FinancialAnalysisExecution.FromStages(
+            CreateSucceededStages().Where(stage =>
+                stage.Operation != FinancialAnalysisOperations.Summary)
+        );
+        var unknown = FinancialAnalysisExecution.FromStages(
+            CreateSucceededStages().Select(stage =>
+                stage.Operation == FinancialAnalysisOperations.Ratios
+                    ? stage with { Status = FinancialAnalysisExecutionStatus.LegacyUnknown }
+                    : stage)
+        );
+
+        missing.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Degraded);
+        missing.Stages.Should().ContainSingle(stage =>
+            stage.Operation == FinancialAnalysisOperations.Summary &&
+            stage.Status == FinancialAnalysisExecutionStatus.LegacyUnknown
+        );
+        unknown.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Degraded);
+    }
+
+    [Fact]
+    public void FromStages_Should_use_the_last_duplicate_stage()
+    {
+        var stages = CreateSucceededStages().Concat(
+        [
+            new FinancialAnalysisStageExecution(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisExecutionStatus.Failed,
+                10,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed)
+        ]);
+
+        var execution = FinancialAnalysisExecution.FromStages(stages);
+
+        execution.OverallStatus.Should().Be(FinancialAnalysisExecutionStatus.Degraded);
+        execution.Stages.Should().ContainSingle(stage =>
+            stage.Operation == FinancialAnalysisOperations.Ratios &&
+            stage.Status == FinancialAnalysisExecutionStatus.Failed &&
+            stage.FailureCode == FinancialAnalysisFailureCodes.PythonInvocationFailed
+        );
+    }
+
+    [Fact]
+    public void Request_session_id_Should_be_omitted_from_all_python_json_contracts()
+    {
+        var sessionId = Guid.NewGuid();
+        object[] requests =
+        [
+            new ComputeFinancialRatiosRequest([], [], sessionId),
+            new ComparePeriodsRequest([], "2024A", "2025E", [], sessionId),
+            new DetectFinancialRiskSignalsRequest([], [], [], SessionId: sessionId),
+            new SummarizeQuantitativeEvidenceRequest([], [], [], [], SessionId: sessionId)
+        ];
+
+        foreach (var request in requests)
+        {
+            var json = JsonSerializer.Serialize(request, request.GetType(), JsonOptions);
+
+            json.Should().NotContain("sessionId");
+            json.Should().NotContain(sessionId.ToString());
+        }
+    }
+
+    [Fact]
+    public void Data_agent_result_requires_human_review_Should_round_trip_and_default_false_for_old_json()
+    {
+        var result = new DataAgentResult(
+            HasAnomaly: true,
+            Severity: "High",
+            Summary: "Review required.",
+            Engine: "Financial Analysis",
+            Evidence: [],
+            RequiresHumanReview: true
+        );
+        var json = JsonSerializer.Serialize(result, JsonOptions);
+        var roundTripped = JsonSerializer.Deserialize<DataAgentResult>(json, JsonOptions);
+        var legacy = JsonSerializer.Deserialize<DataAgentResult>(
+            """
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Legacy result.",
+              "engine": "Legacy",
+              "evidence": []
+            }
+            """,
+            JsonOptions
+        );
+
+        json.Should().Contain("\"requiresHumanReview\":true");
+        roundTripped!.RequiresHumanReview.Should().BeTrue();
+        legacy!.RequiresHumanReview.Should().BeFalse();
+    }
 
     [Fact]
     public void ComputeFinancialRatiosRequest_Should_round_trip_as_json()
@@ -266,6 +503,16 @@ public class FinancialAnalysisContractsSerializationTests
             Statement: "sample_statement",
             Source: "unit_test"
         );
+    }
+
+    private static IReadOnlyList<FinancialAnalysisStageExecution> CreateSucceededStages()
+    {
+        return FinancialAnalysisOperations.All
+            .Select(operation => new FinancialAnalysisStageExecution(
+                operation,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                5))
+            .ToArray();
     }
 
     private sealed record VistaEnergySampleFixture(

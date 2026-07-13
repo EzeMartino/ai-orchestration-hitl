@@ -8,5 +8,6 @@ public sealed record DataAgentResult(
     string Summary,
     string Engine,
     IReadOnlyList<AnomalyEvidence> Evidence,
-    FinancialAnalysisContext? FinancialAnalysis = null
+    FinancialAnalysisContext? FinancialAnalysis = null,
+    bool RequiresHumanReview = false
 );

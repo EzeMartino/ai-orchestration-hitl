@@ -22,5 +22,7 @@ public sealed record FinancialAnalysisContext(
 )
 {
     public IReadOnlyList<FinancialRiskThreshold> ThresholdsUsed { get; init; } = ThresholdsUsed ?? [];
-}
 
+    public FinancialAnalysisExecution Execution { get; init; } =
+        FinancialAnalysisExecution.LegacyUnknown;
+}
