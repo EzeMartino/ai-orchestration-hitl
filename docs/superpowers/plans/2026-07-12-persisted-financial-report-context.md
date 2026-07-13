@@ -642,7 +642,7 @@ rg -n "TotalAmount: 125000m|TransactionCount: 42|financial-report-\{session\.Id\
 
 Expected: all commands exit 0; residue scan returns no production matches.
 
-- [ ] **Step 5: Record issue evidence and commit**
+- [x] **Step 5: Record issue evidence and commit**
 
 Comment on issue #3 with test counts, build results, branch, propagation proof, and residue scan. Keep issue open until PR integration.
 
@@ -659,7 +659,7 @@ git commit -m "Document persisted report context verification"
 - GREEN: the focused filter passed 15 of 15 after the context merge preserved
   both `financialReport` and `structuredFinancialMetrics`.
 - `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --verbosity minimal`
-  passed 1103 of 1103 tests (0 failed, 0 skipped).
+  passed 1116 of 1116 tests (0 failed, 0 skipped).
 - `dotnet build backend/Orchestration.slnx --no-restore --verbosity minimal`
   completed with 0 warnings and 0 errors.
 - `node --test frontend/tests/*.test.ts` passed 24 of 24 tests.
@@ -669,4 +669,5 @@ git commit -m "Document persisted report context verification"
 - Production residue scan for `TotalAmount: 125000m`, `TransactionCount: 42`,
   `financial-report-{session.Id}`, and runtime `UtcNow` tool-input formatting
   returned 0 matches in Application and Infrastructure.
-- No GitHub issue or PR mutation was performed during this task.
+- Final evidence was recorded on GitHub issue #3:
+  `https://github.com/EzeMartino/ai-orchestration-hitl/issues/3#issuecomment-4953679554`.
