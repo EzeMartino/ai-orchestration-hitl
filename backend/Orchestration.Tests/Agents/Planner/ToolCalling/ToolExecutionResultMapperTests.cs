@@ -359,6 +359,73 @@ public class ToolExecutionResultMapperTests
         result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
     }
 
+    [Fact]
+    public void TryMapDataResult_Should_reject_raw_failure_detail_as_stage_failure_code()
+    {
+        const string rawFailure = "System.InvalidOperationException: sensitive adapter detail";
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", rawFailure),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Execution.Stages.Should().BeEmpty();
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        JsonSerializer.Serialize(result, JsonOptions).Should().NotContain(rawFailure);
+    }
+
+    [Theory]
+    [InlineData("succeeded")]
+    [InlineData("legacy_unknown")]
+    public void TryMapDataResult_Should_reject_failure_code_on_non_failed_stage(
+        string stageStatus)
+    {
+        var executionJson = BuildExecutionJson(
+            stageStatus == "succeeded" ? "succeeded" : "degraded",
+            StageJson("ratios", stageStatus, "PYTHON_RESPONSE_INVALID"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "succeeded"),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Execution.Stages.Should().BeEmpty();
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisFailureCodes.PythonInvocationFailed)]
+    [InlineData(FinancialAnalysisFailureCodes.PythonResponseInvalid)]
+    [InlineData(FinancialAnalysisFailureCodes.UnexpectedFailure)]
+    public void TryMapDataResult_Should_accept_allowlisted_code_on_failed_stage(
+        string failureCode)
+    {
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", failureCode),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.FinancialAnalysis.Execution.Stages.Single(stage =>
+            stage.Operation == FinancialAnalysisOperations.Signals)
+            .FailureCode.Should().Be(failureCode);
+        result.RequiresHumanReview.Should().BeTrue();
+    }
+
     private static DataAgentResult? MapDataResult(DataAgentResult dataResult)
     {
         return new ToolExecutionResultMapper().TryMapDataResult(

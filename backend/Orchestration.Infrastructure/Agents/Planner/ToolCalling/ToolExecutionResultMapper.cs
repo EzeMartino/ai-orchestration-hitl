@@ -145,16 +145,16 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         JsonNode? failureCodeNode,
         string status)
     {
-        return failureCodeNode is null
-            ? status != "failed"
-            : TryGetNonEmptyString(failureCodeNode, out _);
-    }
+        if (status != "failed")
+        {
+            return failureCodeNode is null;
+        }
 
-    private static bool TryGetNonEmptyString(
-        JsonNode? node,
-        out string value)
-    {
-        return TryGetString(node, out value) && !string.IsNullOrWhiteSpace(value);
+        return TryGetString(failureCodeNode, out var failureCode) &&
+            failureCode is
+                FinancialAnalysisFailureCodes.PythonInvocationFailed or
+                FinancialAnalysisFailureCodes.PythonResponseInvalid or
+                FinancialAnalysisFailureCodes.UnexpectedFailure;
     }
 
     private static bool TryGetString(
