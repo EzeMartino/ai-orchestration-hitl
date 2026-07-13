@@ -265,7 +265,7 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
 
             signals.Add(new FinancialRiskSignal(
                 Name: GetRequiredString(signal, "name", "code"),
-                Severity: GetRequiredString(signal, "severity"),
+                Severity: GetRequiredSignalSeverity(signal),
                 Period: GetRequiredString(signal, "period"),
                 Summary: GetRequiredString(signal, "summary"),
                 Evidence: evidence,
@@ -532,6 +532,21 @@ public sealed class CSnakesFinancialAnalysisService : IPythonFinancialAnalysisSe
         }
 
         return property.GetString()!;
+    }
+
+    private static string GetRequiredSignalSeverity(JsonElement signal)
+    {
+        var severity = GetRequiredString(signal, "severity");
+
+        if (!IsSeverity(severity, "Info") &&
+            !IsSeverity(severity, "Low") &&
+            !IsSeverity(severity, "Medium") &&
+            !IsSeverity(severity, "High"))
+        {
+            throw new JsonException("Required signal severity was unsupported.");
+        }
+
+        return severity;
     }
 
     private static string GetString(

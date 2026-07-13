@@ -234,6 +234,40 @@ public sealed class CSnakesFinancialAnalysisServiceFailureTests
             .Which.Evidence.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task SignalWithUnsupportedSeverity_ReturnsInvalidResponseFailure()
+    {
+        var invoker = new FakeFinancialAnalysisPythonInvoker(_ =>
+            """
+            {
+              "signals": [
+                {
+                  "name": "LOW_CURRENT_RATIO",
+                  "severity": "Critical",
+                  "period": "2025E",
+                  "summary": "Risk",
+                  "evidence": []
+                }
+              ]
+            }
+            """);
+        var logger = new TestCapturingLogger<CSnakesFinancialAnalysisService>();
+        var service = new CSnakesFinancialAnalysisService(invoker, logger);
+
+        var response = await service.DetectFinancialRiskSignalsAsync(
+            new DetectFinancialRiskSignalsRequest([], [], [], SessionId: SessionId),
+            CancellationToken.None);
+
+        response.Execution.Status.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        response.Execution.FailureCode.Should().Be(
+            FinancialAnalysisFailureCodes.PythonResponseInvalid);
+        response.Result.RiskLevel.Should().Be("Unknown");
+        response.Result.Warnings.Should().NotBeEmpty()
+            .And.OnlyContain(warning =>
+                !string.IsNullOrWhiteSpace(warning) &&
+                !warning.Contains("Critical", StringComparison.Ordinal));
+    }
+
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task OperationAsync_PreCancelledToken_DoesNotInvokePython(
