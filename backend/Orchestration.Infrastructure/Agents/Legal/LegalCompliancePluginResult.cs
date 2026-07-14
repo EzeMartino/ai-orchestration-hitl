@@ -1,4 +1,5 @@
 using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Regulations;
 
 namespace Orchestration.Infrastructure.Agents.Legal;
 
@@ -11,7 +12,8 @@ public sealed record LegalCompliancePluginResult(
     IReadOnlyList<string> Warnings,
     object? QueryStrategy = null,
     LegalAnalysisReviewResult? LegalReview = null,
-    bool RequiresHumanReview = false
+    bool RequiresHumanReview = false,
+    RegulatoryEvidenceAssessment? EvidenceAssessment = null
 );
 
 public sealed record LegalComplianceEvidenceResult(

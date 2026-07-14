@@ -13,6 +13,42 @@ namespace Orchestration.Tests.Agents.Legal;
 public class SemanticKernelLegalAgentTests
 {
     [Fact]
+    public async Task ReviewAsync_Should_preserve_evidence_assessment_without_converting_it_to_compliance_risk()
+    {
+        var evidenceAssessment = new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Weak",
+            Severity: "Warning",
+            RequiresHumanReview: true,
+            Reasons: ["La evidencia relevante no permite establecer el riesgo."]
+        );
+        var source = new StubRegulatoryKnowledgeSource(
+            new RegulatoryReviewResult(
+                HasComplianceRisk: false,
+                RiskLevel: "NotEstablished",
+                Summary: "La evidencia requiere revisión humana.",
+                SourceEngine: "Test regulatory source",
+                Findings: [],
+                Warnings: [],
+                EvidenceAssessment: evidenceAssessment
+            )
+        );
+        var agent = new SemanticKernelLegalAgent(new LegalCompliancePlugin(source));
+
+        var result = await agent.ReviewAsync(
+            TestFinancialReport.CreateContext(),
+            CancellationToken.None
+        );
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.EvidenceAssessment.Should().BeEquivalentTo(evidenceAssessment);
+        result.EvidenceAssessment!.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ReviewAsync_Should_return_compliance_risk_using_semantic_kernel_plugin()
     {
         var services = new ServiceCollection();
@@ -422,5 +458,16 @@ public class SemanticKernelLegalAgentTests
             Warnings: [],
             RequiresHumanReview: requiresHumanReview
         );
+    }
+
+    private sealed class StubRegulatoryKnowledgeSource(RegulatoryReviewResult result)
+        : IRegulatoryKnowledgeSource
+    {
+        public Task<RegulatoryReviewResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(result);
+        }
     }
 }
