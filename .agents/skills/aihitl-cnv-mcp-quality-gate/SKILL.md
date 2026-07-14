@@ -5,64 +5,90 @@ description: Use when ai-orchestration-hitl work involves the CNV MCP server, cn
 
 # AIHITL CNV MCP Quality Gate
 
-## Safety gate
+## Safety and read-only preflight
 
-Work from `tools/CnvRegulation.McpServer`. Start read-only. Before mutation, inspect configured storage and connection presence, embedding provider, and observed current database schema, corpus, and embedding state. Never print secrets: connection strings, API keys, user-secrets, or environment values.
-
-### Decision / quick reference
+From `tools/CnvRegulation.McpServer`, inspect storage/connection presence, provider, schema, corpus, and embeddings first. Never print secrets or secret-bearing environment values.
 
 | Observed state | Decision |
 |---|---|
-| In-memory | No database mutation; use unit/in-memory checks. |
-| Persistent local PostgreSQL | Confirm ownership and mutation authority; preserve existing state. |
-| Shared PostgreSQL | Require explicit target and mutation authority. |
-| Disposable Docker | Use only when explicitly designated and authorized; never assume a database is disposable. |
+| In-memory | Unit checks; no database mutation. |
+| Persistent local/shared PostgreSQL | Confirm owner/target/authority; preserve state. |
+| Disposable Docker | Only explicitly authorized; never assume disposability. |
 
-Never reset a database or replace a corpus unless expressly requested.
+Never reset a database or replace a corpus unless requested. Preflight:
 
-## Ordered workflow
+```powershell
+dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
+dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake --limit 25 --dry-run --only-missing
+```
 
-1. Build and run unit tests: `dotnet build`, then `dotnet test`.
-2. Only when observed schema is stale/missing and migration is authorized:
-   `dotnet run --project src/CnvRegulation.McpServer -- migrate-db`
-3. Only when observed corpus is stale/missing and ingestion is authorized:
-   `dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources --storage postgres`
-4. Run PostgreSQL integration tests only when opted in against the authorized target. Supply its connection through an existing secret-safe channel; never echo it.
+Require coverage totals, dry-run scanned/missing/eligible/already-embedded counts, and `Dry run only. No embeddings were generated or persisted.` Connection/schema failure: request migration authority. Empty/stale coverage: request ingestion authority. Neither permits mutation.
+
+## Ordered gate
+
+1. Clear integration opt-in for baseline; verify/restore:
    ```powershell
-   $env:CNV_REGULATION_RUN_INTEGRATION_TESTS = "true"
-   dotnet test
+   $priorOptIn=$env:CNV_REGULATION_RUN_INTEGRATION_TESTS
+   try {
+       Remove-Item Env:CNV_REGULATION_RUN_INTEGRATION_TESTS -ErrorAction SilentlyContinue
+       if(Test-Path Env:CNV_REGULATION_RUN_INTEGRATION_TESTS){throw "Integration opt-in remains set."}
+       dotnet build
+       dotnet test
+   } finally { [Environment]::SetEnvironmentVariable("CNV_REGULATION_RUN_INTEGRATION_TESTS",$priorOptIn) }
    ```
-5. Establish the full-text search baseline:
-   `dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --queries data/search-quality/cnv.search-quality.json --mode full_text`
-6. Validate analysis quality:
-   `dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --storage postgres --cases data/analysis-quality/cnv.analysis-quality.json`
+2. If schema is stale/missing and authorized: `dotnet run --project src/CnvRegulation.McpServer -- migrate-db`
+3. If corpus is stale/missing and authorized: `dotnet run --project src/CnvRegulation.McpServer -- ingest --source-directory data/sources --storage postgres`
+4. Integration: dedicated disposable database only, never persistent local/shared corpus. Load `$dedicatedDisposableConnectionString` secret-safely; scope/restore:
+   ```powershell
+   $priorOptIn=$env:CNV_REGULATION_RUN_INTEGRATION_TESTS; $priorDb=$env:CNV_REGULATION_DB_CONNECTION_STRING
+   try {
+       $env:CNV_REGULATION_RUN_INTEGRATION_TESTS="true"
+       $env:CNV_REGULATION_DB_CONNECTION_STRING=$dedicatedDisposableConnectionString
+       dotnet test
+   } finally {
+       [Environment]::SetEnvironmentVariable("CNV_REGULATION_RUN_INTEGRATION_TESTS",$priorOptIn)
+       [Environment]::SetEnvironmentVariable("CNV_REGULATION_DB_CONNECTION_STRING",$priorDb)
+   }
+   ```
+5. Full-text quality: `dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --queries data/search-quality/cnv.search-quality.json --mode full_text`
+6. Analysis quality: `dotnet run --project src/CnvRegulation.McpServer -- validate-analysis-quality --storage postgres --cases data/analysis-quality/cnv.analysis-quality.json`
 
-## Embeddings and comparison
+## Paid embeddings and hybrid
 
-Any paid OpenAI operation requires explicit authorization unless the user already requested it. First run the bounded smoke:
+Every paid OpenAI operation needs explicit authorization unless the user already requested it. Run bounded smoke first:
 
 ```powershell
-$env:DOTNET_ENVIRONMENT = "Development"
-dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250 --failed-report data/embedding-reports/failed-embeddings.json
+$priorEnvironment=$env:DOTNET_ENVIRONMENT
+try {
+    $env:DOTNET_ENVIRONMENT="Development"
+    dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --limit 25 --only-missing --batch-size 8 --delay-ms 250 --failed-report data/embedding-reports/failed-embeddings.json
+} finally { [Environment]::SetEnvironmentVariable("DOTNET_ENVIRONMENT",$priorEnvironment) }
 ```
 
-Inspect failures and cost, then obtain separate authorization for the full run. Run the same resume-safe command without the cap:
+Inspect failures/cost; obtain separate full-generation authorization, then run:
+
+`dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --only-missing --batch-size 8 --delay-ms 250 --failed-report data/embedding-reports/failed-embeddings.json`
+
+Hybrid comparison creates paid OpenAI query embeddings; authorize explicitly. Confirm corpus dimensions `1536`; stop on mismatch. Scope/restore:
 
 ```powershell
-dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider OpenAI --only-missing --batch-size 8 --delay-ms 250 --failed-report data/embedding-reports/failed-embeddings.json
+$priorProvider=$env:Embeddings__Provider; $priorModel=$env:Embeddings__Model; $priorDimensions=$env:Embeddings__Dimensions
+try {
+    $env:Embeddings__Provider="OpenAI"; $env:Embeddings__Model="text-embedding-3-small"; $env:Embeddings__Dimensions="1536"
+    dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json --output-report data/search-quality/reports/fulltext-vs-hybrid.review.md
+} finally {
+    [Environment]::SetEnvironmentVariable("Embeddings__Provider",$priorProvider)
+    [Environment]::SetEnvironmentVariable("Embeddings__Model",$priorModel)
+    [Environment]::SetEnvironmentVariable("Embeddings__Dimensions",$priorDimensions)
+}
 ```
 
-If authorized provider/state supports hybrid, write comparison evidence:
+Keep `full_text` default pending human legal-relevance review of comparison evidence. A 14/14 mechanical pass alone never promotes hybrid. Citations are retrieval evidence, not proof of legal applicability or compliance risk.
 
-`dotnet run --project src/CnvRegulation.McpServer -- validate-search-quality --storage postgres --compare-modes full_text,hybrid --queries data/search-quality/cnv.search-quality.json --output-report data/search-quality/reports/fulltext-vs-hybrid.review.md`
+## Stop conditions / common mistakes
 
-Keep `full_text` default until a human completes legal relevance review of that report. A 14/14 mechanical pass alone never promotes hybrid. Citations are retrieval evidence, not proof of legal applicability or compliance risk.
-
-## Stop conditions and common mistakes
-
-| Stop or mistake | Response |
+| Condition | Response |
 |---|---|
-| Storage, ownership, authority, or current state is unclear | Stop and ask; do not default to Docker or mutate. |
-| Paid-operation authorization is absent | Stop before OpenAI use. Smoke authorization does not cover the full run. |
-| A command/output may reveal secrets | Redact or stop; never print the value. |
-| A gate fails or comparison lacks human review | Report evidence; do not promote hybrid or claim regulatory safety. |
+| State, authority, dimensions, or dedicated test DB unclear | Stop and ask; do not mutate/default to Docker. |
+| Paid authorization absent | Stop before OpenAI; smoke authorization does not cover full generation/comparison. |
+| Gate fails or report lacks human review | Report evidence; never claim regulatory safety. |
