@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -165,6 +166,451 @@ public class ToolExecutionResultMapperTests
         );
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_preserve_explicit_human_review()
+    {
+        var result = MapDataResult(CreateDataResult(requiresHumanReview: true));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisExecutionStatus.Failed)]
+    [InlineData(FinancialAnalysisExecutionStatus.Degraded)]
+    [InlineData(FinancialAnalysisExecutionStatus.LegacyUnknown)]
+    public void TryMapDataResult_Should_require_review_for_incomplete_financial_execution(
+        FinancialAnalysisExecutionStatus status)
+    {
+        var result = MapDataResult(CreateDataResult(status: status));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_preserve_false_review_for_succeeded_financial_execution()
+    {
+        var result = MapDataResult(CreateDataResult(
+            status: FinancialAnalysisExecutionStatus.Succeeded,
+            stages: CreateCompleteStages()));
+
+        result!.RequiresHumanReview.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_not_force_review_for_legacy_result_without_financial_analysis()
+    {
+        var result = MapDataResult(CreateDataResult());
+
+        result!.FinancialAnalysis.Should().BeNull();
+        result.RequiresHumanReview.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_normalize_null_financial_execution_to_legacy_unknown_review()
+    {
+        const string outputJson = """
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Partial financial result.",
+              "engine": "Financial Workflow",
+              "evidence": [],
+              "financialAnalysis": {
+                "engine": "Financial Workflow",
+                "documentId": "document-1",
+                "company": "Acme",
+                "ratios": [],
+                "comparisons": [],
+                "riskSignals": [],
+                "riskEvidence": [],
+                "warnings": ["Preserved warning."],
+                "limitations": [],
+                "execution": null
+              },
+              "requiresHumanReview": false
+            }
+            """;
+
+        var result = new ToolExecutionResultMapper().TryMapDataResult(
+        [
+            CreateExecutionResult("data.analyze_transactions", outputJson)
+        ]);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis.Should().NotBeNull();
+        result.FinancialAnalysis!.DocumentId.Should().Be("document-1");
+        result.FinancialAnalysis.Company.Should().Be("Acme");
+        result.FinancialAnalysis.Warnings.Should().ContainSingle()
+            .Which.Should().Be("Preserved warning.");
+        result.FinancialAnalysis.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_canonicalize_contradictory_succeeded_signal_failure()
+    {
+        var executionJson = BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", "PYTHON_INVOCATION_FAILED"),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.FinancialAnalysis.Execution.Stages.Should().HaveCount(4);
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_flag_overall_contradiction_even_when_stages_derive_succeeded()
+    {
+        var executionJson = BuildExecutionJson(
+            "failed",
+            CreateSucceededStageJson());
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_preserve_false_review_for_complete_consistent_raw_execution()
+    {
+        var executionJson = BuildExecutionJson(
+            "succeeded",
+            CreateSucceededStageJson());
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeFalse();
+        result.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Succeeded);
+        result.FinancialAnalysis.Execution.Stages.Select(stage => stage.Operation)
+            .Should().Equal(FinancialAnalysisOperations.All);
+    }
+
+    public static TheoryData<string> InvalidExecutionMetadata => new()
+    {
+        BuildRawDataJson(null),
+        BuildRawDataJson("null"),
+        BuildRawDataJson(BuildExecutionJson("succeeded")),
+        BuildRawDataJson("{\"overallStatus\":\"succeeded\"}"),
+        BuildRawDataJson("{\"overallStatus\":\"succeeded\",\"stages\":null}"),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("ratios", "succeeded"),
+            StageJson("signals", "succeeded"),
+            StageJson("summary", "succeeded"))),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("unknown", "succeeded"),
+            StageJson("summary", "succeeded"))),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "degraded"),
+            StageJson("signals", "succeeded"),
+            StageJson("summary", "succeeded"))),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed"),
+            StageJson("summary", "succeeded"))),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "succeeded"),
+            "null")),
+        BuildRawDataJson(BuildExecutionJson(
+            "succeeded",
+            StageJson("ratios", "succeeded", durationMilliseconds: -1),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "succeeded"),
+            StageJson("summary", "succeeded")))
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidExecutionMetadata))]
+    public void TryMapDataResult_Should_fail_closed_for_invalid_execution_metadata(
+        string outputJson)
+    {
+        var result = MapRawDataResult(outputJson);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_reject_raw_failure_detail_as_stage_failure_code()
+    {
+        const string rawFailure = "System.InvalidOperationException: sensitive adapter detail";
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", rawFailure),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Execution.Stages.Should().BeEmpty();
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        JsonSerializer.Serialize(result, JsonOptions).Should().NotContain(rawFailure);
+    }
+
+    [Theory]
+    [InlineData("succeeded")]
+    [InlineData("legacy_unknown")]
+    public void TryMapDataResult_Should_reject_failure_code_on_non_failed_stage(
+        string stageStatus)
+    {
+        var executionJson = BuildExecutionJson(
+            stageStatus == "succeeded" ? "succeeded" : "degraded",
+            StageJson("ratios", stageStatus, "PYTHON_RESPONSE_INVALID"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "succeeded"),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Execution.Stages.Should().BeEmpty();
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Theory]
+    [InlineData(FinancialAnalysisFailureCodes.PythonInvocationFailed)]
+    [InlineData(FinancialAnalysisFailureCodes.PythonResponseInvalid)]
+    [InlineData(FinancialAnalysisFailureCodes.UnexpectedFailure)]
+    public void TryMapDataResult_Should_accept_allowlisted_code_on_failed_stage(
+        string failureCode)
+    {
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", failureCode),
+            StageJson("summary", "succeeded"));
+
+        var result = MapRawDataResult(BuildRawDataJson(executionJson));
+
+        result!.FinancialAnalysis!.Execution.OverallStatus
+            .Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.FinancialAnalysis.Execution.Stages.Single(stage =>
+            stage.Operation == FinancialAnalysisOperations.Signals)
+            .FailureCode.Should().Be(failureCode);
+        result.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_validate_pascal_case_execution_before_deserialization()
+    {
+        const string rawFailure = "System.InvalidOperationException: sensitive detail";
+        var executionJson = BuildExecutionJson(
+            "failed",
+            StageJson("ratios", "succeeded"),
+            StageJson("comparisons", "succeeded"),
+            StageJson("signals", "failed", rawFailure),
+            StageJson("summary", "succeeded"));
+        var outputJson = PascalCaseExecutionMetadata(
+            BuildRawDataJson(executionJson));
+
+        var result = MapRawDataResult(outputJson);
+
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.DocumentId.Should().Be("document-1");
+        JsonSerializer.Serialize(result, JsonOptions).Should().NotContain(rawFailure);
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_fail_closed_for_pascal_case_null_stages()
+    {
+        var outputJson = PascalCaseExecutionMetadata(BuildRawDataJson(
+            "{\"overallStatus\":\"succeeded\",\"stages\":null}"));
+
+        var result = MapRawDataResult(outputJson);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(
+            FinancialAnalysisExecution.LegacyUnknown);
+        result.FinancialAnalysis.Warnings.Should().Contain("Preserved warning.");
+    }
+
+    [Fact]
+    public void TryMapDataResult_Should_reject_case_equivalent_financial_analysis_properties()
+    {
+        var outputJson = BuildRawDataJsonWithDuplicateFinancialAnalysis(
+            BuildExecutionJson("succeeded", CreateSucceededStageJson()));
+
+        var result = MapRawDataResult(outputJson);
+
+        result.Should().BeNull();
+    }
+
+    private static DataAgentResult? MapDataResult(DataAgentResult dataResult)
+    {
+        return new ToolExecutionResultMapper().TryMapDataResult(
+        [
+            CreateExecutionResult(
+                "data.analyze_transactions",
+                JsonSerializer.Serialize(dataResult, JsonOptions))
+        ]);
+    }
+
+    private static DataAgentResult CreateDataResult(
+        FinancialAnalysisExecutionStatus? status = null,
+        bool requiresHumanReview = false,
+        IReadOnlyList<FinancialAnalysisStageExecution>? stages = null)
+    {
+        FinancialAnalysisContext? financialAnalysis = null;
+        if (status is not null)
+        {
+            financialAnalysis = new FinancialAnalysisContext(
+                "Financial Workflow", "document", null, [], [], [], [], [], [])
+            {
+                Execution = new FinancialAnalysisExecution(status.Value, stages ?? [])
+            };
+        }
+
+        return new DataAgentResult(
+            false, "Low", "No anomaly.", "Test", [],
+            financialAnalysis, requiresHumanReview);
+    }
+
+    private static IReadOnlyList<FinancialAnalysisStageExecution> CreateCompleteStages()
+    {
+        return FinancialAnalysisOperations.All
+            .Select(operation => new FinancialAnalysisStageExecution(
+                operation,
+                FinancialAnalysisExecutionStatus.Succeeded,
+                1))
+            .ToArray();
+    }
+
+    private static DataAgentResult? MapRawDataResult(string outputJson)
+    {
+        return new ToolExecutionResultMapper().TryMapDataResult(
+        [
+            CreateExecutionResult("data.analyze_transactions", outputJson)
+        ]);
+    }
+
+    private static string BuildRawDataJson(string? executionJson)
+    {
+        var executionProperty = executionJson is null
+            ? string.Empty
+            : $",\"execution\":{executionJson}";
+
+        return $$"""
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Partial financial result.",
+              "engine": "Financial Workflow",
+              "evidence": [],
+              "financialAnalysis": {
+                "engine": "Financial Workflow",
+                "documentId": "document-1",
+                "company": "Acme",
+                "ratios": [],
+                "comparisons": [],
+                "riskSignals": [],
+                "riskEvidence": [],
+                "warnings": ["Preserved warning."],
+                "limitations": []{{executionProperty}}
+              },
+              "requiresHumanReview": false
+            }
+            """;
+    }
+
+    private static string PascalCaseExecutionMetadata(string outputJson)
+    {
+        return outputJson
+            .Replace("\"financialAnalysis\"", "\"FinancialAnalysis\"", StringComparison.Ordinal)
+            .Replace("\"execution\"", "\"Execution\"", StringComparison.Ordinal)
+            .Replace("\"overallStatus\"", "\"OverallStatus\"", StringComparison.Ordinal)
+            .Replace("\"stages\"", "\"Stages\"", StringComparison.Ordinal)
+            .Replace("\"operation\"", "\"Operation\"", StringComparison.Ordinal)
+            .Replace("\"status\"", "\"Status\"", StringComparison.Ordinal)
+            .Replace("\"durationMilliseconds\"", "\"DurationMilliseconds\"", StringComparison.Ordinal)
+            .Replace("\"failureCode\"", "\"FailureCode\"", StringComparison.Ordinal);
+    }
+
+    private static string BuildRawDataJsonWithDuplicateFinancialAnalysis(
+        string executionJson)
+    {
+        using var document = JsonDocument.Parse(BuildRawDataJson(executionJson));
+        var financialAnalysisJson = document.RootElement
+            .GetProperty("financialAnalysis")
+            .GetRawText();
+
+        return $$"""
+            {
+              "hasAnomaly": false,
+              "severity": "Low",
+              "summary": "Ambiguous financial result.",
+              "engine": "Financial Workflow",
+              "evidence": [],
+              "financialAnalysis": {{financialAnalysisJson}},
+              "FinancialAnalysis": {{financialAnalysisJson}},
+              "requiresHumanReview": false
+            }
+            """;
+    }
+
+    private static string BuildExecutionJson(
+        string overallStatus,
+        params string[] stages)
+    {
+        return $$"""{"overallStatus":"{{overallStatus}}","stages":[{{string.Join(",", stages)}}]}""";
+    }
+
+    private static string[] CreateSucceededStageJson()
+    {
+        return FinancialAnalysisOperations.All
+            .Select(operation => StageJson(operation, "succeeded"))
+            .ToArray();
+    }
+
+    private static string StageJson(
+        string operation,
+        string status,
+        string? failureCode = null,
+        long durationMilliseconds = 1)
+    {
+        var failureCodeProperty = failureCode is null
+            ? string.Empty
+            : $",\"failureCode\":\"{failureCode}\"";
+
+        return $$"""{"operation":"{{operation}}","status":"{{status}}","durationMilliseconds":{{durationMilliseconds}}{{failureCodeProperty}}}""";
     }
 
     private static ToolExecutionResult CreateExecutionResult(

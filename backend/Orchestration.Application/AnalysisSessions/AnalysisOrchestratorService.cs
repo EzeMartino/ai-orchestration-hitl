@@ -340,6 +340,10 @@ namespace Orchestration.Application.AnalysisSessions
                 anomaly = new
                 {
                     detected = plannerResult.DataResult.HasAnomaly,
+                    assessmentStatus = plannerResult.DataResult.RequiresHumanReview
+                        ? "inconclusive"
+                        : "completed",
+                    requiresHumanReview = plannerResult.DataResult.RequiresHumanReview,
                     severity = plannerResult.DataResult.Severity,
                     engine = plannerResult.DataResult.Engine,
                     category = "FinancialTransactionAnomaly",
@@ -429,6 +433,17 @@ namespace Orchestration.Application.AnalysisSessions
                         }),
                         warnings = plannerResult.DataResult.FinancialAnalysis.Warnings,
                         limitations = plannerResult.DataResult.FinancialAnalysis.Limitations,
+                        execution = new
+                        {
+                            overallStatus = plannerResult.DataResult.FinancialAnalysis.Execution.OverallStatus,
+                            stages = plannerResult.DataResult.FinancialAnalysis.Execution.Stages.Select(stage => new
+                            {
+                                operation = stage.Operation,
+                                status = stage.Status,
+                                durationMilliseconds = stage.DurationMilliseconds,
+                                failureCode = stage.FailureCode
+                            })
+                        },
                         metricsInputSource = plannerResult.DataResult.FinancialAnalysis.MetricsInputSource,
                         metricsProvenance = plannerResult.DataResult.FinancialAnalysis.MetricsProvenance is null
                             ? null

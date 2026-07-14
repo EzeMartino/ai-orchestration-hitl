@@ -4,6 +4,7 @@ import {
   formatFinancialWarningText,
   groupFinancialWarnings,
 } from "../utils/financialWarnings";
+import { getFinancialAnalysisExecutionBanner } from "../utils/financialAnalysisExecution";
 
 interface FinancialRiskEvidencePanelProps {
   financialAnalysis?: FinancialAnalysisContext | null;
@@ -138,6 +139,9 @@ export function FinancialRiskEvidencePanel({
   const aiReview = financialAnalysis.aiReview;
   const requiresSessionMetrics = financialAnalysis.warnings.some(isRequiredMetricsWarning);
   const groupedWarnings = groupFinancialWarnings(financialAnalysis.warnings);
+  const executionBanner = getFinancialAnalysisExecutionBanner(
+    financialAnalysis.execution,
+  );
 
   return (
     <section className="financialRiskPanel">
@@ -185,6 +189,23 @@ export function FinancialRiskEvidencePanel({
           <strong>{financialAnalysis.documentId}</strong>
         </div>
       </div>
+
+      {executionBanner && (
+        <div
+          className={`financialExecutionBanner financialExecution-${executionBanner.tone}`}
+          role={executionBanner.tone === "danger" ? "alert" : "status"}
+        >
+          <strong>{executionBanner.title}</strong>
+          <p>{executionBanner.description}</p>
+          {executionBanner.affectedStages.length > 0 && (
+            <ul>
+              {executionBanner.affectedStages.map((stage) => (
+                <li key={stage}>{stage}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {isFixtureFallback && (
         <div className="financialSourceWarning">

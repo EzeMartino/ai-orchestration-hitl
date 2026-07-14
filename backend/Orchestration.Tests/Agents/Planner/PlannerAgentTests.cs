@@ -96,6 +96,35 @@ public class PlannerAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_Should_require_approval_when_data_requires_review_without_anomaly()
+    {
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false) with
+            {
+                RequiresHumanReview = true
+            }),
+            new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false)),
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions());
+
+        var result = await plannerAgent.RunAsync(
+            TestFinancialReport.CreateContext(),
+            CancellationToken.None);
+
+        result.DataResult.HasAnomaly.Should().BeFalse();
+        result.DataResult.RequiresHumanReview.Should().BeTrue();
+        result.LegalResult.HasComplianceRisk.Should().BeFalse();
+        result.RequiresHumanApproval.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task RunAsync_Should_carry_empty_tool_plan_audit_result_when_tool_calling_is_disabled()
     {
         var plannerAgent = new PlannerAgent(

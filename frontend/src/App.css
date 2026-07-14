@@ -1508,6 +1508,57 @@ code {
   word-break: break-word;
 }
 
+.financialExecutionBanner {
+  margin-top: 1rem;
+  border: 1px solid;
+  border-left-width: 5px;
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+}
+
+.financialExecutionBanner strong {
+  display: block;
+  color: #f8fafc;
+  line-height: 1.35;
+}
+
+.financialExecutionBanner p {
+  margin: 0.4rem 0 0;
+  color: inherit;
+  line-height: 1.5;
+}
+
+.financialExecutionBanner ul {
+  margin: 0.65rem 0 0;
+  padding-left: 1.2rem;
+  font-weight: 800;
+}
+
+.financialExecutionBanner li + li {
+  margin-top: 0.25rem;
+}
+
+.financialExecution-warning {
+  background: rgba(120, 53, 15, 0.32);
+  border-color: rgba(245, 158, 11, 0.62);
+  border-left-color: #f59e0b;
+  color: #fde68a;
+}
+
+.financialExecution-danger {
+  background: rgba(127, 29, 29, 0.34);
+  border-color: rgba(248, 113, 113, 0.68);
+  border-left-color: #ef4444;
+  color: #fecaca;
+}
+
+.financialExecution-neutral {
+  background: rgba(30, 41, 59, 0.72);
+  border-color: rgba(148, 163, 184, 0.58);
+  border-left-color: #94a3b8;
+  color: #cbd5e1;
+}
+
 .financialSourceWarning {
   margin-top: 1rem;
   background: rgba(245, 158, 11, 0.1);

@@ -8,6 +8,9 @@ namespace Orchestration.Infrastructure.Agents.Data;
 
 public sealed class ConfigurableDataAgent : IDataAgent
 {
+    private const string UnexpectedFailureCode = "FINANCIAL_ANALYSIS_UNEXPECTED_FAILURE";
+    private const string HumanReviewSummary =
+        "No se pudo completar el análisis financiero estructurado; requiere revisión humana.";
     private readonly ILegacyDataAgent _legacyDataAgent;
     private readonly IDataAgentFinancialAnalysisWorkflow _financialAnalysisWorkflow;
     private readonly DataAgentOptions _options;
@@ -62,8 +65,9 @@ public sealed class ConfigurableDataAgent : IDataAgent
         {
             _logger.LogWarning(
                 ex,
-                "Financial analysis workflow failed for report {ReportName}.",
-                report.ReportName
+                "Financial analysis workflow failed for session {SessionId}. FailureCode: {FailureCode}.",
+                report.SessionId,
+                UnexpectedFailureCode
             );
 
             if (_options.UseLegacyAnomalyDetectionFallback)
@@ -77,16 +81,19 @@ public sealed class ConfigurableDataAgent : IDataAgent
 
                 return fallback with
                 {
-                    Engine = $"{fallback.Engine} (respaldo legacy)"
+                    Summary = $"{fallback.Summary} {HumanReviewSummary}",
+                    Engine = $"{fallback.Engine} (respaldo legacy)",
+                    RequiresHumanReview = true
                 };
             }
 
             return new DataAgentResult(
-                HasAnomaly: true,
-                Severity: "Medium",
-                Summary: "No se pudo completar el análisis financiero. Se recomienda revisión humana.",
+                HasAnomaly: false,
+                Severity: "Unknown",
+                Summary: HumanReviewSummary,
                 Engine: "Financial Analysis Workflow",
-                Evidence: []
+                Evidence: [],
+                RequiresHumanReview: true
             );
         }
     }

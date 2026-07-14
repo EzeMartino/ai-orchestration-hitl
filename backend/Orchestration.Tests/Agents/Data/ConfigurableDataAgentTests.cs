@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Data;
@@ -61,7 +62,15 @@ public sealed class ConfigurableDataAgentTests
     [Fact]
     public async Task AnalyzeAsync_Should_fallback_to_legacy_when_financial_workflow_fails_and_fallback_is_enabled()
     {
-        var legacy = new FakeLegacyDataAgent();
+        var legacy = new FakeLegacyDataAgent
+        {
+            Result = new DataAgentResult(
+                HasAnomaly: false,
+                Severity: "Low",
+                Summary: "Legacy analysis completed without anomaly.",
+                Engine: "Legacy DataAgent",
+                Evidence: [])
+        };
         var workflow = new FakeFinancialAnalysisWorkflow
         {
             ThrowOnAnalyze = true
@@ -84,6 +93,13 @@ public sealed class ConfigurableDataAgentTests
         legacy.WasCalled.Should().BeTrue();
         workflow.WasCalled.Should().BeTrue();
         result.Engine.Should().Be("Legacy DataAgent (respaldo legacy)");
+        result.HasAnomaly.Should().BeFalse();
+        result.Severity.Should().Be("Low");
+        result.Evidence.Should().BeEmpty();
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Summary.Should().StartWith("Legacy analysis completed without anomaly.");
+        result.Summary.Should().Contain("No se pudo completar el análisis financiero estructurado");
+        result.Summary.Should().Contain("requiere revisión humana");
     }
 
     [Fact]
@@ -112,9 +128,34 @@ public sealed class ConfigurableDataAgentTests
         legacy.WasCalled.Should().BeFalse();
         workflow.WasCalled.Should().BeTrue();
         result.Engine.Should().Be("Financial Analysis Workflow");
-        result.HasAnomaly.Should().BeTrue();
-        result.Severity.Should().Be("Medium");
-        result.Summary.Should().Be("No se pudo completar el análisis financiero. Se recomienda revisión humana.");
+        result.HasAnomaly.Should().BeFalse();
+        result.Severity.Should().Be("Unknown");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Summary.Should().Contain("No se pudo completar el análisis financiero estructurado");
+        result.Summary.Should().Contain("requiere revisión humana");
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_Should_log_safe_structured_failure_metadata()
+    {
+        var legacy = new FakeLegacyDataAgent();
+        var workflow = new FakeFinancialAnalysisWorkflow { ThrowOnAnalyze = true };
+        var logger = new TestCapturingLogger<ConfigurableDataAgent>();
+        var agent = CreateAgent(
+            legacy,
+            workflow,
+            new DataAgentOptions { FinancialAnalysisToolsEnabled = true },
+            logger);
+        var report = CreateReport();
+
+        await agent.AnalyzeAsync(report, CancellationToken.None);
+
+        var failureLog = logger.Entries.Should().ContainSingle(entry =>
+            entry.Level == LogLevel.Warning &&
+            entry.State.ContainsKey("FailureCode")).Subject;
+        failureLog.State["SessionId"].Should().Be(report.SessionId);
+        failureLog.State["FailureCode"].Should().Be("FINANCIAL_ANALYSIS_UNEXPECTED_FAILURE");
+        failureLog.Message.Should().NotContain("Financial workflow failed.");
     }
 
     [Fact]
@@ -171,13 +212,14 @@ public sealed class ConfigurableDataAgentTests
     private static ConfigurableDataAgent CreateAgent(
         FakeLegacyDataAgent legacyDataAgent,
         FakeFinancialAnalysisWorkflow financialAnalysisWorkflow,
-        DataAgentOptions options)
+        DataAgentOptions options,
+        ILogger<ConfigurableDataAgent>? logger = null)
     {
         return new ConfigurableDataAgent(
             legacyDataAgent,
             financialAnalysisWorkflow,
             Options.Create(options),
-            NullLogger<ConfigurableDataAgent>.Instance
+            logger ?? NullLogger<ConfigurableDataAgent>.Instance
         );
     }
 
@@ -196,13 +238,15 @@ public sealed class ConfigurableDataAgentTests
     {
         public bool WasCalled { get; private set; }
 
+        public DataAgentResult? Result { get; init; }
+
         public Task<DataAgentResult> AnalyzeAsync(
             FinancialReportContext report,
             CancellationToken cancellationToken)
         {
             WasCalled = true;
 
-            return Task.FromResult(new DataAgentResult(
+            return Task.FromResult(Result ?? new DataAgentResult(
                 HasAnomaly: true,
                 Severity: "High",
                 Summary: "Legacy anomaly detection completed.",
