@@ -22,15 +22,16 @@ public class SemanticKernelToolPlanProposalServiceTests
         "TOOL_PLAN_SUBMITTED_AT_CANONICALIZED";
 
     [Theory]
-    [InlineData("{}", "missing", null)]
-    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z")]
-    [InlineData("{\"submittedAt\":\"not-a-date\"}", "malformed", "not-a-date")]
-    [InlineData("{\" SubmittedAt \":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z")]
-    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\",\"SubmittedAt\":\"2031-01-01T00:00:00Z\"}", "duplicate", "2030-01-01T00:00:00Z")]
+    [InlineData("{}", "missing", null, null)]
+    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z", null)]
+    [InlineData("{\"submittedAt\":\"not-a-date\"}", "malformed", "not-a-date", null)]
+    [InlineData("{\" SubmittedAt \":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z", null)]
+    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\",\"SubmittedAt\":\"2031-01-01T00:00:00Z\"}", "duplicate", "2030-01-01T00:00:00Z", "2031-01-01T00:00:00Z")]
     public async Task ProposeAsync_Should_canonicalize_data_submitted_at_and_log_safe_reason(
         string argumentsJson,
         string expectedReason,
-        string? untrustedValue)
+        string? firstUnsafeFragment,
+        string? secondUnsafeFragment)
     {
         var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
         var input = CreateInput();
@@ -53,7 +54,13 @@ public class SemanticKernelToolPlanProposalServiceTests
         dataCall.Arguments["submittedAt"].Should().Be(FormatSubmittedAt(input));
 
         var entry = logger.Entries.Should().ContainSingle().Subject;
-        AssertSafeCanonicalizationWarning(entry, input, expectedReason, untrustedValue);
+        AssertSafeCanonicalizationWarning(
+            entry,
+            input,
+            expectedReason,
+            firstUnsafeFragment,
+            secondUnsafeFragment
+        );
     }
 
     [Fact]
@@ -61,6 +68,12 @@ public class SemanticKernelToolPlanProposalServiceTests
     {
         var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
         var input = CreateInput();
+        var fallback = new DeterministicToolPlanProposalService(
+            new ToolCallingOptions
+            {
+                Enabled = true
+            }
+        );
         var service = CreateService(
             toolCallingEnabled: true,
             chatContent: "not-json",
@@ -71,13 +84,15 @@ public class SemanticKernelToolPlanProposalServiceTests
             input,
             CancellationToken.None
         );
+        var expected = await fallback.ProposeAsync(
+            input,
+            CancellationToken.None
+        );
 
-        result.ProposedCalls.Should().HaveCount(2);
-        var dataCall = result.ProposedCalls.Should()
-            .ContainSingle(x => x.ToolName == PlannerToolCatalog.AnalyzeTransactionsName)
-            .Subject;
-        dataCall.Arguments["submittedAt"].Should().Be(FormatSubmittedAt(input));
-        result.ProposedCalls.Should().Contain(x => x.ToolName == "legal.search_cnv_regulation");
+        result.Should().BeEquivalentTo(
+            expected,
+            options => options.WithStrictOrdering()
+        );
         logger.Entries.Should().BeEmpty();
     }
 
@@ -222,7 +237,7 @@ public class SemanticKernelToolPlanProposalServiceTests
             call.Arguments["submittedAt"] == FormatSubmittedAt(input));
 
         logger.Entries.Should().HaveCount(2);
-        AssertSafeCanonicalizationWarning(logger.Entries[0], input, "missing", null);
+        AssertSafeCanonicalizationWarning(logger.Entries[0], input, "missing");
         AssertSafeCanonicalizationWarning(logger.Entries[1], input, "malformed", "not-a-date");
     }
 
@@ -370,7 +385,7 @@ public class SemanticKernelToolPlanProposalServiceTests
         CapturedLogEntry entry,
         ToolPlanProposalInput input,
         string expectedReason,
-        string? untrustedValue)
+        params string?[] unsafeFragments)
     {
         entry.Level.Should().Be(LogLevel.Warning);
         entry.Properties.Keys.Should().BeEquivalentTo(
@@ -381,20 +396,22 @@ public class SemanticKernelToolPlanProposalServiceTests
         entry.Properties["FailureCode"].Should().Be(CanonicalizationFailureCode);
         entry.Properties["Reason"].Should().Be(expectedReason);
 
-        var capturedText = string.Join(
-            " ",
-            entry.Message,
-            string.Join(" ", entry.Properties.Values)
-        );
-        capturedText.Should().NotContain(input.ReportName);
-        capturedText.Should().NotContain(input.TotalAmount.ToString(CultureInfo.InvariantCulture));
-        capturedText.Should().NotContain(input.TransactionCount.ToString(CultureInfo.InvariantCulture));
-        capturedText.Should().NotContain(input.PlannerSummary);
-        capturedText.Should().NotContain(input.RiskFactors[0]);
-        capturedText.Should().NotContain(input.Limitations[0]);
-        if (untrustedValue is not null)
+        var structuredProperties = string.Join(" ", entry.Properties.Values);
+        var forbiddenFragments = new[]
         {
-            capturedText.Should().NotContain(untrustedValue);
+            input.ReportName,
+            input.TotalAmount.ToString(CultureInfo.InvariantCulture),
+            input.TransactionCount.ToString(CultureInfo.InvariantCulture),
+            input.PlannerSummary,
+            input.RiskFactors[0],
+            input.Limitations[0]
+        }
+            .Concat(unsafeFragments.OfType<string>());
+
+        foreach (var forbiddenFragment in forbiddenFragments)
+        {
+            entry.Message.Should().NotContain(forbiddenFragment);
+            structuredProperties.Should().NotContain(forbiddenFragment);
         }
     }
 
