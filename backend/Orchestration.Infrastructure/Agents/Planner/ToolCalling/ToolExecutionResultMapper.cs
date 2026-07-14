@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 
@@ -12,9 +13,16 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 {
+    private const string RetrievalReviewSummary =
+        "Se recuperó evidencia regulatoria potencialmente relevante como posible área de revisión. La aplicabilidad no está determinada.";
+    private const string RetrievalEvidenceSummary =
+        "Se recuperó evidencia regulatoria, pero no se estableció relevancia ni aplicabilidad para una evaluación de cumplimiento.";
+    private const string NoRetrievalEvidenceSummary =
+        "No se recuperó evidencia regulatoria. La ausencia de resultados no constituye una evaluación de cumplimiento.";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> LegalRiskLevels =
-        new(["Low", "Medium", "High", "Unknown"], StringComparer.Ordinal);
+        new(["Low", "Medium", "High", "Unknown", "NotEstablished"], StringComparer.Ordinal);
     private static readonly HashSet<string> LegalDataStatuses = new(
         [
             LegalDataToolStatuses.Executed,
@@ -54,7 +62,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         IReadOnlyList<string?>? Warnings,
         LegalQueryStrategyAudit? QueryStrategy = null,
         LegalAnalysisReviewResult? LegalReview = null,
-        bool RequiresHumanReview = false);
+        bool RequiresHumanReview = false,
+        RegulatoryEvidenceAssessment? EvidenceAssessment = null);
 
     public DataAgentResult? TryMapDataResult(
         IReadOnlyList<ToolExecutionResult> executedCalls)
@@ -346,28 +355,39 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     public LegalAgentResult? TryMapLegalResult(
         IReadOnlyList<ToolExecutionResult> executedCalls)
     {
-        var call = FindSuccessfulExecutedCall(
-            executedCalls,
-            PlannerToolResultKind.LegalAgent);
+        var calls = FindSuccessfulExecutedCalls(
+                executedCalls,
+                PlannerToolResultKind.LegalAgent)
+            .ToArray();
 
-        if (call is null)
+        if (calls.Length == 0)
         {
             return null;
         }
 
         try
         {
-            if (!HasValidRawLegalAuditStatus(call.OutputJson))
+            var results = new List<LegalAgentResult>(calls.Length);
+            foreach (var call in calls)
             {
-                return null;
+                if (!HasValidRawLegalAuditStatus(call.OutputJson))
+                {
+                    return null;
+                }
+
+                var payload = JsonSerializer.Deserialize<LegalAggregatePayload>(
+                    call.OutputJson,
+                    JsonOptions);
+                var result = TryCreateLegalResult(payload);
+                if (result is null)
+                {
+                    return null;
+                }
+
+                results.Add(result);
             }
 
-            var payload = JsonSerializer.Deserialize<LegalAggregatePayload>(
-                call.OutputJson,
-                JsonOptions
-            );
-
-            return TryCreateLegalResult(payload);
+            return AggregateLegalResults(results);
         }
         catch (JsonException)
         {
@@ -461,7 +481,10 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             payload.Evidence.Any(evidence => !IsValidLegalEvidence(evidence)) ||
             payload.Warnings.Any(warning => warning is null) ||
             !TrySnapshotQueryStrategy(payload.QueryStrategy, out var queryStrategy) ||
-            !TrySnapshotLegalReview(payload.LegalReview, out var legalReview))
+            !TrySnapshotLegalReview(payload.LegalReview, out var legalReview) ||
+            !TrySnapshotEvidenceAssessment(
+                payload.EvidenceAssessment,
+                out var evidenceAssessment))
         {
             return null;
         }
@@ -475,8 +498,214 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             Array.AsReadOnly(payload.Warnings.Select(warning => warning!).ToArray()),
             queryStrategy,
             legalReview,
-            payload.RequiresHumanReview
+            payload.RequiresHumanReview,
+            evidenceAssessment
         );
+    }
+
+    private static LegalAgentResult? AggregateLegalResults(
+        IReadOnlyList<LegalAgentResult> results)
+    {
+        var assessments = results
+            .Select(result => result.EvidenceAssessment)
+            .Where(assessment => assessment is not null)
+            .Cast<RegulatoryEvidenceAssessment>()
+            .ToArray();
+        if (assessments.Length > 0 && assessments.Length != results.Count)
+        {
+            return null;
+        }
+
+        var evidenceAssessment = assessments.Length == 0
+            ? null
+            : CombineEvidenceAssessments(assessments);
+        var evidence = results
+            .Where(result => evidenceAssessment is null ||
+                result.EvidenceAssessment!.RequiresHumanReview)
+            .SelectMany(result => result.Evidence)
+            .Distinct()
+            .ToArray();
+        var warnings = results
+            .SelectMany(result => result.Warnings)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var engines = results
+            .Select(result => result.Engine)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var requiresHumanReview = results.Any(result => result.RequiresHumanReview) ||
+            evidenceAssessment?.RequiresHumanReview == true;
+
+        if (evidenceAssessment is not null)
+        {
+            return new LegalAgentResult(
+                HasComplianceRisk: false,
+                RiskLevel: "NotEstablished",
+                Summary: evidenceAssessment.RequiresHumanReview
+                    ? RetrievalReviewSummary
+                    : evidenceAssessment.EvidenceFound
+                        ? RetrievalEvidenceSummary
+                        : NoRetrievalEvidenceSummary,
+                Engine: string.Join(" + ", engines),
+                Evidence: Array.AsReadOnly(evidence),
+                Warnings: Array.AsReadOnly(warnings),
+                QueryStrategy: MergeQueryStrategies(results),
+                LegalReview: results.Select(result => result.LegalReview)
+                    .FirstOrDefault(review => review is not null),
+                RequiresHumanReview: requiresHumanReview,
+                EvidenceAssessment: evidenceAssessment);
+        }
+
+        var highestRisk = results
+            .Select(result => result.RiskLevel)
+            .OrderByDescending(LegalRiskRank)
+            .First();
+        return new LegalAgentResult(
+            HasComplianceRisk: results.Any(result => result.HasComplianceRisk),
+            RiskLevel: highestRisk,
+            Summary: string.Join(" ", results
+                .Select(result => result.Summary)
+                .Distinct(StringComparer.Ordinal)),
+            Engine: string.Join(" + ", engines),
+            Evidence: Array.AsReadOnly(evidence),
+            Warnings: Array.AsReadOnly(warnings),
+            QueryStrategy: MergeQueryStrategies(results),
+            LegalReview: results.Select(result => result.LegalReview)
+                .FirstOrDefault(review => review is not null),
+            RequiresHumanReview: requiresHumanReview);
+    }
+
+    private static RegulatoryEvidenceAssessment CombineEvidenceAssessments(
+        IReadOnlyList<RegulatoryEvidenceAssessment> assessments)
+    {
+        var relevance = MaxAssessmentLevel(
+            assessments.Select(assessment => assessment.Relevance));
+        var quality = MaxAssessmentLevel(
+            assessments.Select(assessment => assessment.EvidenceQuality));
+        var requiresHumanReview = relevance is "Weak" or "Strong";
+
+        return new RegulatoryEvidenceAssessment(
+            EvidenceFound: assessments.Any(assessment => assessment.EvidenceFound),
+            Relevance: relevance,
+            Applicability: "NotEstablished",
+            EvidenceQuality: quality,
+            Severity: requiresHumanReview ? "Warning" : "Info",
+            RequiresHumanReview: requiresHumanReview,
+            Reasons: Array.AsReadOnly(assessments
+                .SelectMany(assessment => assessment.Reasons)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray()));
+    }
+
+    private static string MaxAssessmentLevel(IEnumerable<string> levels)
+    {
+        var values = levels.ToArray();
+        if (values.Contains("Strong", StringComparer.Ordinal)) return "Strong";
+        if (values.Contains("Weak", StringComparer.Ordinal)) return "Weak";
+        return "None";
+    }
+
+    private static int LegalRiskRank(string riskLevel) => riskLevel switch
+    {
+        "High" => 4,
+        "Medium" => 3,
+        "Unknown" => 2,
+        "Low" => 1,
+        _ => 0
+    };
+
+    private static LegalQueryStrategyAudit? MergeQueryStrategies(
+        IReadOnlyList<LegalAgentResult> results)
+    {
+        var strategies = results
+            .Select(result => result.QueryStrategy as LegalQueryStrategyAudit)
+            .ToArray();
+        if (strategies.Any(strategy => strategy is null))
+        {
+            return null;
+        }
+
+        var present = strategies.Cast<LegalQueryStrategyAudit>().ToArray();
+        var queries = present.SelectMany(strategy => strategy.Queries).ToArray();
+        var total = queries.Length;
+        var mergedQueries = queries.Select((query, index) => new LegalCnvQueryAudit(
+            Index: index + 1,
+            Total: total,
+            Query: query.Query,
+            RegulationArea: query.RegulationArea,
+            Reason: query.Reason,
+            RelatedFinancialSignals: Array.AsReadOnly(
+                query.RelatedFinancialSignals.ToArray()),
+            ExecutionStatus: query.ExecutionStatus,
+            ResultCount: query.ResultCount,
+            CitedEvidenceCount: query.CitedEvidenceCount)).ToArray();
+        var allContextual = present.All(strategy =>
+            strategy.Source == LegalCnvQuerySources.Contextual);
+        var dataStatuses = present.Select(strategy => strategy.DataToolStatus)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var financialStatuses = present
+            .Select(strategy => strategy.FinancialAnalysisStatus)
+            .Distinct()
+            .ToArray();
+
+        return new LegalQueryStrategyAudit(
+            StrategyVersion: string.Join("+", present
+                .Select(strategy => strategy.StrategyVersion)
+                .Distinct(StringComparer.Ordinal)),
+            Source: allContextual
+                ? LegalCnvQuerySources.Contextual
+                : LegalCnvQuerySources.Fallback,
+            FallbackReason: allContextual
+                ? null
+                : present.Select(strategy => strategy.FallbackReason)
+                    .FirstOrDefault(reason => reason is not null) ??
+                    LegalCnvFallbackReasons.LegacyOrAmbiguousExecution,
+            DataToolStatus: dataStatuses.Length == 1
+                ? dataStatuses[0]
+                : LegalDataToolStatuses.Unknown,
+            FinancialAnalysisStatus: financialStatuses.Length == 1
+                ? financialStatuses[0]
+                : null,
+            FailedStages: Array.AsReadOnly(present
+                .SelectMany(strategy => strategy.FailedStages)
+                .GroupBy(stage => stage.Operation, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray()),
+            Queries: Array.AsReadOnly(mergedQueries));
+    }
+
+    private static bool TrySnapshotEvidenceAssessment(
+        RegulatoryEvidenceAssessment? assessment,
+        out RegulatoryEvidenceAssessment? snapshot)
+    {
+        snapshot = null;
+        if (assessment is null)
+        {
+            return true;
+        }
+
+        var relevant = assessment.Relevance is "Weak" or "Strong";
+        if (assessment.Relevance is not ("None" or "Weak" or "Strong") ||
+            assessment.Applicability != "NotEstablished" ||
+            assessment.EvidenceQuality is not ("None" or "Weak" or "Strong") ||
+            assessment.Severity != (relevant ? "Warning" : "Info") ||
+            assessment.RequiresHumanReview != relevant ||
+            assessment.Reasons is null ||
+            assessment.Reasons.Any(string.IsNullOrWhiteSpace) ||
+            !assessment.EvidenceFound &&
+                (assessment.Relevance != "None" ||
+                 assessment.EvidenceQuality != "None" ||
+                 assessment.RequiresHumanReview))
+        {
+            return false;
+        }
+
+        snapshot = assessment with
+        {
+            Reasons = Array.AsReadOnly(assessment.Reasons.ToArray())
+        };
+        return true;
     }
 
     private static bool IsValidLegalEvidence(LegalEvidence? evidence) =>
@@ -678,12 +907,20 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         IReadOnlyList<ToolExecutionResult> executedCalls,
         PlannerToolResultKind resultKind)
     {
+        return FindSuccessfulExecutedCalls(executedCalls, resultKind)
+            .FirstOrDefault();
+    }
+
+    private static IEnumerable<ToolExecutionResult> FindSuccessfulExecutedCalls(
+        IReadOnlyList<ToolExecutionResult> executedCalls,
+        PlannerToolResultKind resultKind)
+    {
         var toolNames = PlannerToolCatalog.All
             .Where(definition => definition.ResultKind == resultKind)
             .Select(definition => definition.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return executedCalls.FirstOrDefault(call =>
+        return executedCalls.Where(call =>
             toolNames.Contains(call.ToolName) &&
             call.Status == ToolExecutionStatus.Executed &&
             call.Succeeded

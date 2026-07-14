@@ -43,7 +43,8 @@ public sealed class McpRegulatoryKnowledgeSource(
         IReadOnlyList<string> Warnings,
         IReadOnlyList<LegalCnvQueryAudit> QueryAudits,
         int CompletedQueries,
-        int FailedQueries
+        int FailedQueries,
+        RegulatoryEvidenceAssessment EvidenceAssessment
     );
 
     public Task<RegulatoryReviewResult> ReviewAsync(
@@ -128,13 +129,15 @@ public sealed class McpRegulatoryKnowledgeSource(
         var allQueriesFailed =
             outcome.CompletedQueries == 0 &&
             (outcome.FailedQueries > 0 || derivedQueries.Count == 0);
-        var hasRisk = findings.Count > 0;
+        var evidenceAssessment = outcome.EvidenceAssessment;
 
         var summary = allQueriesFailed
-            ? "No fue posible completar las consultas regulatorias a la CNV. Se requiere revisión legal humana."
-            : hasRisk
-                ? "Se encontró evidencia regulatoria de la CNV para la anomalía financiera enviada. Se requiere revisión legal humana."
-                : "No se encontró evidencia regulatoria de la CNV con citas para la anomalía financiera enviada.";
+            ? "No fue posible completar las consultas regulatorias a la CNV. No se estableció riesgo de cumplimiento y se requiere revisión legal humana."
+            : evidenceAssessment.RequiresHumanReview
+                ? "Se recuperó evidencia regulatoria potencialmente relevante como posible área de revisión. La aplicabilidad no está determinada."
+                : evidenceAssessment.EvidenceFound
+                    ? "Se recuperó evidencia regulatoria, pero no se estableció relevancia ni aplicabilidad para una evaluación de cumplimiento."
+                    : "No se recuperó evidencia regulatoria. La ausencia de resultados no constituye una evaluación de cumplimiento.";
 
         // AI Review Execution
         LegalAnalysisReviewResult legalReviewResult;
@@ -159,7 +162,8 @@ public sealed class McpRegulatoryKnowledgeSource(
                 FinancialRiskEvidence: financialAnalysis.RiskEvidence ?? Array.Empty<RiskEvidenceItem>(),
                 FinancialWarnings: financialAnalysis.Warnings ?? Array.Empty<string>(),
                 FinancialLimitations: financialAnalysis.Limitations ?? Array.Empty<string>(),
-                CnvEvidence: outcome.EvidenceReferences
+                CnvEvidence: outcome.EvidenceReferences,
+                EvidenceAssessment: evidenceAssessment
             );
 
             legalReviewResult = await _legalAnalysisReviewService.ReviewAsync(input, cancellationToken);
@@ -207,8 +211,8 @@ public sealed class McpRegulatoryKnowledgeSource(
         }
 
         return new RegulatoryReviewResult(
-            HasComplianceRisk: hasRisk,
-            RiskLevel: allQueriesFailed ? "Unknown" : hasRisk ? "Medium" : "Low",
+            HasComplianceRisk: false,
+            RiskLevel: "NotEstablished",
             Summary: summary,
             SourceEngine: "MCP CNV Regulation Server",
             Findings: findings,
@@ -216,10 +220,11 @@ public sealed class McpRegulatoryKnowledgeSource(
             QueryStrategy: audit,
             LegalReview: legalReviewResult,
             RequiresHumanReview:
-                hasRisk ||
+                evidenceAssessment.RequiresHumanReview ||
                 !usedContextualPlan ||
                 outcome.FailedQueries > 0 ||
-                derivedQueries.Count == 0
+                derivedQueries.Count == 0,
+            EvidenceAssessment: evidenceAssessment
         );
     }
 
@@ -366,6 +371,7 @@ public sealed class McpRegulatoryKnowledgeSource(
         var allEvidence = new List<LegalEvidenceReference>();
         var findingKeys = new HashSet<string>(StringComparer.Ordinal);
         var evidenceKeys = new HashSet<string>(StringComparer.Ordinal);
+        var allRetrievedResults = new List<CnvRegulationSearchResult>();
         var warnings = new List<string>();
         var queryAudits = new List<LegalCnvQueryAudit>(queries.Count);
         var completedQueries = 0;
@@ -407,6 +413,7 @@ public sealed class McpRegulatoryKnowledgeSource(
                     foreach (var result in response.Results)
                     {
                         ArgumentNullException.ThrowIfNull(result);
+                        allRetrievedResults.Add(result);
                         if (result.Citations == null || result.Citations.Count == 0)
                         {
                             queryHasUncitedEvidence = true;
@@ -414,6 +421,12 @@ public sealed class McpRegulatoryKnowledgeSource(
                         else
                         {
                             citedEvidenceCount += result.Citations.Count;
+
+                            if (!CnvRegulatoryEvidenceAssessor.IsRelevant(result))
+                            {
+                                continue;
+                            }
+
                             foreach (var finding in MapFindings(result))
                             {
                                 var findingKey = CreateFindingKey(finding);
@@ -515,18 +528,25 @@ public sealed class McpRegulatoryKnowledgeSource(
             }
         }
 
+        var evidenceAssessment = CnvRegulatoryEvidenceAssessor.Assess(
+            allRetrievedResults);
+
         if (hasUncitedEvidence)
         {
             warnings.Add("Algunos resultados de búsqueda de CNV/Infoleg se ignoraron como evidencia sólida debido a que no incluían citas.");
         }
 
-        if (allFindings.Count > 0)
+        if (evidenceAssessment.RequiresHumanReview)
         {
-            warnings.Add("Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas.");
+            warnings.Add("Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana.");
+        }
+        else if (evidenceAssessment.EvidenceFound)
+        {
+            warnings.Add("Se recuperó evidencia regulatoria, pero no alcanzó el umbral de relevancia para crear un área de revisión.");
         }
         else
         {
-            warnings.Add("No se encontró evidencia regulatoria citada de la CNV mediante la estrategia de búsqueda MCP.");
+            warnings.Add("La búsqueda MCP no recuperó evidencia regulatoria; esto no establece ausencia de riesgo ni constituye una conclusión legal.");
         }
 
         return new CnvSearchReviewResult(
@@ -535,7 +555,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             Warnings: Array.AsReadOnly(warnings.Distinct().ToArray()),
             QueryAudits: Array.AsReadOnly(queryAudits.ToArray()),
             CompletedQueries: completedQueries,
-            FailedQueries: failedQueries
+            FailedQueries: failedQueries,
+            EvidenceAssessment: evidenceAssessment
         );
     }
 

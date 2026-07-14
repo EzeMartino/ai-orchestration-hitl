@@ -6,6 +6,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
@@ -129,6 +130,70 @@ public class ToolExecutionResultMapperTests
                 )
             ]
         );
+
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryMapLegalResult_Should_combine_all_assessed_legal_calls_regardless_of_order(
+        bool strongResultFirst)
+    {
+        var irrelevant = CreateAssessedLegalResult(
+            relevance: "None",
+            quality: "Strong",
+            warning: "Irrelevant response warning.");
+        var strong = CreateAssessedLegalResult(
+            relevance: "Strong",
+            quality: "Strong",
+            warning: "Strong response warning.");
+        var payloads = strongResultFirst
+            ? new[] { strong, irrelevant }
+            : [irrelevant, strong];
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(payloads
+            .Select(payload => CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                JsonSerializer.Serialize(payload, JsonOptions)))
+            .ToArray());
+
+        result.Should().NotBeNull();
+        result!.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.Relevance.Should().Be("Strong");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("Strong");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+        result.Evidence.Should().ContainSingle();
+        result.Warnings.Should().Contain("Irrelevant response warning.");
+        result.Warnings.Should().Contain("Strong response warning.");
+        var queryStrategy = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        queryStrategy.Queries.Should().HaveCount(4);
+        queryStrategy.Queries.Select(query => query.Index).Should()
+            .Equal(1, 2, 3, 4);
+        queryStrategy.Queries.Should().OnlyContain(query => query.Total == 4);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_return_null_when_any_selected_legal_payload_is_malformed()
+    {
+        var valid = CreateAssessedLegalResult(
+            relevance: "Strong",
+            quality: "Strong",
+            warning: "Valid response warning.");
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+        [
+            CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                JsonSerializer.Serialize(valid, JsonOptions)),
+            CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                "{ invalid-json")
+        ]);
 
         result.Should().BeNull();
     }
@@ -844,6 +909,33 @@ public class ToolExecutionResultMapperTests
         );
     }
 
+    private static LegalAgentResult CreateAssessedLegalResult(
+        string relevance,
+        string quality,
+        string warning)
+    {
+        var relevant = relevance is "Weak" or "Strong";
+        var assessment = new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: relevance,
+            Applicability: "NotEstablished",
+            EvidenceQuality: quality,
+            Severity: relevant ? "Warning" : "Info",
+            RequiresHumanReview: relevant,
+            Reasons: [$"Assessment reason: {relevance}."]);
+
+        return CreateLegalResult() with
+        {
+            HasComplianceRisk = false,
+            RiskLevel = "NotEstablished",
+            Summary = "Retrieval-only legal result.",
+            Warnings = [warning],
+            LegalReview = relevant ? CreateLegalResult().LegalReview : null,
+            RequiresHumanReview = relevant,
+            EvidenceAssessment = assessment
+        };
+    }
+
     private static ToolExecutionResult CreateExecutionResult(
         string toolName,
         string outputJson)
@@ -858,4 +950,5 @@ public class ToolExecutionResultMapperTests
             Error: null
         );
     }
+
 }

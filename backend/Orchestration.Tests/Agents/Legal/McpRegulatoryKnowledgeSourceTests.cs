@@ -25,31 +25,41 @@ namespace Orchestration.Tests.Agents.Legal;
 public class McpRegulatoryKnowledgeSourceTests
 {
     [Fact]
-    public async Task ReviewAsync_Should_map_cited_mcp_results_to_regulatory_findings()
+    public async Task ReviewAsync_Should_retain_irrelevant_cited_results_without_establishing_risk()
     {
-        var source = CreateSource(new FakeCnvRegulationMcpClient());
+        var source = CreateSource(new SingleResultCnvRegulationMcpClient(
+            CreateResult(
+                "irrelevant",
+                "Irrelevant cited result",
+                "Snippet with citations.",
+                [CreateCitation()],
+                score: 0.20)));
 
         var result = await source.ReviewAsync(
-            CreateReport(),
+            CreateReportWithFinancialSignal(),
             CancellationToken.None
         );
 
         result.SourceEngine.Should().Be("MCP CNV Regulation Server");
-        result.HasComplianceRisk.Should().BeTrue();
-        result.RiskLevel.Should().Be("Medium");
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.RequiresHumanReview.Should().BeTrue();
-        result.Findings.Should().NotBeEmpty();
+        result.Summary.Should().Be(
+            "Se recuperó evidencia regulatoria, pero no se estableció relevancia ni aplicabilidad para una evaluación de cumplimiento.");
+        result.Findings.Should().BeEmpty();
         result.Warnings.Should().Contain(
-            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
+            "Se recuperó evidencia regulatoria, pero no alcanzó el umbral de relevancia para crear un área de revisión."
         );
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
+        result.EvidenceAssessment.Relevance.Should().Be("None");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("Strong");
+        result.EvidenceAssessment.Severity.Should().Be("Info");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeFalse();
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
+        result.LegalReview.EvidenceReferences.Should().BeEmpty();
 
-        result.Findings
-            .Should()
-            .Contain(x =>
-                x.Regulation.Contains("622/2013") &&
-                x.Section == "Articulo 1" &&
-                x.Finding == "Texto normativo citado."
-            );
     }
 
     [Fact]
@@ -62,7 +72,8 @@ public class McpRegulatoryKnowledgeSourceTests
             CancellationToken.None
         );
 
-        result.HasComplianceRisk.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().ContainSingle();
         result.Findings[0].Finding.Should().Be("Texto normativo citado.");
         result.Findings.Should().NotContain(x => x.Finding == "Snippet without citations.");
@@ -79,11 +90,16 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         result.HasComplianceRisk.Should().BeFalse();
-        result.RiskLevel.Should().Be("Low");
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().BeEmpty();
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
+        result.EvidenceAssessment.Relevance.Should().Be("Strong");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("None");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
         result.Warnings.Should().Contain("candidate source");
         result.Warnings.Should().Contain(
-            "No se encontró evidencia regulatoria citada de la CNV mediante la estrategia de búsqueda MCP."
+            "Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana."
         );
     }
 
@@ -99,8 +115,94 @@ public class McpRegulatoryKnowledgeSourceTests
 
         result.Warnings.Should().Contain("requires review");
         result.Warnings.Should().Contain(
-            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
+            "Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana."
         );
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_assess_incomplete_relevant_evidence_as_weak_and_require_review()
+    {
+        var source = CreateSource(new SingleResultCnvRegulationMcpClient(
+            CreateResult(
+                "weak",
+                "Weak cited result",
+                "Snippet with incomplete citation.",
+                [CreateCitation(url: null)],
+                score: 0.60)));
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialSignal(),
+            CancellationToken.None);
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.Findings.Should().ContainSingle();
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
+        result.EvidenceAssessment.Relevance.Should().Be("Weak");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("Weak");
+        result.EvidenceAssessment.Severity.Should().Be("Warning");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_assess_complete_relevant_evidence_as_strong_and_require_review()
+    {
+        var reviewService = new CapturingLegalAnalysisReviewService();
+        var source = CreateSource(new SingleResultCnvRegulationMcpClient(
+            CreateResult(
+                "strong",
+                "Strong cited result",
+                "Snippet with complete citation.",
+                [CreateCitation()],
+                score: 0.90)),
+            reviewService);
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialSignal(),
+            CancellationToken.None);
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.Summary.Should().Be(
+            "Se recuperó evidencia regulatoria potencialmente relevante como posible área de revisión. La aplicabilidad no está determinada.");
+        result.Findings.Should().ContainSingle();
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.Relevance.Should().Be("Strong");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("Strong");
+        result.EvidenceAssessment.Severity.Should().Be("Warning");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should().NotBeEmpty();
+        reviewService.LastInput.Should().NotBeNull();
+        reviewService.LastInput!.EvidenceAssessment.Should()
+            .BeEquivalentTo(result.EvidenceAssessment);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_assess_empty_retrieval_without_establishing_risk()
+    {
+        var source = CreateSource(new SingleResultCnvRegulationMcpClient(result: null));
+
+        var result = await source.ReviewAsync(
+            CreateReport(),
+            CancellationToken.None);
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.Summary.Should().Be(
+            "No se recuperó evidencia regulatoria. La ausencia de resultados no constituye una evaluación de cumplimiento.");
+        result.Findings.Should().BeEmpty();
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.EvidenceFound.Should().BeFalse();
+        result.EvidenceAssessment.Relevance.Should().Be("None");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("None");
+        result.EvidenceAssessment.Severity.Should().Be("Info");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeFalse();
+        result.Warnings.Should().Contain(
+            "La búsqueda MCP no recuperó evidencia regulatoria; esto no establece ausencia de riesgo ni constituye una conclusión legal.");
     }
 
     private static McpRegulatoryKnowledgeSource CreateSource(
@@ -265,6 +367,66 @@ public class McpRegulatoryKnowledgeSourceTests
         };
     }
 
+    private static FinancialReportContext CreateReportWithFinancialSignal()
+    {
+        var signal = new FinancialRiskSignal(
+            "liquidity_risk",
+            "High",
+            "Q1",
+            "Low current ratio",
+            []);
+        var financialAnalysis = new FinancialAnalysisContext(
+            Engine: "TestDataEngine",
+            DocumentId: "doc-123",
+            Company: "TestCorp",
+            Ratios: [],
+            Comparisons: [],
+            RiskSignals: [signal],
+            RiskEvidence: [],
+            Warnings: [],
+            Limitations: []);
+
+        return CreateReport() with { FinancialAnalysis = financialAnalysis };
+    }
+
+    private sealed class SingleResultCnvRegulationMcpClient(
+        CnvRegulationSearchResult? result) : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<CnvRegulationSearchResult> results = result is null
+                ? []
+                : [result];
+
+            return Task.FromResult(new CnvRegulationSearchResponse(
+                request.Query,
+                results,
+                []));
+        }
+    }
+
+    private sealed class CapturingLegalAnalysisReviewService : ILegalAnalysisReviewService
+    {
+        private readonly DeterministicLegalAnalysisReviewService _inner = new();
+
+        public LegalAnalysisReviewInput? LastInput { get; private set; }
+
+        public Task<LegalAnalysisReviewResult> ReviewAsync(
+            LegalAnalysisReviewInput input,
+            CancellationToken cancellationToken)
+        {
+            LastInput = input;
+            return _inner.ReviewAsync(input, cancellationToken);
+        }
+    }
+
     private sealed class MixedCitationCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
         public bool IsConnected => true;
@@ -363,7 +525,8 @@ public class McpRegulatoryKnowledgeSourceTests
         string documentId,
         string title,
         string snippet,
-        IReadOnlyList<CnvRegulationCitation> citations)
+        IReadOnlyList<CnvRegulationCitation> citations,
+        double score = 0.90)
     {
         return new CnvRegulationSearchResult(
             DocumentId: documentId,
@@ -375,12 +538,13 @@ public class McpRegulatoryKnowledgeSourceTests
             Source: "Infoleg",
             Url: "https://servicios.infoleg.gob.ar/",
             Snippet: snippet,
-            Score: 0.123,
+            Score: score,
             Citations: citations
         );
     }
 
-    private static CnvRegulationCitation CreateCitation()
+    private static CnvRegulationCitation CreateCitation(
+        string? url = "https://servicios.infoleg.gob.ar/")
     {
         return new CnvRegulationCitation(
             Source: "Infoleg",
@@ -391,7 +555,7 @@ public class McpRegulatoryKnowledgeSourceTests
             Section: null,
             Article: "Articulo 1",
             PublicationDate: "2013-09-09",
-            Url: "https://servicios.infoleg.gob.ar/",
+            Url: url,
             QuotedText: "Texto normativo citado."
         );
     }
@@ -913,7 +1077,8 @@ public class McpRegulatoryKnowledgeSourceTests
             CancellationToken.None
         );
 
-        result.RiskLevel.Should().Be("Medium");
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().ContainSingle();
         result.LegalReview.Should().NotBeNull();
         result.LegalReview!.EvidenceReferences.Should().NotBeEmpty();
@@ -965,7 +1130,7 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         result.HasComplianceRisk.Should().BeFalse();
-        result.RiskLevel.Should().Be("Unknown");
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().BeEmpty();
         result.RequiresHumanReview.Should().BeTrue();
         result.LegalReview.Should().NotBeNull();
@@ -1016,8 +1181,8 @@ public class McpRegulatoryKnowledgeSourceTests
             CancellationToken.None
         );
 
-        result.HasComplianceRisk.Should().BeTrue();
-        result.RiskLevel.Should().Be("Medium");
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.RequiresHumanReview.Should().BeTrue();
         result.Findings.Should().ContainSingle();
         result.Warnings.Should().NotContain(
@@ -1086,7 +1251,7 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         result.HasComplianceRisk.Should().BeFalse();
-        result.RiskLevel.Should().Be("Unknown");
+        result.RiskLevel.Should().Be("NotEstablished");
         result.RequiresHumanReview.Should().BeTrue();
         result.Findings.Should().BeEmpty();
         result.Warnings.Should().NotContain(
@@ -1122,9 +1287,9 @@ public class McpRegulatoryKnowledgeSourceTests
             CancellationToken.None
         );
 
-        result.RiskLevel.Should().Be("Low");
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().BeEmpty();
-        result.RequiresHumanReview.Should().BeFalse();
+        result.RequiresHumanReview.Should().BeTrue();
         reviewService.CallCount.Should().Be(1);
         var queryAudit = result.QueryStrategy.Should()
             .BeOfType<LegalQueryStrategyAudit>().Subject
@@ -1231,8 +1396,8 @@ public class McpRegulatoryKnowledgeSourceTests
         publisher.PublishedEvents.Count(item =>
             item.Type == "legal_cnv_queries_derived" ||
             item.Type == "legal_cnv_query_fallback_used").Should().Be(1);
-        result.HasComplianceRisk.Should().BeTrue();
-        result.RiskLevel.Should().Be("Medium");
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.RequiresHumanReview.Should().BeTrue();
 
         var audit = result.QueryStrategy.Should()
@@ -1397,7 +1562,8 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         // Assert
-        result.HasComplianceRisk.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().NotBeEmpty();
         result.Findings.Any(f => f.Finding.Contains("liquidez")).Should().BeTrue();
 
@@ -1484,7 +1650,8 @@ public class McpRegulatoryKnowledgeSourceTests
         var result = await source.ReviewAsync(report, CancellationToken.None);
 
         // Assert
-        result.HasComplianceRisk.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         // Should contain findings from both queries (liquidez and leverage)
         result.Findings.Should().Contain(f => f.Finding.Contains("liquidez"));
         result.Findings.Should().Contain(f => f.Finding.Contains("leverage"));
@@ -1550,7 +1717,8 @@ public class McpRegulatoryKnowledgeSourceTests
         var result = await source.ReviewAsync(report, CancellationToken.None);
 
         // Assert
-        result.HasComplianceRisk.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().Contain(f => f.Finding.Contains("fallback"));
         result.Warnings.Should().Contain(w => w.Contains("No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera."));
         result.LegalReview.Should().NotBeNull();

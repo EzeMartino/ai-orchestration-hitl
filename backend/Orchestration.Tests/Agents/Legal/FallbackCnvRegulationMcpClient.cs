@@ -105,10 +105,15 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
             CancellationToken.None
         );
 
-        result.HasComplianceRisk.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
         result.Findings.Should().NotBeEmpty();
-        result.Warnings.Should().Contain(
-            "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
+        result.EvidenceAssessment.Should().NotBeNull();
+        result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
+        result.EvidenceAssessment.Relevance.Should().Be("None");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeFalse();
+        result.Warnings.Should().NotContain(
+            "Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana."
         );
 
         client.ReceivedQueries.Should().Contain("régimen informativo estados financieros emisoras");
