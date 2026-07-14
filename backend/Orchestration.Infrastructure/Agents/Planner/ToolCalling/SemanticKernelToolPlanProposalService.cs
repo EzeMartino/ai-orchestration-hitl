@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
@@ -10,6 +12,10 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 public sealed class SemanticKernelToolPlanProposalService : IToolPlanProposalService
 {
+    private const string SubmittedAtArgumentName = "submittedAt";
+    private const string SubmittedAtCanonicalizedFailureCode =
+        "TOOL_PLAN_SUBMITTED_AT_CANONICALIZED";
+
     private const string SystemPrompt = """
 You are a tool planning assistant inside a human-supervised financial analysis workflow.
 
@@ -63,6 +69,7 @@ If no tool is appropriate, return:
     private readonly ToolCallingOptions _toolCallingOptions;
     private readonly DeterministicToolPlanProposalService _fallback;
     private readonly SemanticKernelToolPlanResponseParser _parser;
+    private readonly ILogger<SemanticKernelToolPlanProposalService> _logger;
     private readonly Kernel? _kernel;
     private readonly IChatCompletionService _chatCompletionService;
 
@@ -70,11 +77,13 @@ If no tool is appropriate, return:
         IOptions<LlmOptions> llmOptions,
         IOptions<ToolCallingOptions> toolCallingOptions,
         DeterministicToolPlanProposalService fallback,
-        SemanticKernelToolPlanResponseParser parser)
+        SemanticKernelToolPlanResponseParser parser,
+        ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         _toolCallingOptions = toolCallingOptions.Value;
         _fallback = fallback;
         _parser = parser;
+        _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
 
         var options = llmOptions.Value;
         var kernelBuilder = Kernel.CreateBuilder();
@@ -94,12 +103,14 @@ If no tool is appropriate, return:
         ToolCallingOptions toolCallingOptions,
         DeterministicToolPlanProposalService fallback,
         SemanticKernelToolPlanResponseParser parser,
-        IChatCompletionService chatCompletionService)
+        IChatCompletionService chatCompletionService,
+        ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         _toolCallingOptions = toolCallingOptions;
         _fallback = fallback;
         _parser = parser;
         _chatCompletionService = chatCompletionService;
+        _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
     }
 
     public async Task<ToolPlan> ProposeAsync(
@@ -124,7 +135,7 @@ If no tool is appropriate, return:
             );
 
             return _parser.TryParse(response.Content, out var plan)
-                ? plan
+                ? CanonicalizeSubmittedAt(plan, input)
                 : await CreateFallbackPlanAsync(input, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -145,6 +156,94 @@ If no tool is appropriate, return:
             input,
             cancellationToken
         );
+    }
+
+    private ToolPlan CanonicalizeSubmittedAt(
+        ToolPlan plan,
+        ToolPlanProposalInput input)
+    {
+        ProposedToolCall[]? canonicalizedCalls = null;
+        var canonicalValue = input.SubmittedAt.ToString("O", CultureInfo.InvariantCulture);
+
+        for (var index = 0; index < plan.ProposedCalls.Count; index++)
+        {
+            var call = plan.ProposedCalls[index];
+            if (!string.Equals(
+                    call.ToolName.Trim(),
+                    PlannerToolCatalog.AnalyzeTransactionsName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var matchingArguments = call.Arguments
+                .Where(argument => string.Equals(
+                    argument.Key.Trim(),
+                    SubmittedAtArgumentName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var reason = GetCanonicalizationReason(matchingArguments, canonicalValue);
+            if (reason is null)
+            {
+                continue;
+            }
+
+            var canonicalArguments = call.Arguments
+                .Where(argument => !string.Equals(
+                    argument.Key.Trim(),
+                    SubmittedAtArgumentName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(argument => argument.Key, argument => argument.Value);
+            canonicalArguments[SubmittedAtArgumentName] = canonicalValue;
+
+            canonicalizedCalls ??= plan.ProposedCalls.ToArray();
+            canonicalizedCalls[index] = call with
+            {
+                Arguments = canonicalArguments
+            };
+
+            _logger.LogWarning(
+                "Canonicalized planner submission timestamp. {SessionId} {ToolName} {FailureCode} {Reason}",
+                input.SessionId,
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                SubmittedAtCanonicalizedFailureCode,
+                reason
+            );
+        }
+
+        return canonicalizedCalls is null
+            ? plan
+            : plan with { ProposedCalls = canonicalizedCalls };
+    }
+
+    private static string? GetCanonicalizationReason(
+        IReadOnlyList<KeyValuePair<string, string>> matchingArguments,
+        string canonicalValue)
+    {
+        if (matchingArguments.Count == 0)
+        {
+            return "missing";
+        }
+
+        if (matchingArguments.Count > 1)
+        {
+            return "duplicate";
+        }
+
+        var argument = matchingArguments[0];
+        if (!DateTimeOffset.TryParse(
+                argument.Value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out _))
+        {
+            return "malformed";
+        }
+
+        return string.Equals(argument.Key, SubmittedAtArgumentName, StringComparison.Ordinal) &&
+               string.Equals(argument.Value, canonicalValue, StringComparison.Ordinal)
+            ? null
+            : "mismatch";
     }
 
     private static string BuildUserPrompt(
