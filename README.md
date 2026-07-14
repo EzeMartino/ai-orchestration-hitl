@@ -750,8 +750,12 @@ structuredFinancialMetrics
 
 `financialReport` contains the caller-supplied `reportName`, `totalAmount`,
 `transactionCount`, and `submittedAt`. These values remain session-scoped and
-survive the complete workflow. The Planner and tool-plan proposal consume these
-persisted values exactly; they do not derive, default, or replace them.
+survive the complete workflow. The Planner and deterministic tool-plan proposal
+consume them directly. Semantic Kernel treats the persisted `submittedAt` as
+trusted context: a missing, malformed, duplicated, or different LLM value is
+replaced before validation and execution. A missing source blocks session start
+with `SUBMITTED_AT_REQUIRED` or `SUBMITTED_AT_INVALID`; current-time fallback is
+never used.
 
 The persisted block includes audit provenance:
 
