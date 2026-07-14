@@ -119,15 +119,7 @@ public class ToolCallingDiagnosticServiceTests
                 ["transactionCount"] = "42",
                 ["submittedAt"] = DateTimeOffset.UnixEpoch.ToString("O")
             }
-            : string.Equals(
-                toolName,
-                PlannerToolCatalog.SearchCnvRegulationName,
-                StringComparison.OrdinalIgnoreCase)
-                ? new Dictionary<string, string>
-                {
-                    ["query"] = "agentes"
-                }
-                : new Dictionary<string, string>();
+            : new Dictionary<string, string>();
 
         return new ProposedToolCall(
             ToolName: toolName,

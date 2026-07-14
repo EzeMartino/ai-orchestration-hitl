@@ -51,9 +51,9 @@ public sealed class ToolPlanNormalizer : IToolPlanNormalizer
 
         foreach (var argument in arguments)
         {
-            var key = argument.Key?.Trim() ?? string.Empty;
+            var key = argument.Key?.Trim();
 
-            if (string.IsNullOrWhiteSpace(key) || normalized.ContainsKey(key))
+            if (key is null || normalized.ContainsKey(key))
             {
                 continue;
             }

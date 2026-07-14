@@ -131,6 +131,34 @@ public class ToolPlanValidatorTests
         );
     }
 
+    [Fact]
+    public void Normalize_then_validate_Should_reject_whitespace_legal_argument()
+    {
+        var plan = CreatePlan(
+            new ProposedToolCall(
+                PlannerToolCatalog.SearchCnvRegulationName,
+                new Dictionary<string, string>
+                {
+                    [" "] = "hostile"
+                },
+                "Planner requested cited evidence."));
+        var normalizedPlan = new ToolPlanNormalizer().Normalize(plan);
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                AllowedTools = [PlannerToolCatalog.SearchCnvRegulationName]
+            });
+
+        var result = validator.Validate(normalizedPlan);
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().BeEmpty();
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                PlannerToolCatalog.SearchCnvRegulationName,
+                "Argumento no permitido: ."));
+    }
+
     [Theory]
     [InlineData("data.compute_financial_ratios")]
     [InlineData("data.compare_periods")]
