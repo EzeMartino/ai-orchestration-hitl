@@ -42,7 +42,7 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.NewGuid());
-        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1}}""");
+        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1,"transactionCount":-1,"submittedAt":"2026-07-12T18:30:00Z"}}""");
         var validator = CreateValidator(new DataAgentOptions(), dbContext);
 
         var result = await validator.ValidateAsync(session, CancellationToken.None);
@@ -51,6 +51,25 @@ public sealed class AnalysisSessionStartPreflightValidatorTests
         result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(new
         {
             Code = FinancialReportContextResolver.InvalidCode,
+            Severity = "Error"
+        });
+    }
+
+    [Fact]
+    public async Task ValidateAsync_MissingSubmittedAt_ShouldReturnSpecificError()
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""{"financialReport":{"reportName":"report.pdf","totalAmount":1,"transactionCount":1}}""");
+        var validator = CreateValidator(new DataAgentOptions(), dbContext);
+
+        var result = await validator.ValidateAsync(session, CancellationToken.None);
+
+        result.CanStart.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            Code = FinancialReportSummaryValidator.SubmittedAtRequiredCode,
+            Message = FinancialReportSummaryValidator.SubmittedAtRequiredMessage,
             Severity = "Error"
         });
     }

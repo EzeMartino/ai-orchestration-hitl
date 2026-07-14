@@ -54,7 +54,7 @@ public sealed class FinancialReportContextResolverTests
     [Theory]
     [InlineData("{not-json")]
     [InlineData("{\"financialReport\":\"invalid\"}")]
-    [InlineData("{\"financialReport\":{\"reportName\":\" \",\"totalAmount\":-1,\"transactionCount\":-1,\"submittedAt\":\"0001-01-01T00:00:00Z\"}}")]
+    [InlineData("{\"financialReport\":{\"reportName\":\" \",\"totalAmount\":-1,\"transactionCount\":-1,\"submittedAt\":\"2026-07-12T18:30:00Z\"}}")]
     public void Resolve_MalformedOrInvalidSummary_ShouldReturnInvalidFailure(string contextJson)
     {
         var session = AnalysisSession.Create(Guid.NewGuid());
@@ -66,5 +66,30 @@ public sealed class FinancialReportContextResolverTests
         result.Report.Should().BeNull();
         result.ErrorCode.Should().Be("FINANCIAL_REPORT_SUMMARY_INVALID");
         result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Theory]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1}}", FinancialReportSummaryValidator.SubmittedAtRequiredCode, FinancialReportSummaryValidator.SubmittedAtRequiredMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":null}}", FinancialReportSummaryValidator.SubmittedAtRequiredCode, FinancialReportSummaryValidator.SubmittedAtRequiredMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":\"not-a-date\"}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":123}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":{}}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":true}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":[]}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":\"0001-01-01T00:00:00+00:00\"}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage)]
+    public void Resolve_InvalidSubmittedAt_ShouldReturnSpecificFailure(
+        string contextJson,
+        string expectedCode,
+        string expectedMessage)
+    {
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(contextJson);
+
+        var result = new FinancialReportContextResolver().Resolve(session);
+
+        result.IsValid.Should().BeFalse();
+        result.Report.Should().BeNull();
+        result.ErrorCode.Should().Be(expectedCode);
+        result.ErrorMessage.Should().Be(expectedMessage).And.NotBeNullOrWhiteSpace();
     }
 }

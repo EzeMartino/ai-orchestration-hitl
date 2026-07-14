@@ -1469,6 +1469,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -1492,10 +1493,60 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         session.Status.Should().Be(AnalysisSessionStatus.Pending);
         session.CurrentAgent.Should().BeNull();
         planner.RunCalls.Should().Be(0);
-        publisher.PublishedEvents.Should().ContainSingle(evt =>
-            evt.Type == "analysis_start_blocked" &&
-            evt.Agent == "Orchestrator"
-        );
+        var activityEvent = publisher.PublishedEvents.Should().ContainSingle().Subject;
+        activityEvent.Type.Should().Be("analysis_start_blocked");
+        activityEvent.Agent.Should().Be("Orchestrator");
+        activityEvent.Message.Should().Be(
+            "Inicio de análisis bloqueado: se requieren métricas financieras estructuradas pero no están presentes.");
+    }
+
+    [Theory]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1}}", FinancialReportSummaryValidator.SubmittedAtRequiredCode, FinancialReportSummaryValidator.SubmittedAtRequiredMessage, null)]
+    [InlineData("{\"financialReport\":{\"reportName\":\"report.pdf\",\"totalAmount\":1,\"transactionCount\":1,\"submittedAt\":\"private-raw-date\"}}", FinancialReportSummaryValidator.SubmittedAtInvalidCode, FinancialReportSummaryValidator.SubmittedAtInvalidMessage, "private-raw-date")]
+    public async Task StartSession_InvalidSubmittedAt_ShouldReturnSpecificSafeConflict(
+        string contextJson,
+        string expectedCode,
+        string expectedMessage,
+        string? rawTimestamp)
+    {
+        await using var dbContext = CreateDbContext();
+        var session = AnalysisSession.Create(
+            Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        session.SetContext(contextJson);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new FakePlannerAgent();
+        var controller = CreateController(
+            dbContext,
+            publisher: publisher,
+            orchestrator: CreateOrchestrator(dbContext, publisher, planner));
+
+        var result = await controller.StartSession(
+            session.Id,
+            CancellationToken.None);
+
+        var preflight = result.Should().BeOfType<ConflictObjectResult>()
+            .Which.Value.Should().BeOfType<AnalysisSessionStartPreflightResult>()
+            .Subject;
+        preflight.CanStart.Should().BeFalse();
+        preflight.Errors.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            Code = expectedCode,
+            Message = expectedMessage,
+            Severity = "Error"
+        });
+        session.Status.Should().Be(AnalysisSessionStatus.Pending);
+        planner.RunCalls.Should().Be(0);
+        var activityEvent = publisher.PublishedEvents.Should().ContainSingle().Subject;
+        activityEvent.Type.Should().Be("analysis_start_blocked");
+        activityEvent.Agent.Should().Be("Orchestrator");
+        activityEvent.Message.Should().Be(expectedMessage);
+        activityEvent.Message.Should().NotContain("submittedAt");
+        if (rawTimestamp is not null)
+        {
+            activityEvent.Message.Should().NotContain(rawTimestamp);
+        }
     }
 
     [Fact]

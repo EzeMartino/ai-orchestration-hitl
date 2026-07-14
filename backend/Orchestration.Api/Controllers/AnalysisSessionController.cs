@@ -33,6 +33,9 @@ public class AnalysisSessionsController(
     IFinancialMetricsExtractionDraftService financialMetricsExtractionDraftService,
     IOptions<StructuredFinancialMetricsFileUploadOptions> fileUploadOptions) : ControllerBase
 {
+    private const string StartBlockedAuditMessage =
+        "Inicio de análisis bloqueado: se requieren métricas financieras estructuradas pero no están presentes.";
+
     private readonly IOrchestrationDbContext _dbContext = dbContext;
     private readonly AnalysisOrchestratorService _orchestrator = orchestrator;
     private readonly IAnalysisSessionStartPreflightValidator _startPreflightValidator = startPreflightValidator;
@@ -149,7 +152,7 @@ public class AnalysisSessionsController(
                     id,
                     "analysis_start_blocked",
                     "Orchestrator",
-                    "Inicio de análisis bloqueado: se requieren métricas financieras estructuradas pero no están presentes.",
+                    ResolveStartBlockedAuditMessage(preflight),
                     DateTimeOffset.UtcNow
                 ),
                 cancellationToken
@@ -177,6 +180,16 @@ public class AnalysisSessionsController(
                 error = ex.Message
             });
         }
+    }
+
+    private static string ResolveStartBlockedAuditMessage(
+        AnalysisSessionStartPreflightResult preflight)
+    {
+        var submittedAtIssue = preflight.Errors.FirstOrDefault(issue =>
+            issue.Code is FinancialReportSummaryValidator.SubmittedAtRequiredCode
+                or FinancialReportSummaryValidator.SubmittedAtInvalidCode);
+
+        return submittedAtIssue?.Message ?? StartBlockedAuditMessage;
     }
 
     [HttpGet("{id:guid}/start-preflight")]
