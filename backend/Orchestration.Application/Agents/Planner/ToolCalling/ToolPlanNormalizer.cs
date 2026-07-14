@@ -4,8 +4,6 @@ namespace Orchestration.Application.Agents.Planner.ToolCalling;
 
 public sealed class ToolPlanNormalizer : IToolPlanNormalizer
 {
-    private const string LegalSearchToolName = "legal.search_cnv_regulation";
-
     public ToolPlan Normalize(
         ToolPlan plan)
     {
@@ -70,14 +68,6 @@ public sealed class ToolPlanNormalizer : IToolPlanNormalizer
         string toolName,
         IReadOnlyDictionary<string, string> arguments)
     {
-        if (string.Equals(toolName, LegalSearchToolName, StringComparison.OrdinalIgnoreCase) &&
-            arguments.TryGetValue("query", out var query))
-        {
-            arguments.TryGetValue("area", out var area);
-
-            return $"{LegalSearchToolName}|query={query.Trim()}|area={area?.Trim() ?? string.Empty}";
-        }
-
         var builder = new StringBuilder(toolName.Trim());
 
         foreach (var argument in arguments.OrderBy(argument => argument.Key, StringComparer.OrdinalIgnoreCase))

@@ -75,7 +75,7 @@ public class ToolPlanValidatorTests
     }
 
     [Fact]
-    public void Validate_Should_reject_catalog_tool_with_missing_required_argument()
+    public void Validate_Should_approve_argument_free_legal_capability()
     {
         var validator = new ToolPlanValidator(
             new ToolCallingOptions
@@ -92,12 +92,41 @@ public class ToolPlanValidatorTests
                     "Planner requested cited evidence."))
         );
 
+        result.IsValid.Should().BeTrue();
+        var approvedCall = result.ApprovedCalls.Should().ContainSingle().Subject;
+        approvedCall.ToolName.Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
+        approvedCall.Arguments.Should().BeEmpty();
+        approvedCall.Reason.Should().Be("Planner requested cited evidence.");
+        result.RejectedCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_Should_reject_arguments_for_argument_free_legal_capability()
+    {
+        var validator = new ToolPlanValidator(
+            new ToolCallingOptions
+            {
+                AllowedTools = [PlannerToolCatalog.SearchCnvRegulationName]
+            }
+        );
+
+        var result = validator.Validate(
+            CreatePlan(
+                new ProposedToolCall(
+                    PlannerToolCatalog.SearchCnvRegulationName,
+                    new Dictionary<string, string>
+                    {
+                        ["query"] = "agentes"
+                    },
+                    "Planner requested cited evidence."))
+        );
+
         result.IsValid.Should().BeFalse();
         result.ApprovedCalls.Should().BeEmpty();
         result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
             new RejectedToolCall(
                 PlannerToolCatalog.SearchCnvRegulationName,
-                "Falta el argumento obligatorio: query."
+                "Argumento no permitido: query."
             )
         );
     }
@@ -286,10 +315,7 @@ public class ToolPlanValidatorTests
                 toolName,
                 PlannerToolCatalog.SearchCnvRegulationName,
                 StringComparison.OrdinalIgnoreCase)
-                ? new Dictionary<string, string>
-                {
-                    ["query"] = "agentes"
-                }
+                ? new Dictionary<string, string>()
                 : new Dictionary<string, string>
                 {
                     ["sessionId"] = Guid.NewGuid().ToString()

@@ -28,22 +28,12 @@ public static class PlannerToolCatalog
                 ])),
             new PlannerToolDefinition(
                 SearchCnvRegulationName,
-                "Recupera evidencia regulatoria CNV citada sin emitir conclusiones legales.",
+                "Autoriza una revisión legal compuesta; la lógica determinista deriva consultas CNV del análisis financiero completado.",
                 PlannerToolHandler.SearchCnvRegulation,
                 PlannerToolResultKind.LegalAgent,
                 PlannerToolSatisfactionKind.LegalReview,
                 "LegalAgent",
-                Array.AsReadOnly(
-                [
-                    Required("query", PlannerToolArgumentType.String, "Consulta breve en español."),
-                    Optional("area", PlannerToolArgumentType.String, "Área regulatoria opcional."),
-                    Optional("limit", PlannerToolArgumentType.Integer, "Máximo de resultados."),
-                    Optional("source", PlannerToolArgumentType.String, "Fuente regulatoria opcional."),
-                    Optional("documentType", PlannerToolArgumentType.String, "Tipo de documento opcional."),
-                    Optional("resolutionNumber", PlannerToolArgumentType.String, "Número de resolución opcional."),
-                    Optional("status", PlannerToolArgumentType.String, "Estado documental opcional."),
-                    Optional("requiresReview", PlannerToolArgumentType.Boolean, "Filtro opcional de revisión requerida.")
-                ]))
+                Array.Empty<PlannerToolArgumentDefinition>())
         ]);
 
     /// <summary>
@@ -88,13 +78,5 @@ public static class PlannerToolCatalog
         string description)
     {
         return new PlannerToolArgumentDefinition(name, type, true, description);
-    }
-
-    private static PlannerToolArgumentDefinition Optional(
-        string name,
-        PlannerToolArgumentType type,
-        string description)
-    {
-        return new PlannerToolArgumentDefinition(name, type, false, description);
     }
 }

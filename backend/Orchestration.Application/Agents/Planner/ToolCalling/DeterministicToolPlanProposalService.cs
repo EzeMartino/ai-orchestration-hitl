@@ -48,14 +48,8 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
             calls.Add(
                 new ProposedToolCall(
                     ToolName: PlannerToolCatalog.SearchCnvRegulationName,
-                    Arguments: new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes",
-                        ["area"] = "Agentes",
-                        ["limit"] = "5",
-                        ["requiresReview"] = "true"
-                    },
-                    Reason: "Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados."
+                    Arguments: new Dictionary<string, string>(),
+                    Reason: "Autorizar una revisión regulatoria CNV derivada del análisis financiero completado."
                 ));
         }
 

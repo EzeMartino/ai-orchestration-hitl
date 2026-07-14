@@ -131,10 +131,7 @@ public class SemanticKernelToolPlanProposalServiceTests
   "proposedCalls": [
     {
       "toolName": "legal.search_cnv_regulation",
-      "arguments": {
-        "query": "agentes",
-        "limit": "5"
-      },
+      "arguments": {},
       "reason": "Recuperar evidencia CNV citada."
     }
   ]
@@ -153,8 +150,7 @@ public class SemanticKernelToolPlanProposalServiceTests
 
         result.ProposedCalls.Should().ContainSingle();
         result.ProposedCalls[0].ToolName.Should().Be("legal.search_cnv_regulation");
-        result.ProposedCalls[0].Arguments["query"].Should().Be("agentes");
-        result.ProposedCalls[0].Arguments["limit"].Should().Be("5");
+        result.ProposedCalls[0].Arguments.Should().BeEmpty();
         result.ProposedCalls[0].Reason.Should().Be("Recuperar evidencia CNV citada.");
         chatCompletionService.LastChatHistory
             .Should()
@@ -253,11 +249,7 @@ public class SemanticKernelToolPlanProposalServiceTests
   "proposedCalls": [
     {
       "toolName": "legal.search_cnv_regulation",
-      "arguments": {
-        "query": "submittedAt 2030",
-        "submittedAt": "2030-01-01T00:00:00Z",
-        "limit": "5"
-      },
+      "arguments": {},
       "reason": "Buscar regulación."
     }
   ]
@@ -271,12 +263,7 @@ public class SemanticKernelToolPlanProposalServiceTests
         var legalCall = result.ProposedCalls.Should().ContainSingle().Subject;
         legalCall.Should().BeEquivalentTo(new ProposedToolCall(
             PlannerToolCatalog.SearchCnvRegulationName,
-            new Dictionary<string, string>
-            {
-                ["query"] = "submittedAt 2030",
-                ["submittedAt"] = "2030-01-01T00:00:00Z",
-                ["limit"] = "5"
-            },
+            new Dictionary<string, string>(),
             "Buscar regulación."
         ));
         logger.Entries.Should().BeEmpty();
@@ -313,8 +300,8 @@ public class SemanticKernelToolPlanProposalServiceTests
         availableTools.GetArrayLength().Should().Be(1);
         availableTools[0].GetProperty("name").GetString()
             .Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
-        availableTools[0].GetProperty("arguments")[0].GetProperty("name").GetString()
-            .Should().Be("query");
+        availableTools[0].GetProperty("arguments").GetArrayLength()
+            .Should().Be(0);
     }
 
     private static SemanticKernelToolPlanProposalService CreateService(

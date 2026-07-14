@@ -57,11 +57,9 @@ public class DeterministicToolPlanProposalServiceTests
 
         var legalCall = result.ProposedCalls[1];
         legalCall.ToolName.Should().Be("legal.search_cnv_regulation");
-        legalCall.Arguments["query"].Should().Be("agentes");
-        legalCall.Arguments["area"].Should().Be("Agentes");
-        legalCall.Arguments["limit"].Should().Be("5");
-        legalCall.Arguments["requiresReview"].Should().Be("true");
-        legalCall.Reason.Should().Be("Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados.");
+        legalCall.Arguments.Should().BeEmpty();
+        legalCall.Reason.Should().Be(
+            "Autorizar una revisión regulatoria CNV derivada del análisis financiero completado.");
     }
 
     [Fact]
