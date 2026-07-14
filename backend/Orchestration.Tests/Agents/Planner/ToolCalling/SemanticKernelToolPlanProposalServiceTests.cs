@@ -64,7 +64,7 @@ public class SemanticKernelToolPlanProposalServiceTests
     }
 
     [Fact]
-    public async Task ProposeAsync_Should_fallback_safely_when_llm_output_is_invalid()
+    public async Task ProposeAsync_Should_record_invalid_response_fallback()
     {
         var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
         var input = CreateInput();
@@ -89,11 +89,74 @@ public class SemanticKernelToolPlanProposalServiceTests
             CancellationToken.None
         );
 
-        result.Should().BeEquivalentTo(
-            expected,
+        result.ProposedCalls.Should().BeEquivalentTo(
+            expected.ProposedCalls,
             options => options.WithStrictOrdering()
         );
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(
+            ToolPlanProposalFallbackReason.LlmResponseInvalid);
         logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_record_request_failure_fallback()
+    {
+        var service = CreateService(
+            toolCallingEnabled: true,
+            new FakeChatCompletionService(new InvalidOperationException("sensitive request failure"))
+        );
+
+        var result = await service.ProposeAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(
+            ToolPlanProposalFallbackReason.LlmRequestFailed);
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_record_configuration_failure_fallback()
+    {
+        var toolCallingOptions = new ToolCallingOptions
+        {
+            Enabled = true
+        };
+        var service = new SemanticKernelToolPlanProposalService(
+            toolCallingOptions,
+            new DeterministicToolPlanProposalService(toolCallingOptions),
+            new SemanticKernelToolPlanResponseParser(),
+            chatCompletionService: null,
+            kernel: null,
+            configurationFailure: ToolPlanProposalFallbackReason.LlmConfigurationFailed
+        );
+
+        var result = await service.ProposeAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(
+            ToolPlanProposalFallbackReason.LlmConfigurationFailed);
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_always_propagate_operation_cancellation()
+    {
+        var service = CreateService(
+            toolCallingEnabled: true,
+            new FakeChatCompletionService(new OperationCanceledException("request canceled"))
+        );
+
+        Func<Task> act = () => service.ProposeAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
@@ -152,6 +215,8 @@ public class SemanticKernelToolPlanProposalServiceTests
         result.ProposedCalls[0].ToolName.Should().Be("legal.search_cnv_regulation");
         result.ProposedCalls[0].Arguments.Should().BeEmpty();
         result.ProposedCalls[0].Reason.Should().Be("Recuperar evidencia CNV citada.");
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.Llm);
+        result.ProposalFallbackReason.Should().BeNull();
         chatCompletionService.LastChatHistory
             .Should()
             .NotBeNull();
@@ -418,12 +483,19 @@ public class SemanticKernelToolPlanProposalServiceTests
 
     private sealed class FakeChatCompletionService : IChatCompletionService
     {
-        private readonly string _content;
+        private readonly string? _content;
+        private readonly Exception? _exception;
 
         public FakeChatCompletionService(
             string content)
         {
             _content = content;
+        }
+
+        public FakeChatCompletionService(
+            Exception exception)
+        {
+            _exception = exception;
         }
 
         public IReadOnlyDictionary<string, object?> Attributes { get; } =
@@ -439,11 +511,16 @@ public class SemanticKernelToolPlanProposalServiceTests
         {
             LastChatHistory = chatHistory;
 
+            if (_exception is not null)
+            {
+                return Task.FromException<IReadOnlyList<ChatMessageContent>>(_exception);
+            }
+
             IReadOnlyList<ChatMessageContent> response =
             [
                 new ChatMessageContent(
                     AuthorRole.Assistant,
-                    _content
+                    _content ?? string.Empty
                 )
             ];
 
