@@ -21,7 +21,8 @@ checks parseability, not equality with persisted session evidence.
 Missing or invalid source timestamps are already rejected upstream, but
 `FinancialReportContextResolver` collapses timestamp-specific validation into
 `FINANCIAL_REPORT_SUMMARY_INVALID`. That makes the failure less explicit in
-preflight and audit events.
+preflight. The API then blocks before orchestration and currently publishes a
+generic structured-metrics audit message, hiding the timestamp-specific cause.
 
 ## Goals
 
@@ -104,10 +105,15 @@ The resolver will preserve timestamp-specific validation outcomes:
 Other invalid report-summary fields retain the existing generic
 `FINANCIAL_REPORT_SUMMARY_INVALID` result.
 
-`AnalysisOrchestratorService` continues to publish
-`financial_report_context_invalid`, but its message will reflect the specific
-timestamp error returned by the resolver. No submitted timestamp value is
-included in the event.
+`AnalysisSessionsController.StartSession` will keep blocking at preflight and
+publishing `analysis_start_blocked`, but timestamp failures will use the
+specific safe resolver message instead of the generic structured-metrics text.
+Other preflight failures retain the existing generic message.
+
+`AnalysisOrchestratorService` remains a defensive second boundary for direct
+invocations. Its `financial_report_context_invalid` message will also reflect
+the specific timestamp error returned by the resolver. Neither event includes
+the submitted timestamp value.
 
 ### LLM canonicalization
 
@@ -148,8 +154,9 @@ round-trip assertion and verifies the same trusted input used by fallback.
 ### Source validation and audit
 
 Resolver and preflight tests will distinguish required from invalid timestamps.
-Orchestrator tests will verify Planner is not invoked, the session fails, and
-the audit event contains only the stable specific message.
+API controller tests will verify `StartSession` blocks before Planner and emits
+the stable specific message without raw input. Direct-orchestrator tests will
+verify the same defensive failure and audit behavior.
 
 ### End-to-end preservation
 
@@ -176,6 +183,5 @@ git diff --check
 | `SubmittedAt` is typed proposal input | Existing contract retained and asserted |
 | LLM and deterministic proposals receive persisted timestamp | Prompt input plus post-parse canonicalization and deterministic direct construction |
 | No production current-time fallback | Trusted input only; scan and tests |
-| Missing timestamp explicit and audited | Specific resolver/preflight codes plus safe orchestrator event |
+| Missing timestamp explicit and audited | Specific resolver/preflight codes plus safe API and defensive orchestrator events |
 | End-to-end preservation | Persisted context through LLM plan and controlled Data execution |
-
