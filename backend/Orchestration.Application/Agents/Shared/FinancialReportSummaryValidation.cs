@@ -13,6 +13,11 @@ public sealed record FinancialReportSummaryValidationIssue(
 
 public static class FinancialReportSummaryValidator
 {
+    public const string SubmittedAtRequiredCode = "SUBMITTED_AT_REQUIRED";
+    public const string SubmittedAtRequiredMessage = "Submission date is required.";
+    public const string SubmittedAtInvalidCode = "SUBMITTED_AT_INVALID";
+    public const string SubmittedAtInvalidMessage = "Submission date must be valid.";
+
     public static FinancialReportSummaryValidation Validate(
         FinancialReportSummaryInput? input)
     {
@@ -62,14 +67,14 @@ public static class FinancialReportSummaryValidator
         if (input.SubmittedAt is null)
         {
             errors.Add(new FinancialReportSummaryValidationIssue(
-                "SUBMITTED_AT_REQUIRED",
-                "Submission date is required."));
+                SubmittedAtRequiredCode,
+                SubmittedAtRequiredMessage));
         }
         else if (input.SubmittedAt.Value == default)
         {
             errors.Add(new FinancialReportSummaryValidationIssue(
-                "SUBMITTED_AT_INVALID",
-                "Submission date must be valid."));
+                SubmittedAtInvalidCode,
+                SubmittedAtInvalidMessage));
         }
 
         if (errors.Count > 0)

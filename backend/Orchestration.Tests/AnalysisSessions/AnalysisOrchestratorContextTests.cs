@@ -24,7 +24,7 @@ public class AnalysisOrchestratorContextTests
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
         var session = AnalysisSession.Create(Guid.NewGuid());
-        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1}}""");
+        session.SetContext("""{"financialReport":{"reportName":"","totalAmount":-1,"transactionCount":-1,"submittedAt":"2026-07-12T18:30:00Z"}}""");
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -53,6 +53,43 @@ public class AnalysisOrchestratorContextTests
             .AsNoTracking()
             .SingleAsync(item => item.Id == session.Id);
         persisted.Status.Should().Be(AnalysisSessionStatus.Failed);
+    }
+
+    [Fact]
+    public async Task StartAnalysisAsync_MissingSubmittedAt_ShouldFailSafelyWithoutInvokingPlanner()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext("""{"financialReport":{"reportName":"report.pdf","totalAmount":1,"transactionCount":1}}""");
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var publisher = new FakeActivityEventPublisher();
+        var planner = new CapturingPlannerAgent();
+        var orchestrator = new AnalysisOrchestratorService(
+            dbContext,
+            new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
+            publisher,
+            planner,
+            new FinancialReportContextResolver());
+
+        var result = await orchestrator.StartAnalysisAsync(
+            session.Id,
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Status.Should().Be(nameof(AnalysisSessionStatus.Failed));
+        planner.RunCalls.Should().Be(0);
+        var persisted = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        persisted.FailureReason.Should().Be(
+            FinancialReportSummaryValidator.SubmittedAtRequiredMessage);
+        var activityEvent = publisher.PublishedEvents.Should().ContainSingle().Subject;
+        activityEvent.Type.Should().Be("financial_report_context_invalid");
+        activityEvent.Agent.Should().Be("Orchestrator");
+        activityEvent.Message.Should().Be(
+            FinancialReportSummaryValidator.SubmittedAtRequiredMessage);
+        activityEvent.Message.Should().NotContain("submittedAt");
     }
 
     [Theory]

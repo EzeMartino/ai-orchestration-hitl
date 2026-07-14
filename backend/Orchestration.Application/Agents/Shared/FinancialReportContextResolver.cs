@@ -52,6 +52,15 @@ public sealed class FinancialReportContextResolver : IFinancialReportContextReso
 
             if (!validation.IsValid || validation.Summary is null)
             {
+                var submittedAtError = validation.Errors.FirstOrDefault(error =>
+                    error.Code is FinancialReportSummaryValidator.SubmittedAtRequiredCode
+                        or FinancialReportSummaryValidator.SubmittedAtInvalidCode);
+
+                if (submittedAtError is not null)
+                {
+                    return Invalid(submittedAtError.Code, submittedAtError.Message);
+                }
+
                 return Invalid();
             }
 
@@ -87,12 +96,14 @@ public sealed class FinancialReportContextResolver : IFinancialReportContextReso
             ErrorMessage: RequiredMessage);
     }
 
-    private static FinancialReportContextResolution Invalid()
+    private static FinancialReportContextResolution Invalid(
+        string code = InvalidCode,
+        string message = InvalidMessage)
     {
         return new FinancialReportContextResolution(
             IsValid: false,
             Report: null,
-            ErrorCode: InvalidCode,
-            ErrorMessage: InvalidMessage);
+            ErrorCode: code,
+            ErrorMessage: message);
     }
 }

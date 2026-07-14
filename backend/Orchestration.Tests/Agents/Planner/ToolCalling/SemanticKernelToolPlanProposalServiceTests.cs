@@ -1,33 +1,99 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
+using System.Globalization;
 using System.Text.Json;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
 public class SemanticKernelToolPlanProposalServiceTests
 {
+    private static readonly Guid SessionId =
+        Guid.Parse("11111111-1111-1111-1111-111111111111");
+
     private static readonly DateTimeOffset SubmittedAt =
-        new(2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
+        new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.FromHours(-3))
+            .AddTicks(1_234_567);
+
+    private const string CanonicalizationFailureCode =
+        "TOOL_PLAN_SUBMITTED_AT_CANONICALIZED";
+
+    [Theory]
+    [InlineData("{}", "missing", null, null)]
+    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z", null)]
+    [InlineData("{\"submittedAt\":\"not-a-date\"}", "malformed", "not-a-date", null)]
+    [InlineData("{\" SubmittedAt \":\"2030-01-01T00:00:00Z\"}", "mismatch", "2030-01-01T00:00:00Z", null)]
+    [InlineData("{\"submittedAt\":\"2030-01-01T00:00:00Z\",\"SubmittedAt\":\"2031-01-01T00:00:00Z\"}", "duplicate", "2030-01-01T00:00:00Z", "2031-01-01T00:00:00Z")]
+    public async Task ProposeAsync_Should_canonicalize_data_submitted_at_and_log_safe_reason(
+        string argumentsJson,
+        string expectedReason,
+        string? firstUnsafeFragment,
+        string? secondUnsafeFragment)
+    {
+        var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
+        var input = CreateInput();
+        var service = CreateService(
+            toolCallingEnabled: true,
+            chatContent: CreatePlanJson(
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                argumentsJson
+            ),
+            logger
+        );
+
+        var result = await service.ProposeAsync(input, CancellationToken.None);
+
+        var dataCall = result.ProposedCalls.Should().ContainSingle().Subject;
+        dataCall.Arguments.Keys
+            .Where(IsSubmittedAtKey)
+            .Should()
+            .Equal("submittedAt");
+        dataCall.Arguments["submittedAt"].Should().Be(FormatSubmittedAt(input));
+
+        var entry = logger.Entries.Should().ContainSingle().Subject;
+        AssertSafeCanonicalizationWarning(
+            entry,
+            input,
+            expectedReason,
+            firstUnsafeFragment,
+            secondUnsafeFragment
+        );
+    }
 
     [Fact]
     public async Task ProposeAsync_Should_fallback_safely_when_llm_output_is_invalid()
     {
+        var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
+        var input = CreateInput();
+        var fallback = new DeterministicToolPlanProposalService(
+            new ToolCallingOptions
+            {
+                Enabled = true
+            }
+        );
         var service = CreateService(
             toolCallingEnabled: true,
-            chatContent: "not-json"
+            chatContent: "not-json",
+            logger
         );
 
         var result = await service.ProposeAsync(
-            CreateInput(),
+            input,
+            CancellationToken.None
+        );
+        var expected = await fallback.ProposeAsync(
+            input,
             CancellationToken.None
         );
 
-        result.ProposedCalls.Should().HaveCount(2);
-        result.ProposedCalls.Should().Contain(x => x.ToolName == "data.analyze_transactions");
-        result.ProposedCalls.Should().Contain(x => x.ToolName == "legal.search_cnv_regulation");
+        result.Should().BeEquivalentTo(
+            expected,
+            options => options.WithStrictOrdering()
+        );
+        logger.Entries.Should().BeEmpty();
     }
 
     [Fact]
@@ -104,7 +170,116 @@ public class SemanticKernelToolPlanProposalServiceTests
             .Content!;
         using var payload = JsonDocument.Parse(userMessage);
         payload.RootElement.GetProperty("submittedAt").GetString()
-            .Should().Be("2024-02-03T04:05:06.0000000+00:00");
+            .Should().Be(FormatSubmittedAt(CreateInput()));
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_leave_exact_canonical_data_argument_unchanged_without_logging()
+    {
+        var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
+        var input = CreateInput();
+        var expectedArguments = new Dictionary<string, string>
+        {
+            ["submittedAt"] = FormatSubmittedAt(input),
+            ["reportName"] = "llm-report",
+            ["totalAmount"] = "999.50"
+        };
+        var service = CreateService(
+            toolCallingEnabled: true,
+            chatContent: CreatePlanJson(
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                JsonSerializer.Serialize(expectedArguments)
+            ),
+            logger
+        );
+
+        var result = await service.ProposeAsync(input, CancellationToken.None);
+
+        result.ProposedCalls.Should().ContainSingle();
+        result.ProposedCalls[0].Arguments.Should().Equal(expectedArguments);
+        logger.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_canonicalize_each_data_call_using_trimmed_case_insensitive_tool_match()
+    {
+        var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
+        var input = CreateInput();
+        var service = CreateService(
+            toolCallingEnabled: true,
+            chatContent: """
+{
+  "proposedCalls": [
+    {
+      "toolName": " DATA.ANALYZE_TRANSACTIONS ",
+      "arguments": { "marker": "first" },
+      "reason": "Primera llamada."
+    },
+    {
+      "toolName": "data.analyze_transactions",
+      "arguments": { "submittedAt": "not-a-date", "marker": "second" },
+      "reason": "Segunda llamada."
+    }
+  ]
+}
+""",
+            logger
+        );
+
+        var result = await service.ProposeAsync(input, CancellationToken.None);
+
+        result.ProposedCalls.Should().HaveCount(2);
+        result.ProposedCalls[0].ToolName.Should().Be(" DATA.ANALYZE_TRANSACTIONS ");
+        result.ProposedCalls[0].Arguments["marker"].Should().Be("first");
+        result.ProposedCalls[1].Arguments["marker"].Should().Be("second");
+        result.ProposedCalls.Should().OnlyContain(call =>
+            call.Arguments.Count(pair => IsSubmittedAtKey(pair.Key)) == 1 &&
+            call.Arguments["submittedAt"] == FormatSubmittedAt(input));
+
+        logger.Entries.Should().HaveCount(2);
+        AssertSafeCanonicalizationWarning(logger.Entries[0], input, "missing");
+        AssertSafeCanonicalizationWarning(logger.Entries[1], input, "malformed", "not-a-date");
+    }
+
+    [Fact]
+    public async Task ProposeAsync_Should_leave_legal_only_plan_identical_without_logging()
+    {
+        var logger = new CapturingLogger<SemanticKernelToolPlanProposalService>();
+        var input = CreateInput();
+        var service = CreateService(
+            toolCallingEnabled: true,
+            chatContent: """
+{
+  "proposedCalls": [
+    {
+      "toolName": "legal.search_cnv_regulation",
+      "arguments": {
+        "query": "submittedAt 2030",
+        "submittedAt": "2030-01-01T00:00:00Z",
+        "limit": "5"
+      },
+      "reason": "Buscar regulación."
+    }
+  ]
+}
+""",
+            logger
+        );
+
+        var result = await service.ProposeAsync(input, CancellationToken.None);
+
+        var legalCall = result.ProposedCalls.Should().ContainSingle().Subject;
+        legalCall.Should().BeEquivalentTo(new ProposedToolCall(
+            PlannerToolCatalog.SearchCnvRegulationName,
+            new Dictionary<string, string>
+            {
+                ["query"] = "submittedAt 2030",
+                ["submittedAt"] = "2030-01-01T00:00:00Z",
+                ["limit"] = "5"
+            },
+            "Buscar regulación."
+        ));
+        logger.Entries.Should().BeEmpty();
     }
 
     [Fact]
@@ -144,17 +319,20 @@ public class SemanticKernelToolPlanProposalServiceTests
 
     private static SemanticKernelToolPlanProposalService CreateService(
         bool toolCallingEnabled,
-        string chatContent)
+        string chatContent,
+        ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         return CreateService(
             toolCallingEnabled,
-            new FakeChatCompletionService(chatContent)
+            new FakeChatCompletionService(chatContent),
+            logger
         );
     }
 
     private static SemanticKernelToolPlanProposalService CreateService(
         bool toolCallingEnabled,
-        FakeChatCompletionService chatCompletionService)
+        FakeChatCompletionService chatCompletionService,
+        ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         var toolCallingOptions = new ToolCallingOptions
         {
@@ -165,14 +343,82 @@ public class SemanticKernelToolPlanProposalServiceTests
             toolCallingOptions,
             new DeterministicToolPlanProposalService(toolCallingOptions),
             new SemanticKernelToolPlanResponseParser(),
-            chatCompletionService
+            chatCompletionService,
+            logger
         );
+    }
+
+    private static string CreatePlanJson(
+        string toolName,
+        string argumentsJson)
+    {
+        return $$"""
+{
+  "proposedCalls": [
+    {
+      "toolName": {{JsonSerializer.Serialize(toolName)}},
+      "arguments": {{argumentsJson}},
+      "reason": "Analizar transacciones."
+    }
+  ]
+}
+""";
+    }
+
+    private static bool IsSubmittedAtKey(
+        string key)
+    {
+        return string.Equals(
+            key.Trim(),
+            "submittedAt",
+            StringComparison.OrdinalIgnoreCase
+        );
+    }
+
+    private static string FormatSubmittedAt(
+        ToolPlanProposalInput input)
+    {
+        return input.SubmittedAt.ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    private static void AssertSafeCanonicalizationWarning(
+        CapturedLogEntry entry,
+        ToolPlanProposalInput input,
+        string expectedReason,
+        params string?[] unsafeFragments)
+    {
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Properties.Keys.Should().BeEquivalentTo(
+            ["SessionId", "ToolName", "FailureCode", "Reason"]
+        );
+        entry.Properties["SessionId"].Should().Be(input.SessionId);
+        entry.Properties["ToolName"].Should().Be(PlannerToolCatalog.AnalyzeTransactionsName);
+        entry.Properties["FailureCode"].Should().Be(CanonicalizationFailureCode);
+        entry.Properties["Reason"].Should().Be(expectedReason);
+
+        var structuredProperties = string.Join(" ", entry.Properties.Values);
+        var forbiddenFragments = new[]
+        {
+            input.ReportName,
+            input.TotalAmount.ToString(CultureInfo.InvariantCulture),
+            input.TransactionCount.ToString(CultureInfo.InvariantCulture),
+            input.PlannerSummary,
+            input.RiskFactors[0],
+            input.Limitations[0]
+        }
+            .Concat(unsafeFragments.OfType<string>());
+
+        foreach (var forbiddenFragment in forbiddenFragments)
+        {
+            entry.Message.Should().NotContain(forbiddenFragment);
+            structuredProperties.Should().NotContain(forbiddenFragment);
+        }
     }
 
     private static ToolPlanProposalInput CreateInput()
     {
         return new ToolPlanProposalInput(
-            SessionId: Guid.NewGuid(),
+            SessionId: SessionId,
             ReportName: "financial-report",
             TotalAmount: 125000m,
             TransactionCount: 42,
@@ -225,6 +471,59 @@ public class SemanticKernelToolPlanProposalServiceTests
         {
             await Task.CompletedTask;
             yield break;
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        private readonly List<CapturedLogEntry> _entries = [];
+
+        public IReadOnlyList<CapturedLogEntry> Entries => _entries;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return NullScope.Instance;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
+                ? values
+                    .Where(pair => pair.Key != "{OriginalFormat}")
+                    .ToDictionary(pair => pair.Key, pair => pair.Value)
+                : new Dictionary<string, object?>();
+
+            _entries.Add(new CapturedLogEntry(
+                logLevel,
+                formatter(state, exception),
+                properties
+            ));
+        }
+    }
+
+    private sealed record CapturedLogEntry(
+        LogLevel Level,
+        string Message,
+        IReadOnlyDictionary<string, object?> Properties
+    );
+
+    private sealed class NullScope : IDisposable
+    {
+        public static NullScope Instance { get; } = new();
+
+        public void Dispose()
+        {
         }
     }
 }
