@@ -12,6 +12,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
 using Orchestration.Api.Controllers;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
@@ -229,6 +231,118 @@ public sealed class ProductionLikeWorkflowE2ETests
     }
 
     [Fact]
+    public async Task ProductionLikeWorkflow_LlmPlan_ShouldExecutePersistedSubmittedAt()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var session = AnalysisSession.Create(userId);
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        var expectedSummary = new FinancialReportSummaryInput(
+            "llm-plan-report.pdf",
+            333333.33m,
+            33,
+            new DateTimeOffset(2026, 7, 12, 18, 30, 0, TimeSpan.FromHours(-3)));
+        var toolCallingOptions = new ToolCallingOptions
+        {
+            Enabled = true,
+            ExecutionMode = ToolCallingExecutionMode.PlanDriven
+        };
+        var chatResponse = $$"""
+            {
+              "proposedCalls": [
+                {
+                  "toolName": "data.analyze_transactions",
+                  "arguments": {
+                    "sessionId": "{{session.Id}}",
+                    "reportName": "llm-plan-report.pdf",
+                    "totalAmount": "333333.33",
+                    "transactionCount": "33",
+                    "submittedAt": "2030-01-01T00:00:00Z"
+                  },
+                  "reason": "Analizar las transacciones del reporte persistido."
+                },
+                {
+                  "toolName": "legal.search_cnv_regulation",
+                  "arguments": {
+                    "query": "agentes",
+                    "area": "Agentes",
+                    "limit": "5",
+                    "requiresReview": "true"
+                  },
+                  "reason": "Recuperar evidencia regulatoria CNV para revisión."
+                }
+              ]
+            }
+            """;
+        var chatCompletionService = new StaticChatCompletionService(chatResponse);
+        var proposalService = new SemanticKernelToolPlanProposalService(
+            toolCallingOptions,
+            new DeterministicToolPlanProposalService(toolCallingOptions),
+            new SemanticKernelToolPlanResponseParser(),
+            chatCompletionService,
+            NullLogger<SemanticKernelToolPlanProposalService>.Instance);
+        FinancialReportContext? executedReport = null;
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            new FakeProductionCnvRegulationMcpClient(),
+            ToolCallingExecutionMode.PlanDriven,
+            proposalService,
+            report => executedReport = report);
+
+        var saveResult = await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(reportSummary: expectedSummary),
+            CancellationToken.None);
+        saveResult.Should().BeOfType<OkObjectResult>();
+
+        var startResult = await controller.StartSession(
+            session.Id,
+            CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        chatCompletionService.InvocationCount.Should().Be(1);
+        executedReport.Should().NotBeNull();
+        var observedReport = executedReport
+            ?? throw new InvalidOperationException("Controlled DataAgent execution was not observed.");
+        observedReport.SubmittedAt.Should().Be(expectedSummary.SubmittedAt!.Value);
+        observedReport.SubmittedAt.ToString("O", CultureInfo.InvariantCulture)
+            .Should().Be("2026-07-12T18:30:00.0000000-03:00");
+
+        var persistedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == session.Id);
+        using var persistedContext = JsonDocument.Parse(persistedSession.ContextJson);
+        var toolPlan = persistedContext.RootElement.GetProperty("toolPlan");
+        toolPlan.GetProperty("approvedCalls").GetArrayLength().Should().Be(2);
+        toolPlan.GetProperty("rejectedCalls").GetArrayLength().Should().Be(0);
+        var executedCalls = toolPlan.GetProperty("executedCalls")
+            .EnumerateArray()
+            .ToArray();
+        executedCalls.Should().HaveCount(2);
+        executedCalls.Should().OnlyContain(call =>
+            call.GetProperty("status").GetString() == "Executed" &&
+            call.GetProperty("succeeded").GetBoolean());
+        var dataCall = toolPlan
+            .GetProperty("proposedCalls")
+            .EnumerateArray()
+            .Single(call => call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.AnalyzeTransactionsName);
+        dataCall.GetProperty("reason").GetString()
+            .Should().Be("Analizar las transacciones del reporte persistido.");
+        dataCall.GetProperty("arguments")
+            .GetProperty("submittedAt")
+            .GetString()
+            .Should().Be("2026-07-12T18:30:00.0000000-03:00");
+        persistedSession.ContextJson.Should().NotContain("2030-01-01");
+        activityPublisher.PublishedEvents.Should().NotContain(activityEvent =>
+            activityEvent.Type == "tool_execution_fallback_used");
+    }
+
+    [Fact]
     public async Task ProductionLikeWorkflow_TwoSessions_ShouldKeepPersistedReportsAndToolInputsIsolated()
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
@@ -391,7 +505,9 @@ public sealed class ProductionLikeWorkflowE2ETests
         PersistingActivityEventPublisher activityPublisher,
         IPythonFinancialAnalysisService pythonService,
         ICnvRegulationMcpClient cnvClient,
-        ToolCallingExecutionMode executionMode = ToolCallingExecutionMode.Shadow)
+        ToolCallingExecutionMode executionMode = ToolCallingExecutionMode.Shadow,
+        IToolPlanProposalService? proposalService = null,
+        Action<FinancialReportContext>? dataReportObserver = null)
     {
         var dataAgentOptions = new DataAgentOptions
         {
@@ -419,12 +535,16 @@ public sealed class ProductionLikeWorkflowE2ETests
             activityPublisher,
             NullLogger<DataAgentFinancialAnalysisWorkflow>.Instance
         );
-        var dataAgent = new ConfigurableDataAgent(
+        IDataAgent dataAgent = new ConfigurableDataAgent(
             new ThrowingLegacyDataAgent(),
             financialWorkflow,
             Options.Create(dataAgentOptions),
             NullLogger<ConfigurableDataAgent>.Instance
         );
+        if (dataReportObserver is not null)
+        {
+            dataAgent = new ObservingDataAgent(dataAgent, dataReportObserver);
+        }
         var legalSource = new McpRegulatoryKnowledgeSource(
             cnvClient,
             Options.Create(new CnvRegulationMcpOptions
@@ -448,7 +568,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             legalAgent,
             activityPublisher,
             new DeterministicPlannerReasoningService(),
-            new DeterministicToolPlanProposalService(toolCallingOptions),
+            proposalService ?? new DeterministicToolPlanProposalService(toolCallingOptions),
             new ToolPlanNormalizer(),
             new ToolPlanValidator(toolCallingOptions),
             new ToolExecutionPolicy(),
@@ -1280,6 +1400,74 @@ public sealed class ProductionLikeWorkflowE2ETests
             CancellationToken cancellationToken)
         {
             throw new InvalidOperationException("Legacy DataAgent should not run in production-like E2E.");
+        }
+    }
+
+    private sealed class ObservingDataAgent : IDataAgent
+    {
+        private readonly IDataAgent _inner;
+        private readonly Action<FinancialReportContext> _observer;
+
+        public ObservingDataAgent(
+            IDataAgent inner,
+            Action<FinancialReportContext> observer)
+        {
+            _inner = inner;
+            _observer = observer;
+        }
+
+        public Task<DataAgentResult> AnalyzeAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            _observer(report);
+
+            return _inner.AnalyzeAsync(report, cancellationToken);
+        }
+    }
+
+    private sealed class StaticChatCompletionService : IChatCompletionService
+    {
+        private readonly string _content;
+
+        public StaticChatCompletionService(
+            string content)
+        {
+            _content = content;
+        }
+
+        public IReadOnlyDictionary<string, object?> Attributes { get; } =
+            new Dictionary<string, object?>();
+
+        public int InvocationCount { get; private set; }
+
+        public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
+            ChatHistory chatHistory,
+            PromptExecutionSettings? executionSettings = null,
+            Kernel? kernel = null,
+            CancellationToken cancellationToken = default)
+        {
+            InvocationCount++;
+
+            IReadOnlyList<ChatMessageContent> response =
+            [
+                new ChatMessageContent(
+                    AuthorRole.Assistant,
+                    _content
+                )
+            ];
+
+            return Task.FromResult(response);
+        }
+
+        public async IAsyncEnumerable<StreamingChatMessageContent> GetStreamingChatMessageContentsAsync(
+            ChatHistory chatHistory,
+            PromptExecutionSettings? executionSettings = null,
+            Kernel? kernel = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
         }
     }
 
