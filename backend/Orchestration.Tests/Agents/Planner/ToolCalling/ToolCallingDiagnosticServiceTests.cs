@@ -93,15 +93,50 @@ public class ToolCallingDiagnosticServiceTests
         executor.WasCalled.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Should_copy_normalized_proposal_provenance_to_audit()
+    {
+        var executor = new FakeControlledToolExecutor();
+        var service = CreateService(
+            executor,
+            new ProvenanceToolPlanNormalizer()
+        );
+
+        var result = await service.ExecuteAsync(
+            new ToolCallingDiagnosticRequest
+            {
+                ProposedCalls = [CreateProposedCall("legal.search_cnv_regulation")]
+            },
+            CancellationToken.None
+        );
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(ToolPlanProposalFallbackReason.LlmResponseInvalid);
+    }
+
     private static ToolCallingDiagnosticService CreateService(
-        FakeControlledToolExecutor executor)
+        FakeControlledToolExecutor executor,
+        IToolPlanNormalizer? normalizer = null)
     {
         return new ToolCallingDiagnosticService(
-            new ToolPlanNormalizer(),
+            normalizer ?? new ToolPlanNormalizer(),
             new ToolPlanValidator(),
             new ToolExecutionPolicy(),
             executor
         );
+    }
+
+    private sealed class ProvenanceToolPlanNormalizer : IToolPlanNormalizer
+    {
+        public ToolPlan Normalize(
+            ToolPlan plan)
+        {
+            return plan with
+            {
+                ProposalSource = ToolPlanProposalSource.DeterministicFallback,
+                ProposalFallbackReason = ToolPlanProposalFallbackReason.LlmResponseInvalid
+            };
+        }
     }
 
     private static ProposedToolCall CreateProposedCall(

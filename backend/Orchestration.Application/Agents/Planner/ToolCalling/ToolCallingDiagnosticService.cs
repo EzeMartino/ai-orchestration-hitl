@@ -46,7 +46,9 @@ public sealed class ToolCallingDiagnosticService : IToolCallingDiagnosticService
             ProposedCalls: normalizedPlan.ProposedCalls,
             ApprovedCalls: validationResult.ApprovedCalls,
             RejectedCalls: validationResult.RejectedCalls,
-            ExecutedCalls: executedCalls
+            ExecutedCalls: executedCalls,
+            ProposalSource: normalizedPlan.ProposalSource,
+            ProposalFallbackReason: normalizedPlan.ProposalFallbackReason
         );
     }
 

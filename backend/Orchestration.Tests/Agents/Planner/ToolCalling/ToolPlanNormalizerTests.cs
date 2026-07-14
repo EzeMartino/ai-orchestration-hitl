@@ -162,6 +162,32 @@ public class ToolPlanNormalizerTests
         result.ProposedCalls[0].Arguments.Should().BeEmpty();
     }
 
+    [Fact]
+    public void Normalize_Should_preserve_proposal_provenance()
+    {
+        var plan = new ToolPlan(
+            ProposedCalls: [CreateCall("legal.search_cnv_regulation")],
+            ProposalSource: ToolPlanProposalSource.DeterministicFallback,
+            ProposalFallbackReason: ToolPlanProposalFallbackReason.LlmResponseInvalid
+        );
+
+        var result = new ToolPlanNormalizer().Normalize(plan);
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(ToolPlanProposalFallbackReason.LlmResponseInvalid);
+    }
+
+    [Fact]
+    public void Normalize_Should_leave_legacy_plan_provenance_null()
+    {
+        var plan = new ToolPlan([CreateCall("legal.search_cnv_regulation")]);
+
+        var result = new ToolPlanNormalizer().Normalize(plan);
+
+        result.ProposalSource.Should().BeNull();
+        result.ProposalFallbackReason.Should().BeNull();
+    }
+
     private static ProposedToolCall CreateCall(
         string toolName,
         IReadOnlyDictionary<string, string>? arguments = null,

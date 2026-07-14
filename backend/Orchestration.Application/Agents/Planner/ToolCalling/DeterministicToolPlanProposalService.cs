@@ -18,7 +18,11 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
     {
         if (!_options.Enabled)
         {
-            return Task.FromResult(new ToolPlan([]));
+            return Task.FromResult(new ToolPlan(
+                ProposedCalls: [],
+                ProposalSource: ToolPlanProposalSource.Deterministic,
+                ProposalFallbackReason: null
+            ));
         }
 
         var allowedHandlers = PlannerToolCatalog.GetAllowed(_options)
@@ -53,6 +57,10 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
                 ));
         }
 
-        return Task.FromResult(new ToolPlan(calls));
+        return Task.FromResult(new ToolPlan(
+            ProposedCalls: calls,
+            ProposalSource: ToolPlanProposalSource.Deterministic,
+            ProposalFallbackReason: null
+        ));
     }
 }

@@ -544,11 +544,7 @@ public class PlannerAgentTests
                 ),
                 CreateProposedToolCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes",
-                        ["area"] = "Agentes"
-                    },
+                    new Dictionary<string, string>(),
                     "Retrieve legal evidence."
                 )
             ]
@@ -649,14 +645,13 @@ public class PlannerAgentTests
                 CreateProposedToolCall("data.analyze_transactions"),
                 CreateProposedToolCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes"
-                    }
+                    new Dictionary<string, string>()
                 ),
                 CreateProposedToolCall("workflow.complete"),
                 CreateProposedToolCall("unknown.tool")
-            ]
+            ],
+            ProposalSource: ToolPlanProposalSource.DeterministicFallback,
+            ProposalFallbackReason: ToolPlanProposalFallbackReason.LlmResponseInvalid
         );
 
         var plannerAgent = new PlannerAgent(
@@ -692,6 +687,8 @@ public class PlannerAgentTests
         result.ToolPlan.RejectedCalls.Select(call => call.ToolName)
             .Should()
             .Equal("workflow.complete", "unknown.tool");
+        result.ToolPlan.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ToolPlan.ProposalFallbackReason.Should().Be(ToolPlanProposalFallbackReason.LlmResponseInvalid);
         result.ToolPlan.ExecutedCalls
             .Should()
             .OnlyContain(call => call.Status == ToolExecutionStatus.SkippedAlreadySatisfied);
@@ -720,10 +717,7 @@ public class PlannerAgentTests
                 CreateProposedToolCall("data.analyze_transactions"),
                 CreateProposedToolCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes"
-                    }
+                    new Dictionary<string, string>()
                 ),
                 CreateProposedToolCall("workflow.complete"),
                 CreateProposedToolCall("money.transfer")
@@ -921,10 +915,7 @@ public class PlannerAgentTests
                      PlannerToolCatalog.SearchCnvRegulationName,
                      StringComparison.OrdinalIgnoreCase))
         {
-            resolvedArguments = new Dictionary<string, string>
-            {
-                ["query"] = "agentes"
-            };
+            resolvedArguments = new Dictionary<string, string>();
         }
 
         return new ProposedToolCall(
@@ -954,13 +945,7 @@ public class PlannerAgentTests
                 ),
                 CreateProposedToolCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes",
-                        ["area"] = "Agentes",
-                        ["limit"] = "5",
-                        ["requiresReview"] = "true"
-                    }
+                    new Dictionary<string, string>()
                 )
             ]
         );

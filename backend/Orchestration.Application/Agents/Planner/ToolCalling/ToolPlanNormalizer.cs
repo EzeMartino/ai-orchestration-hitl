@@ -36,7 +36,7 @@ public sealed class ToolPlanNormalizer : IToolPlanNormalizer
             ));
         }
 
-        return new ToolPlan(normalizedCalls);
+        return plan with { ProposedCalls = normalizedCalls };
     }
 
     private static IReadOnlyDictionary<string, string> NormalizeArguments(

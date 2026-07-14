@@ -310,7 +310,9 @@ public sealed class PlannerAgent : IPlannerAgent
             ProposedCalls: normalizedPlan.ProposedCalls,
             ApprovedCalls: validationResult.ApprovedCalls,
             RejectedCalls: validationResult.RejectedCalls,
-            ExecutedCalls: executionAudit
+            ExecutedCalls: executionAudit,
+            ProposalSource: normalizedPlan.ProposalSource,
+            ProposalFallbackReason: normalizedPlan.ProposalFallbackReason
         );
     }
 
