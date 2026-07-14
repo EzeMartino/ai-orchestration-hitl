@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIHITL CNV MCP Quality Gate"
+  short_description: "Validate CNV storage, search, and analysis"
+  default_prompt: "Use $aihitl-cnv-mcp-quality-gate to validate this CNV MCP change safely."
