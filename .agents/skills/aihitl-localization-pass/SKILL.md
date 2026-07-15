@@ -5,7 +5,7 @@ description: Use when ai-orchestration-hitl needs Spanish localization of user-v
 
 # AIHITL Localization Pass
 
-Localize user-visible copy end to end. Preserve contracts; prove changed producers through consumers and focused tests.
+Preserve contracts; prove changed producers through consumers and focused tests.
 
 ## Contract vs copy
 
