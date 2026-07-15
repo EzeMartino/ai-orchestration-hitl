@@ -11,7 +11,7 @@ HTTP success alone is not end-to-end proof. Prove one isolated run across resour
 
 1. Treat AppHost as shared. Before browser work, inspect Aspire readiness/logs, record endpoints, and wait for dependencies, migration, API, and frontend steady. Do not trust old tabs or restart healthy resources.
 2. Use Aspire's API URL, but open `http://localhost:5173`; configured CORS rejects `127.0.0.1`. Inspect Network and Console in a fresh browser context.
-3. Create a unique disposable account/session and synthetic input. Record session ID and input filename/hash. Never reuse seeded data or expose secrets.
+3. Create disposable test credentials/data. Register and authenticate with them before creating an isolated session. Use unique synthetic input; record session ID and input filename/hash. Never reuse seeded data or expose secrets.
 4. Exercise the relevant flow. Capture URL, method, status, decisive fields, and UI state. Reload `GET /api/analysis-sessions/{id}` and parse persisted `contextJson`; response/UI memory does not prove persistence.
 5. If the flow should emit activity, prove `/hubs/activity` connected and capture an `activityEventReceived` whose session ID/type matches the Activity Feed and `GET /api/analysis-sessions/{id}/events`. Otherwise record SignalR/event proof as N/A; never create unrelated mutation merely to emit an event. Always record relevant console errors or none.
 6. Recheck after reload. Classify a startup error transient only when contemporaneous readiness/log evidence causally identifies an unready dependency and the same action succeeds after it becomes ready. Stabilization plus retry alone is insufficient; otherwise classify it unresolved/product flake.
