@@ -9,12 +9,12 @@ HTTP success alone is not end-to-end proof. Prove one isolated run across resour
 
 ## Workflow
 
-1. Treat a running AppHost as shared state. Before browser actions, inspect Aspire readiness/logs and record endpoints. Wait for dependencies, migration, `orchestration-api`, and `frontend` to reach steady state. Do not trust an old tab or restart healthy resources.
-2. Use Aspire's API URL, but open `http://localhost:5173`; configured CORS rejects `127.0.0.1`. Use a fresh browser context with Network and Console visible.
-3. Register a unique disposable account, authenticate, create a new session, and use unique synthetic input. Record session ID and input filename/hash. Never reuse seeded accounts, sessions, or credentials; never expose secrets.
-4. Exercise only the relevant flow. Capture URL, method, status, decisive response fields, and UI state. Reload `GET /api/analysis-sessions/{id}` and parse persisted `contextJson`; neither upload response nor UI memory proves persistence.
-5. Prove SignalR: show `/hubs/activity` connected and capture an `activityEventReceived` event whose session ID/type matches the Activity Feed and `GET /api/analysis-sessions/{id}/events`. Record relevant console errors or state that none appeared during observation.
-6. Recheck after reload. Call startup failures transient only when readiness/logs stabilize and the same action succeeds. Reproducible failures after steady state are product/config failures.
+1. Treat AppHost as shared. Before browser work, inspect Aspire readiness/logs, record endpoints, and wait for dependencies, migration, API, and frontend steady. Do not trust old tabs or restart healthy resources.
+2. Use Aspire's API URL, but open `http://localhost:5173`; configured CORS rejects `127.0.0.1`. Inspect Network and Console in a fresh browser context.
+3. Create a unique disposable account/session and synthetic input. Record session ID and input filename/hash. Never reuse seeded data or expose secrets.
+4. Exercise the relevant flow. Capture URL, method, status, decisive fields, and UI state. Reload `GET /api/analysis-sessions/{id}` and parse persisted `contextJson`; response/UI memory does not prove persistence.
+5. If the flow should emit activity, prove `/hubs/activity` connected and capture an `activityEventReceived` whose session ID/type matches the Activity Feed and `GET /api/analysis-sessions/{id}/events`. Otherwise record SignalR/event proof as N/A; never create unrelated mutation merely to emit an event. Always record relevant console errors or none.
+6. Recheck after reload. Classify a startup error transient only when contemporaneous readiness/log evidence causally identifies an unready dependency and the same action succeeds after it becomes ready. Stabilization plus retry alone is insufficient; otherwise classify it unresolved/product flake.
 
 ## Decision table
 
@@ -22,18 +22,18 @@ HTTP success alone is not end-to-end proof. Prove one isolated run across resour
 | --- | --- |
 | API/session | Authenticated response + reloaded session/context |
 | UI | API truth + visible state after reload |
-| Activity/event | SignalR event + feed + persisted event |
+| Activity/event | If emission is expected: SignalR + feed + persisted event; otherwise N/A |
 | PDF review | Upload + stored draft + UI/server gates + unchanged active context |
 
 For PDF review, require every gate: upload returns `outcome: "review_required"`; `reviewDraft.payload.candidates` is nonempty; `GET .../financial-metrics/review` returns that draft; the editor renders those candidates; preflight returns `canStart: false` with `FINANCIAL_METRICS_REVIEW_REQUIRED`; Start is disabled; `POST .../start` returns `409` without agent execution; reloaded `contextJson` excludes unconfirmed candidates from active `structuredFinancialMetrics`. **NEVER call `/confirm` or click confirmation unless explicitly requested.**
 
 ## Stop and report
 
-Stop if resource/endpoint identity, auth isolation, or authority is unclear; evidence layers disagree; or proof needs review confirmation or out-of-scope product changes.
+Stop when endpoint identity, auth isolation, authority, or evidence is unclear/disagrees, or proof needs review confirmation/out-of-scope changes.
 
-Report exact resources/endpoints; disposable identity label, session ID, and input; API/UI evidence; SignalR event and console result; persisted context/event; transient/steady-state classification; cleanup; verdict and gaps.
+Report resources/endpoints; disposable identity, session ID, and input; API/UI; SignalR/event or N/A and console; persisted context/event; startup classification evidence; cleanup; verdict/gaps.
 
-Clean only this run's account, session, draft, and input through supported authorized operations. If deletion is unavailable, leave them isolated and report identifiers. Never purge databases or alter unrelated sessions.
+Clean only run-created account/session/draft/input via authorized supported operations. If unavailable, report identifiers and leave isolated. Never purge databases or alter unrelated sessions.
 
 ## Common mistakes
 
@@ -41,6 +41,6 @@ Clean only this run's account, session, draft, and input through supported autho
 | --- | --- |
 | HTTP `200` means complete | Prove all applicable layers |
 | Old `127.0.0.1` tab | Reopen `localhost:5173` |
-| Connected badge alone | Capture matching SignalR and persisted events |
+| Retry succeeds after startup | Require causal dependency evidence |
+| No activity expected | Record N/A; never manufacture an event |
 | Review draft confirmed for convenience | Leave it pending unless explicitly requested |
-| Broad cleanup | Touch only disposable artifacts |
