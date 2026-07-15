@@ -11,14 +11,14 @@ Reviews/diagnoses default read-only; explicit no-change binds. Change the reposi
 
 ## Workflow
 
-1. Fix scope and mode. With a declared budget, record start, absolute deadline, and absolute evidence cutoff before tracing. Otherwise use scope completion.
-2. Use `codegraph_context`, then `codegraph_search`, `codegraph_callers`, and `codegraph_impact`; read source afterward. Literal-search only config keys, canonical names, prompts, logs, or test text CodeGraph cannot model.
+1. Fix scope/mode. With a declared budget, record start/absolute deadline; set absolute cutoff timestamp = start + 75% of budget, reserving 25% for synthesis/delivery. Otherwise use scope completion.
+2. Use `codegraph_context`, then `codegraph_search`, `codegraph_callers`, and `codegraph_impact`, then source. Literal-search only config/names/prompts/logs/test text outside CodeGraph.
 3. Record each canonical tool; split native/deterministic paths, MCP tools/transports, substitutes, degraded paths, and fallbacks when reachability differs.
-4. Prefix evidence `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, then `path:line`. `Absent` names scope; `N/A`/`Inference` explains why. Repeat paths; no global evidence list.
+4. Start evidence `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, plus `path:line`. `Absent` names scope; `N/A`/`Inference` explains why. Repeat paths; no global list.
 
 ## Per-tool record
 
-Repeat this vertical record. Keep every field and its evidence separate.
+Repeat per tool; keep fields separate.
 
 | Field | Evidence |
 |---|---|
@@ -43,15 +43,25 @@ Repeat this vertical record. Keep every field and its evidence separate.
 | Availability | |
 | Primary / secondary gap | |
 
-Do not collapse definition, registration, proposal, execution, approval, owner, safety, implementation, or tests into a `wired` claim.
+`wired` never substitutes for these separate lifecycle fields.
 
 ## Runtime status
 
-Use exactly one: `runtime-observed` (runtime evidence), `statically reachable` (non-test source path), `test-only` (only tests reference it), `unreferenced in searched scope` (none in named scope), or `unknown` (insufficient evidence). A static caller never proves a tool was used; it supports at most `statically reachable`.
+Use exactly one: `runtime-observed` (runtime proof), `statically reachable` (non-test path), `test-only` (tests alone), `unreferenced in searched scope` (none in named scope), or `unknown` (insufficient evidence). A static caller never proves a tool was used; at most `statically reachable`.
+
+## Availability
+
+| Evidence | Availability |
+|---|---|
+| Required wiring/policy allows use under stated config | `Available/conditional` |
+| Required connection absent | `Unavailable` |
+| Connected, but policy/approval safety prevents use | `Blocked/unsafe` |
+| Evidence incomplete | `Unverified` |
+| Only a test gap | Preserve code-derived availability; never change it automatically |
 
 ## Gap precedence
 
-Evaluate in order; primary is the earliest causal gap. Add secondary gaps only when independently evidenced, never when merely downstream.
+Evaluate in order; primary is earliest causal. Add secondary gaps only when independently evidenced, never merely downstream.
 
 | Condition | Classification |
 |---|---|
@@ -65,7 +75,7 @@ Recommend changes only when requested and supported by record evidence. Label in
 
 ## Stop
 
-With a budget, stop evidence collection at the recorded cutoff and deliver `Unknown` fields by the deadline. Without a deadline, stop at scoped completion; never invent a percentage cutoff.
+With a budget, stop evidence at cutoff and deliver `Unknown` by deadline. Without a deadline, stop at scoped completion.
 
 ## Common mistakes
 
