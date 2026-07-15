@@ -45,7 +45,9 @@ try {
     psql -Xw -v ON_ERROR_STOP=1 -c "SELECT coalesce(embedding_model,'missing'),coalesce(vector_dims(embedding)::text,'missing'),count(*) FROM regulation_chunks WHERE embedding IS NOT NULL GROUP BY 1,2 ORDER BY 1,2;"
     if($LASTEXITCODE -ne 0){throw "Embedding profile check failed. Stop."}
     dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
+    if($LASTEXITCODE -ne 0){throw "Coverage check failed. Stop."}
     dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake --dimensions 1536 --dry-run --only-missing
+    if($LASTEXITCODE -ne 0){throw "Embedding dry-run failed. Stop."}
 } finally { foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$prior[$name])} }
 ```
 
