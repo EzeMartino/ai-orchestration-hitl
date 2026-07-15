@@ -12,13 +12,11 @@ Reviews/diagnoses default read-only; explicit no-change binds. Change the reposi
 ## Workflow
 
 1. Fix scope/mode. With a declared budget, record start/absolute deadline; set absolute cutoff timestamp = start + 75% of budget, reserving 25% for synthesis/delivery. Otherwise use scope completion.
-2. Use `codegraph_context`, then `codegraph_search`, `codegraph_callers`, and `codegraph_impact`, then source. Literal-search only config/names/prompts/logs/test text outside CodeGraph.
-3. Record each canonical tool; split native/deterministic paths, MCP tools/transports, substitutes, degraded paths, and fallbacks when reachability differs.
-4. Start evidence `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, plus `path:line`. `Absent` names scope; `N/A`/`Inference` explains why. Repeat paths; no global list.
+2. Use `codegraph_context` → `codegraph_search` → `codegraph_callers` → `codegraph_impact` → source. Literal-search only config/names/prompts/logs/tests outside CodeGraph.
+3. Record each canonical tool; split native/deterministic, MCP transports, substitutes, degraded paths, and fallbacks when reachability differs.
+4. Evidence starts `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, plus `path:line`. `Absent` names scope; `N/A`/`Inference` explains why. Repeat paths; no global list.
 
 ## Per-tool record
-
-Repeat per tool; keep fields separate.
 
 | Field | Evidence |
 |---|---|
@@ -54,7 +52,7 @@ Use exactly one: `runtime-observed` (runtime proof), `statically reachable` (non
 | Evidence | Availability |
 |---|---|
 | Required wiring/policy allows use under stated config | `Available/conditional` |
-| Required connection absent | `Unavailable` |
+| Implementation/equivalent or required connection absent | `Unavailable` |
 | Connected, but policy/approval safety prevents use | `Blocked/unsafe` |
 | Evidence incomplete | `Unverified` |
 | Only a test gap | Preserve code-derived availability; never change it automatically |
@@ -75,11 +73,9 @@ Recommend changes only when requested and supported by record evidence. Label in
 
 ## Stop
 
-With a budget, stop evidence at cutoff and deliver `Unknown` by deadline. Without a deadline, stop at scoped completion.
+With a budget, stop at cutoff and deliver `Unknown` by deadline. Without one, stop at scoped completion.
 
 ## Common mistakes
 
-- Treating a static caller as runtime use.
 - Collapsing MCP tools, wrappers, and fallbacks.
-- Calling a missing connection a policy gap.
 - Recommending from `Unknown` or inference.
