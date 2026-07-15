@@ -10,7 +10,7 @@ Work in `tools/CnvRegulation.McpServer`. Never print DSN, password, API key, or 
 | Observed storage | Path |
 |---|---|
 | In-memory | Build/unit only; no DB mutation. |
-| Persistent local PostgreSQL | Bind approved fingerprint; preserve state. |
+| Persistent local/shared PostgreSQL | Authorize owner/target/operation; bind approved fingerprint; preserve state. |
 | Disposable Docker | Designated/authorized only; never assume disposable. |
 
 ## Read-only preflight
@@ -22,23 +22,38 @@ Inspect before mutation:
 3. Run read-only checks; emit only fingerprint. Inspect pgvector/schema, profiles, corpus, coverage.
 
 ```powershell
-$identity = @(& psql -X -v ON_ERROR_STOP=1 -Atc "SELECT concat_ws('|',current_database(),current_user,coalesce(inet_server_addr()::text,'local'),coalesce(inet_server_port()::text,'local'))")
-if ($LASTEXITCODE -ne 0 -or $identity.Count -ne 1) { $identity=$null; throw "Database identity check failed. Stop." }
-$sha=[Security.Cryptography.SHA256]::Create()
-try { $fingerprint=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity[0].Trim())))).Replace("-","").ToLowerInvariant() }
-finally { $identity=$null; $sha.Dispose() }
-Write-Output "CNV DB fingerprint (SHA-256): $fingerprint"
-psql -X -v ON_ERROR_STOP=1 -c "SELECT extversion FROM pg_extension WHERE extname='vector'; SELECT column_name,data_type FROM information_schema.columns WHERE table_name='regulation_chunks' AND column_name IN ('embedding','embedding_model');"
-psql -X -v ON_ERROR_STOP=1 -c "SELECT coalesce(embedding_model,'missing'),coalesce(vector_dims(embedding)::text,'missing'),count(*) FROM regulation_chunks WHERE embedding IS NOT NULL GROUP BY 1,2 ORDER BY 1,2;"
-dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
-dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake --dimensions 1536 --dry-run --only-missing
+$builder=[Data.Common.DbConnectionStringBuilder]::new(); $builder.ConnectionString=$approvedConnectionString
+$allowed=@("Host","Server","Port","Database","Initial Catalog","Username","User ID","UserId","Password")
+if (@($builder.Keys | Where-Object { $_ -notin $allowed }).Count) { throw "Connection options cannot be safely mapped. Stop." }
+function DbValue([string[]]$names,$default=$null) { foreach($name in $names){if($builder.ContainsKey($name)){return [string]$builder[$name]}}; $default }
+$pg=@{PGHOST=DbValue @("Host","Server"); PGPORT=DbValue @("Port") "5432"; PGDATABASE=DbValue @("Database","Initial Catalog"); PGUSER=DbValue @("Username","User ID","UserId"); PGPASSWORD=DbValue @("Password")}
+if ($pg.Values | Where-Object {[string]::IsNullOrWhiteSpace($_)}) { throw "Connection cannot be mapped without ambient psql state. Stop." }
+$names=@("CNV_REGULATION_DB_CONNECTION_STRING")+@($pg.Keys); $prior=@{}
+foreach($name in $names){$prior[$name]=[Environment]::GetEnvironmentVariable($name)}
+try {
+    $env:CNV_REGULATION_DB_CONNECTION_STRING=$approvedConnectionString
+    foreach($entry in $pg.GetEnumerator()){[Environment]::SetEnvironmentVariable($entry.Key,$entry.Value)}
+    $identity=@(& psql -Xw -v ON_ERROR_STOP=1 -Atc "SELECT concat_ws('|',current_database(),current_user,coalesce(inet_server_addr()::text,'local'),coalesce(inet_server_port()::text,'local'))")
+    if($LASTEXITCODE -ne 0 -or $identity.Count -ne 1){$identity=$null;throw "Database identity check failed. Stop."}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$fingerprint=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity[0].Trim())))).Replace("-","").ToLowerInvariant()}
+    finally{$identity=$null;$sha.Dispose()}
+    if([string]::IsNullOrWhiteSpace($expectedFingerprint) -or $fingerprint -ne $expectedFingerprint){throw "Fingerprint is not separately authorized. Stop."}
+    Write-Output "CNV DB fingerprint (SHA-256): $fingerprint"
+    psql -Xw -v ON_ERROR_STOP=1 -c "SELECT extversion FROM pg_extension WHERE extname='vector'; SELECT column_name,data_type FROM information_schema.columns WHERE table_name='regulation_chunks' AND column_name IN ('embedding','embedding_model');"
+    if($LASTEXITCODE -ne 0){throw "Schema check failed. Stop."}
+    psql -Xw -v ON_ERROR_STOP=1 -c "SELECT coalesce(embedding_model,'missing'),coalesce(vector_dims(embedding)::text,'missing'),count(*) FROM regulation_chunks WHERE embedding IS NOT NULL GROUP BY 1,2 ORDER BY 1,2;"
+    if($LASTEXITCODE -ne 0){throw "Embedding profile check failed. Stop."}
+    dotnet run --project src/CnvRegulation.McpServer -- inspect-coverage --storage postgres
+    dotnet run --project src/CnvRegulation.McpServer -- generate-embeddings --storage postgres --provider fake --dimensions 1536 --dry-run --only-missing
+} finally { foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$prior[$name])} }
 ```
 
 `inspect-coverage` proves coverage totals only—not connection identity, provider, model, or dimensions. Never add `--source-directory` to read-only inspection because that ingests.
 
 ## Authorization and ordered gate
 
-For every persistent PostgreSQL command: approve fingerprint/operation; save `CNV_REGULATION_DB_CONNECTION_STRING`, set the exact authorized secret, recheck fingerprint, execute, and restore in `finally`. Never reuse authorization across targets.
+For every persistent PostgreSQL command, reuse this scope after owner/target/operation authorization: map the same approved secret to PG/app variables, verify `$expectedFingerprint`, execute, then restore all variables. Never use ambient `psql` or reuse authorization across targets.
 
 1. Save/clear/restore `CNV_REGULATION_RUN_INTEGRATION_TESTS`; run `dotnet build`, then `dotnet test`.
 2. If observed state requires it and the mutation is authorized:
