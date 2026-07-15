@@ -22,7 +22,7 @@ Inspect before mutation:
 3. Run read-only checks; emit only fingerprint. Inspect pgvector/schema, profiles, corpus, coverage.
 
 ```powershell
-$builder=[Data.Common.DbConnectionStringBuilder]::new(); $builder.ConnectionString=$approvedConnectionString
+$builder=[Data.Common.DbConnectionStringBuilder]::new(); $builder.set_ConnectionString($approvedConnectionString)
 $allowed=@("Host","Server","Port","Database","Initial Catalog","Username","User ID","UserId","Password")
 if (@($builder.Keys | Where-Object { $_ -notin $allowed }).Count) { throw "Connection options cannot be safely mapped. Stop." }
 function DbValue([string[]]$names,$default=$null) { foreach($name in $names){if($builder.ContainsKey($name)){return [string]$builder[$name]}}; $default }
