@@ -1,7 +1,7 @@
 # Repository Skills Design
 
-**Date:** 2026-07-14  
-**Status:** Ready for user review  
+**Date:** 2026-07-14
+**Status:** Ready for user review
 **Scope:** Five Codex skills specific to `ai-orchestration-hitl`
 
 ## Context
