@@ -11,13 +11,13 @@ Separate locked-output or post-redirect Python path failures from real build/tes
 
 ## Workflow
 
-1. Resolve the current checkout or worktree root with `git rev-parse --show-toplevel`; validate its `backend` and `python-agents` directories. Never assume the canonical checkout path. Record the exact failing solution, project, test filter, and command.
-2. Preserve the intended failing target and filter; never broaden them. Narrow only when task scope permits and the original target covers more than the required proof.
+1. Resolve the active checkout/worktree root with `git rev-parse --show-toplevel`; validate its `backend` and `python-agents` directories. Never hard-code the canonical checkout. Record the exact failing target, filter, and command.
+2. Preserve the failing target/filter; never broaden them. Narrow only when task scope permits.
 3. Select the applicable remediation:
    - **Lock/copy branch:** For `MSB3026`, `MSB3027`, copy retries, or locked `Orchestration.*.dll`, assign a unique `$outputPath` under `$env:TEMP`. Rerun the intended target with `"-p:OutputPath=$outputPath" -m:1 -nr:false`. Do not stop AppHost, Visual Studio, or API processes first.
-   - **Python-resolution branch:** When a Python-backed test stops resolving `python-agents` after output redirection, set `ORCHESTRATION_TEST_PYTHON_HOME` to `Join-Path $repoRoot 'python-agents'`. Rerun the same intended target and filter once.
-4. Preserve AppHost unless teardown is explicitly required. When live-app proof matters, keep it running and smoke-test separately.
-5. After the applicable remediation, leave this workflow. Diagnose any remaining compile, test, configuration, or product failure normally. If neither branch matches, do not use this skill.
+   - **Python-resolution branch:** When a Python-backed test stops resolving `python-agents` after output redirection, temporarily set `ORCHESTRATION_TEST_PYTHON_HOME` to `Join-Path $repoRoot 'python-agents'`. Preserve its prior process value or unset state; after the rerun, restore it and propagate the native test exit code.
+4. Preserve AppHost unless teardown is required; smoke-test it separately when live proof matters.
+5. After remediation, leave this workflow. Diagnose remaining failures normally. If neither branch matches, do not use this skill.
 
 ## PowerShell example
 
@@ -28,14 +28,25 @@ $repoRoot = & git rev-parse --show-toplevel 2>$null
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) { throw 'Current directory is not inside a Git worktree.' }
 $repoRoot = $repoRoot.Trim()
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'backend') -PathType Container) -or -not (Test-Path -LiteralPath (Join-Path $repoRoot 'python-agents') -PathType Container)) { throw 'Current Git root is not ai-orchestration-hitl.' }
-$env:ORCHESTRATION_TEST_PYTHON_HOME = Join-Path $repoRoot 'python-agents'
+$pythonHomeWasSet = Test-Path Env:ORCHESTRATION_TEST_PYTHON_HOME
+$previousPythonHome = $env:ORCHESTRATION_TEST_PYTHON_HOME
 $outputPath = Join-Path $env:TEMP ("aihitl-test-bin-" + [guid]::NewGuid().ToString('N'))
+$testExitCode = 1
 Push-Location -LiteralPath $repoRoot
 try {
-    dotnet test .\backend\Orchestration.Tests\Orchestration.Tests.csproj --filter 'FullyQualifiedName~CSnakesFinancialAnalysisServiceTests' "-p:OutputPath=$outputPath" -m:1 -nr:false
+    $env:ORCHESTRATION_TEST_PYTHON_HOME = Join-Path $repoRoot 'python-agents'
+    & dotnet test .\backend\Orchestration.Tests\Orchestration.Tests.csproj --filter 'FullyQualifiedName~CSnakesFinancialAnalysisServiceTests' "-p:OutputPath=$outputPath" -m:1 -nr:false
+    $testExitCode = $LASTEXITCODE
 } finally {
+    if ($pythonHomeWasSet) {
+        $env:ORCHESTRATION_TEST_PYTHON_HOME = $previousPythonHome
+    } else {
+        Remove-Item Env:ORCHESTRATION_TEST_PYTHON_HOME -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }
+$global:LASTEXITCODE = $testExitCode
+if ($testExitCode -ne 0) { throw "dotnet test failed with exit code $testExitCode." }
 ```
 
 ## Quick reference
