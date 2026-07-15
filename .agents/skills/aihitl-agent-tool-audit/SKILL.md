@@ -7,45 +7,69 @@ description: Use when reviewing ai-orchestration-hitl Planner, Legal, or Data to
 
 ## Core rule
 
-Default reviews and diagnoses to read-only. Explicit no-change is binding. Change the repository only when the user explicitly requests implementation, and only within authorized scope. Treat each tool and fallback as unverified until its row proves every applicable stage.
+Reviews/diagnoses default read-only; explicit no-change binds. Change the repository only for an explicit implementation request within its scope. Each tool/fallback remains unverified pending its record.
 
 ## Workflow
 
-1. Fix the requested agents, tools, and time budget. Reserve 25% for synthesis.
-2. Use `codegraph_context`, then `codegraph_search`, `codegraph_callers`, and `codegraph_impact`. Read focused source afterward. Use literal search only for config keys, canonical names, prompts, logs, or test text CodeGraph cannot model.
-3. Trace separately: purpose, definition, input schema, output schema, DI, Semantic Kernel plugin registration, `PlannerToolCatalog`/allowlist, LLM proposal visibility, `ControlledToolExecutor` policy, HITL approval, implementation, and focused tests. Mark non-applicable stages.
-4. Record used/unused status, owner, and safety. Separate native/deterministic implementations, MCP tools, transports, substitutes, degraded paths, and fallbacks when availability differs.
-5. Prefix every evidence cell with `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, then repository `path:line`. For `Absent`, name searched scope; for `N/A` or `Inference`, explain why. Never use a global evidence list instead.
+1. Fix scope and mode. With a declared budget, record start, absolute deadline, and absolute evidence cutoff before tracing. Otherwise use scope completion.
+2. Use `codegraph_context`, then `codegraph_search`, `codegraph_callers`, and `codegraph_impact`; read source afterward. Literal-search only config keys, canonical names, prompts, logs, or test text CodeGraph cannot model.
+3. Record each canonical tool; split native/deterministic paths, MCP tools/transports, substitutes, degraded paths, and fallbacks when reachability differs.
+4. Prefix evidence `Confirmed`, `Absent`, `Unknown`, `N/A`, or `Inference`, then `path:line`. `Absent` names scope; `N/A`/`Inference` explains why. Repeat paths; no global evidence list.
 
-## Inventory template
+## Per-tool record
 
-| Agent / canonical tool | Purpose evidence | Mode / fallback | Definition evidence | Input schema evidence | Output schema evidence | DI evidence | Plugin evidence | Catalog / allowlist evidence | LLM proposal evidence | Automatic execution / executor policy evidence | HITL evidence | Owner / safety evidence | Implementation evidence | Test evidence | Used / unused status + evidence | Availability | Gap |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+Repeat this vertical record. Keep every field and its evidence separate.
 
-Keep paths in every row, including repeated paths. Do not merge registration, proposal, execution, or approval into one `wired` claim.
+| Field | Evidence |
+|---|---|
+| Agent / canonical tool | |
+| Purpose | |
+| Mode / fallback | |
+| Definition | |
+| Input schema | |
+| Output schema | |
+| DI registration | |
+| Plugin registration | |
+| Catalog / allowlist | |
+| LLM proposal visibility | |
+| Execution mode / reachability | |
+| Executor wiring / policy | |
+| HITL approval | |
+| Owner | |
+| Safety | |
+| Implementation | |
+| Focused tests | |
+| Used / unused runtime status | |
+| Availability | |
+| Primary / secondary gap | |
 
-## Decision table
+Do not collapse definition, registration, proposal, execution, approval, owner, safety, implementation, or tests into a `wired` claim.
 
-| Evidence pattern | Availability | Gap classification |
-|---|---|---|
-| All applicable stages confirmed | Available, or conditional when flags/HITL apply | None |
-| Implementation exists but a required wiring stage is absent | Unavailable | Disconnected tool |
-| Requested outcome has no implementation or equivalent | Unavailable | Missing capability |
-| Wiring exists but proposal, executor, approval, ownership, or safety rules are missing or inconsistent | Blocked/unsafe | Policy gap |
-| Runtime path or outcome cannot be audited | Unverified | Observability gap |
-| Behavior lacks focused coverage | Preserve code-derived availability; reduce confidence | Test gap |
+## Runtime status
 
-Apply multiple classifications only when each has evidence. Recommend changes only when requested and supported by row evidence. Label inference.
+Use exactly one: `runtime-observed` (runtime evidence), `statically reachable` (non-test source path), `test-only` (only tests reference it), `unreferenced in searched scope` (none in named scope), or `unknown` (insufficient evidence). A static caller never proves a tool was used; it supports at most `statically reachable`.
+
+## Gap precedence
+
+Evaluate in order; primary is the earliest causal gap. Add secondary gaps only when independently evidenced, never when merely downstream.
+
+| Condition | Classification |
+|---|---|
+| No implementation or equivalent | Missing capability |
+| Implementation exists; required connection is absent | Disconnected tool |
+| Connection exists; rules are unsafe or inconsistent | Policy gap |
+| Connected outcome cannot be audited | Observability gap |
+| Existing behavior lacks focused coverage | Test gap |
+
+Recommend changes only when requested and supported by record evidence. Label inference.
 
 ## Stop
 
-At 75% of the time budget, stop discovery. Deliver a partial matrix on time with unresolved cells `Unknown`; never overrun for one more trace. Otherwise stop when every scoped row is auditable and each gap follows the decision table.
+With a budget, stop evidence collection at the recorded cutoff and deliver `Unknown` fields by the deadline. Without a deadline, stop at scoped completion; never invent a percentage cutoff.
 
 ## Common mistakes
 
-- Calling a class definition `available` without registrations and execution policy.
-- Treating an MCP server tool, client wrapper, and deterministic fallback as one capability.
-- Inferring LLM eligibility from implementation or automatic execution from proposal visibility.
-- Listing implementation/tests globally instead of per tool row.
-- Calling a registered tool `used` without a reachable caller or execution path.
-- Turning absence of evidence into a recommendation or confirmed gap.
+- Treating a static caller as runtime use.
+- Collapsing MCP tools, wrappers, and fallbacks.
+- Calling a missing connection a policy gap.
+- Recommending from `Unknown` or inference.
