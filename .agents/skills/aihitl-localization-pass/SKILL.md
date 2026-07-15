@@ -12,8 +12,10 @@ Localize user-visible copy end to end. Preserve contracts; prove changed produce
 | Preserve exactly | Localize when user-visible |
 |---|---|
 | IDs, error codes, tool names, JSON keys | Warnings, errors, fallbacks, activity messages |
-| Event types, protocol values, enum/status values | Summaries, evidence, labels, validation text |
+| Event types, protocol values, enum/status values | application-generated evidence summaries/interpretations, labels, validation text |
 | Log property names and structured fields | Planner/legal/tool rejection reasons surfaced to users |
+
+Preserve retrieved source titles, citations, snippets/quotes, URLs, and user/source-document content verbatim; localize only surrounding labels/app-generated narrative.
 
 Do not require zero English globally. Never run unbounded replacement. Classify English in contracts, logs, fixtures, prompts, citations, and technical terms instead of translating blindly.
 
