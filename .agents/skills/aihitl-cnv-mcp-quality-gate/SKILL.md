@@ -83,7 +83,7 @@ try {
 }
 ```
 
-Keep `full_text` default pending human legal-relevance review of comparison evidence. A 14/14 mechanical pass alone never promotes hybrid. Citations are retrieval evidence, not proof of legal applicability or compliance risk.
+`full_text` changes only when human comparison review explicitly supports `hybrid`; review completion alone is insufficient. `full_text_better`, `needs_legal_review`, and `ambiguous` keep `full_text`. Mechanical passes never promote hybrid. Citations are retrieval evidence, never legal-applicability/compliance-risk proof.
 
 ## Stop conditions / common mistakes
 
@@ -91,4 +91,4 @@ Keep `full_text` default pending human legal-relevance review of comparison evid
 |---|---|
 | State, authority, dimensions, or dedicated test DB unclear | Stop and ask; do not mutate/default to Docker. |
 | Paid authorization absent | Stop before OpenAI; smoke authorization does not cover full generation/comparison. |
-| Gate fails or report lacks human review | Report evidence; never claim regulatory safety. |
+| Gate fails or review absent | Report evidence; never claim regulatory safety. |
