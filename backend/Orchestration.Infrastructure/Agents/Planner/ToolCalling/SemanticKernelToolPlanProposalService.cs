@@ -67,7 +67,7 @@ If no tool is appropriate, return:
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ToolCallingOptions _toolCallingOptions;
-    private readonly DeterministicToolPlanProposalService _fallback;
+    private readonly Func<ToolPlanProposalInput, CancellationToken, Task<ToolPlan>> _fallbackProposal;
     private readonly SemanticKernelToolPlanResponseParser _parser;
     private readonly ILogger<SemanticKernelToolPlanProposalService> _logger;
     private readonly Kernel? _kernel;
@@ -82,7 +82,7 @@ If no tool is appropriate, return:
         ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         _toolCallingOptions = toolCallingOptions.Value;
-        _fallback = fallback;
+        _fallbackProposal = fallback.ProposeAsync;
         _parser = parser;
         _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
 
@@ -99,10 +99,11 @@ If no tool is appropriate, return:
         IChatCompletionService? chatCompletionService,
         ILogger<SemanticKernelToolPlanProposalService>? logger = null,
         Kernel? kernel = null,
-        ToolPlanProposalFallbackReason? configurationFailure = null)
+        ToolPlanProposalFallbackReason? configurationFailure = null,
+        Func<ToolPlanProposalInput, CancellationToken, Task<ToolPlan>>? fallbackProposal = null)
     {
         _toolCallingOptions = toolCallingOptions;
-        _fallback = fallback;
+        _fallbackProposal = fallbackProposal ?? fallback.ProposeAsync;
         _parser = parser;
         _chatCompletionService = chatCompletionService;
         _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
@@ -134,25 +135,18 @@ If no tool is appropriate, return:
             );
         }
 
+        var history = new ChatHistory();
+        history.AddSystemMessage(SystemPrompt);
+        history.AddUserMessage(BuildUserPrompt(input, _toolCallingOptions));
+
+        ChatMessageContent response;
         try
         {
-            var history = new ChatHistory();
-            history.AddSystemMessage(SystemPrompt);
-            history.AddUserMessage(BuildUserPrompt(input, _toolCallingOptions));
-
-            var response = await _chatCompletionService.GetChatMessageContentAsync(
+            response = await _chatCompletionService.GetChatMessageContentAsync(
                 history,
                 kernel: _kernel,
                 cancellationToken: cancellationToken
             );
-
-            return _parser.TryParse(response.Content, out var plan)
-                ? CanonicalizeSubmittedAt(plan, input)
-                : await CreateFallbackPlanAsync(
-                    input,
-                    ToolPlanProposalFallbackReason.LlmResponseInvalid,
-                    cancellationToken
-                );
         }
         catch (OperationCanceledException)
         {
@@ -166,6 +160,14 @@ If no tool is appropriate, return:
                 cancellationToken
             );
         }
+
+        return _parser.TryParse(response.Content, out var plan)
+            ? CanonicalizeSubmittedAt(plan, input)
+            : await CreateFallbackPlanAsync(
+                input,
+                ToolPlanProposalFallbackReason.LlmResponseInvalid,
+                cancellationToken
+            );
     }
 
     private async Task<ToolPlan> CreateFallbackPlanAsync(
@@ -173,7 +175,7 @@ If no tool is appropriate, return:
         ToolPlanProposalFallbackReason reason,
         CancellationToken cancellationToken)
     {
-        var fallbackPlan = await _fallback.ProposeAsync(
+        var fallbackPlan = await _fallbackProposal(
             input,
             cancellationToken
         );

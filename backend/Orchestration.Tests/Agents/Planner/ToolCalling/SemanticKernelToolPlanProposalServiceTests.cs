@@ -100,6 +100,39 @@ public class SemanticKernelToolPlanProposalServiceTests
     }
 
     [Fact]
+    public async Task ProposeAsync_Should_propagate_invalid_response_fallback_failure_once()
+    {
+        var toolCallingOptions = new ToolCallingOptions
+        {
+            Enabled = true
+        };
+        var chatCompletionService = new FakeChatCompletionService("not-json");
+        var expectedException = new InvalidOperationException("fallback failure");
+        var fallbackCallCount = 0;
+        var service = new SemanticKernelToolPlanProposalService(
+            toolCallingOptions,
+            new DeterministicToolPlanProposalService(toolCallingOptions),
+            new SemanticKernelToolPlanResponseParser(),
+            chatCompletionService,
+            fallbackProposal: (_, _) =>
+            {
+                fallbackCallCount++;
+                return Task.FromException<ToolPlan>(expectedException);
+            }
+        );
+
+        Func<Task> act = () => service.ProposeAsync(
+            CreateInput(),
+            CancellationToken.None
+        );
+
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Should().BeSameAs(expectedException);
+        fallbackCallCount.Should().Be(1);
+        chatCompletionService.CallCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ProposeAsync_Should_record_request_failure_fallback()
     {
         var service = CreateService(
@@ -124,11 +157,12 @@ public class SemanticKernelToolPlanProposalServiceTests
         {
             Enabled = true
         };
+        var chatCompletionService = new FakeChatCompletionService("unused");
         var service = new SemanticKernelToolPlanProposalService(
             toolCallingOptions,
             new DeterministicToolPlanProposalService(toolCallingOptions),
             new SemanticKernelToolPlanResponseParser(),
-            chatCompletionService: null,
+            chatCompletionService,
             kernel: null,
             configurationFailure: ToolPlanProposalFallbackReason.LlmConfigurationFailed
         );
@@ -141,6 +175,7 @@ public class SemanticKernelToolPlanProposalServiceTests
         result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
         result.ProposalFallbackReason.Should().Be(
             ToolPlanProposalFallbackReason.LlmConfigurationFailed);
+        chatCompletionService.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -503,12 +538,15 @@ public class SemanticKernelToolPlanProposalServiceTests
 
         public ChatHistory? LastChatHistory { get; private set; }
 
+        public int CallCount { get; private set; }
+
         public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
             ChatHistory chatHistory,
             PromptExecutionSettings? executionSettings = null,
             Kernel? kernel = null,
             CancellationToken cancellationToken = default)
         {
+            CallCount++;
             LastChatHistory = chatHistory;
 
             if (_exception is not null)
