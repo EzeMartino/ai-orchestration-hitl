@@ -41,6 +41,9 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             FinancialAnalysisFailureCodes.UnexpectedFailure
         ],
         StringComparer.Ordinal);
+    private static readonly HashSet<string> LegalFinancialAnalysisStatuses = new(
+        ["succeeded", "degraded", "failed", "legacy_unknown"],
+        StringComparer.Ordinal);
 
     private sealed record LegalAggregatePayload(
         bool HasComplianceRisk,
@@ -354,6 +357,11 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
         try
         {
+            if (!HasValidRawLegalAuditStatus(call.OutputJson))
+            {
+                return null;
+            }
+
             var payload = JsonSerializer.Deserialize<LegalAggregatePayload>(
                 call.OutputJson,
                 JsonOptions
@@ -369,6 +377,75 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         {
             return null;
         }
+    }
+
+    private static bool HasValidRawLegalAuditStatus(string outputJson)
+    {
+        using var document = JsonDocument.Parse(outputJson);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !TryGetUniquePropertyIgnoreCase(
+                root,
+                "queryStrategy",
+                out var strategy,
+                out var hasStrategy))
+        {
+            return false;
+        }
+
+        if (!hasStrategy || strategy.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        if (strategy.ValueKind != JsonValueKind.Object ||
+            !TryGetUniquePropertyIgnoreCase(
+                strategy,
+                "financialAnalysisStatus",
+                out var status,
+                out var hasStatus))
+        {
+            return false;
+        }
+
+        if (!hasStatus || status.ValueKind == JsonValueKind.Null)
+        {
+            return true;
+        }
+
+        return status.ValueKind == JsonValueKind.String &&
+            status.GetString() is { } statusText &&
+            LegalFinancialAnalysisStatuses.Contains(statusText);
+    }
+
+    private static bool TryGetUniquePropertyIgnoreCase(
+        JsonElement element,
+        string propertyName,
+        out JsonElement value,
+        out bool found)
+    {
+        value = default;
+        found = false;
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(
+                    property.Name,
+                    propertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (found)
+            {
+                return false;
+            }
+
+            value = property.Value;
+            found = true;
+        }
+
+        return true;
     }
 
     private static LegalAgentResult? TryCreateLegalResult(

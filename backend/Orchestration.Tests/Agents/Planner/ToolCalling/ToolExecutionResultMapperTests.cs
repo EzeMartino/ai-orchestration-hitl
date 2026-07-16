@@ -183,6 +183,69 @@ public class ToolExecutionResultMapperTests
     }
 
     [Theory]
+    [InlineData("\"tampered\"")]
+    [InlineData("42")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("true")]
+    public void TryMapLegalResult_Should_reject_invalid_raw_financial_analysis_status(
+        string rawStatusToken)
+    {
+        var outputJson = LegalAggregateWithRawFinancialAnalysisStatus(
+            rawStatusToken);
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(ValidRawFinancialAnalysisStatusCases))]
+    public void TryMapLegalResult_Should_accept_valid_raw_financial_analysis_status(
+        string rawStatusToken,
+        FinancialAnalysisExecutionStatus? expectedStatus)
+    {
+        var outputJson = LegalAggregateWithRawFinancialAnalysisStatus(
+            rawStatusToken);
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().NotBeNull();
+        var strategy = result!.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        strategy.FinancialAnalysisStatus.Should().Be(expectedStatus);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryMapLegalResult_Should_reject_duplicate_case_insensitive_audit_properties(
+        bool duplicateTopLevelStrategy)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        if (duplicateTopLevelStrategy)
+        {
+            root["QueryStrategy"] = JsonNode.Parse(
+                root["queryStrategy"]!.ToJsonString());
+        }
+        else
+        {
+            root["queryStrategy"]!["FinancialAnalysisStatus"] = "failed";
+        }
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                root.ToJsonString(JsonOptions))]);
+
+        result.Should().BeNull();
+    }
+
+    [Theory]
     [MemberData(nameof(InvalidLegalAggregateJsonCases))]
     public void TryMapLegalResult_Should_reject_semantically_invalid_aggregate(
         string caseName,
@@ -694,6 +757,26 @@ public class ToolExecutionResultMapperTests
                 JsonNode.Parse("[null]"));
         yield return InvalidCase("null legal evidence reference", root =>
             root["legalReview"]!["evidenceReferences"] = JsonNode.Parse("[null]"));
+    }
+
+    public static IEnumerable<object?[]> ValidRawFinancialAnalysisStatusCases()
+    {
+        yield return ["\"succeeded\"", FinancialAnalysisExecutionStatus.Succeeded];
+        yield return ["\"degraded\"", FinancialAnalysisExecutionStatus.Degraded];
+        yield return ["\"failed\"", FinancialAnalysisExecutionStatus.Failed];
+        yield return ["\"legacy_unknown\"", FinancialAnalysisExecutionStatus.LegacyUnknown];
+        yield return ["null", null];
+    }
+
+    private static string LegalAggregateWithRawFinancialAnalysisStatus(
+        string rawStatusToken)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        root["queryStrategy"]!["financialAnalysisStatus"] =
+            JsonNode.Parse(rawStatusToken);
+        return root.ToJsonString(JsonOptions);
     }
 
     private static object[] InvalidCase(
