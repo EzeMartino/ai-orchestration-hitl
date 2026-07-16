@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Legal;
@@ -36,6 +37,7 @@ public class McpRegulatoryKnowledgeSourceTests
         result.SourceEngine.Should().Be("MCP CNV Regulation Server");
         result.HasComplianceRisk.Should().BeTrue();
         result.RiskLevel.Should().Be("Medium");
+        result.RequiresHumanReview.Should().BeTrue();
         result.Findings.Should().NotBeEmpty();
         result.Warnings.Should().Contain(
             "Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas."
@@ -403,7 +405,8 @@ public class McpRegulatoryKnowledgeSourceTests
         IOrchestrationDbContext dbContext,
         ILegalCnvQueryStrategy? queryStrategy = null,
         IActivityEventPublisher? activityPublisher = null,
-        ILegalAnalysisReviewService? reviewService = null)
+        ILegalAnalysisReviewService? reviewService = null,
+        ILogger<McpRegulatoryKnowledgeSource>? logger = null)
     {
         var options = Options.Create(
             new CnvRegulationMcpOptions
@@ -418,7 +421,7 @@ public class McpRegulatoryKnowledgeSourceTests
         return new McpRegulatoryKnowledgeSource(
             client,
             options,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
+            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             reviewService ?? new DeterministicLegalAnalysisReviewService(),
             dbContext,
             queryStrategy,
@@ -647,13 +650,134 @@ public class McpRegulatoryKnowledgeSourceTests
         private readonly DeterministicLegalAnalysisReviewService _inner = new();
 
         public int CallCount { get; private set; }
+        public LegalAnalysisReviewInput? LastInput { get; private set; }
 
         public Task<LegalAnalysisReviewResult> ReviewAsync(
             LegalAnalysisReviewInput input,
             CancellationToken cancellationToken)
         {
             CallCount++;
+            LastInput = input;
             return _inner.ReviewAsync(input, cancellationToken);
+        }
+    }
+
+    private enum MalformedQueryResponse
+    {
+        NullResult,
+        NullCitation
+    }
+
+    private sealed class MalformedQueryCnvRegulationMcpClient(
+        MalformedQueryResponse malformedResponse,
+        bool succeedAfterMalformed = false) : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+        public int CallCount { get; private set; }
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (succeedAfterMalformed && CallCount > 1)
+            {
+                return Task.FromResult(CreateSuccessfulResponse(request.Query));
+            }
+
+            IReadOnlyList<CnvRegulationSearchResult> results = malformedResponse switch
+            {
+                MalformedQueryResponse.NullResult =>
+                [
+                    CreateResult(
+                        "shared-artifact",
+                        "Shared artifact",
+                        "Shared cited evidence.",
+                        [CreateCitation()]),
+                    null!
+                ],
+                MalformedQueryResponse.NullCitation =>
+                [
+                    CreateResult(
+                        "shared-artifact",
+                        "Shared artifact",
+                        "Shared cited evidence.",
+                        [CreateCitation(), null!])
+                ],
+                _ => throw new ArgumentOutOfRangeException(nameof(malformedResponse))
+            };
+
+            return Task.FromResult(new CnvRegulationSearchResponse(
+                request.Query,
+                results,
+                ["discarded malformed response warning"]
+            ));
+        }
+
+        private static CnvRegulationSearchResponse CreateSuccessfulResponse(
+            string query)
+        {
+            return new CnvRegulationSearchResponse(
+                query,
+                [
+                    CreateResult(
+                        "shared-artifact",
+                        "Shared artifact",
+                        "Shared cited evidence.",
+                        [CreateCitation()])
+                ],
+                []
+            );
+        }
+    }
+
+    private sealed class SensitiveThrowingCnvRegulationMcpClient(
+        string secret) : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException($"{secret}: {request.Query}");
+        }
+    }
+
+    private sealed record CapturedLog(
+        LogLevel Level,
+        string Message,
+        string State,
+        Exception? Exception);
+
+    private sealed class CapturingLogger : ILogger<McpRegulatoryKnowledgeSource>
+    {
+        public List<CapturedLog> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add(new CapturedLog(
+                logLevel,
+                formatter(state, exception),
+                state?.ToString() ?? string.Empty,
+                exception
+            ));
         }
     }
 
@@ -859,6 +983,128 @@ public class McpRegulatoryKnowledgeSourceTests
     }
 
     [Fact]
+    public async Task ReviewAsync_ValidResultThenNullResult_DiscardsEntireFailedQuery()
+    {
+        await AssertMalformedSingleQueryIsAtomicAsync(
+            MalformedQueryResponse.NullResult);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_ValidCitationThenNullCitation_DiscardsEntireFailedQuery()
+    {
+        await AssertMalformedSingleQueryIsAtomicAsync(
+            MalformedQueryResponse.NullCitation);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_FailedQueryArtifacts_DoNotPoisonLaterSuccessfulDeduplication()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new MalformedQueryCnvRegulationMcpClient(
+                MalformedQueryResponse.NullResult,
+                succeedAfterMalformed: true),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan()),
+            reviewService: reviewService
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        result.HasComplianceRisk.Should().BeTrue();
+        result.RiskLevel.Should().Be("Medium");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Findings.Should().ContainSingle();
+        result.Warnings.Should().NotContain(
+            "discarded malformed response warning");
+        reviewService.CallCount.Should().Be(1);
+        reviewService.LastInput.Should().NotBeNull();
+        reviewService.LastInput!.CnvEvidence.Should().ContainSingle()
+            .Which.RegulationArea.Should().Be("audit_area_2");
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Queries.Select(item => item.ExecutionStatus).Should().Equal(
+            "failed",
+            "succeeded");
+        audit.Queries[0].ResultCount.Should().Be(0);
+        audit.Queries[0].CitedEvidenceCount.Should().Be(0);
+        audit.Queries[1].ResultCount.Should().Be(1);
+        audit.Queries[1].CitedEvidenceCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_QueryFailureLog_DoesNotRetainExceptionQueryOrSecret()
+    {
+        const string secret = "super-secret-mcp-payload";
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var logger = new CapturingLogger();
+        var source = CreateSource(
+            new SensitiveThrowingCnvRegulationMcpClient(secret),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            logger: logger
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        var log = logger.Entries.Should().ContainSingle(item =>
+            item.Message == "CNV MCP search failed for query 1 of 1.")
+            .Subject;
+        log.Exception.Should().BeNull();
+        log.Message.Should().NotContain(secret).And.NotContain("audit query 1");
+        log.State.Should().NotContain(secret).And.NotContain("audit query 1");
+        result.Warnings.Should().Contain(
+            "La búsqueda en la CNV a través de MCP falló para una consulta.");
+    }
+
+    private static async Task AssertMalformedSingleQueryIsAtomicAsync(
+        MalformedQueryResponse malformedResponse)
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new MalformedQueryCnvRegulationMcpClient(malformedResponse),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            reviewService: reviewService
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("Unknown");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Findings.Should().BeEmpty();
+        result.Warnings.Should().NotContain(
+            "discarded malformed response warning");
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.FailureReason.Should().Be("cnv_queries_failed");
+        result.LegalReview.EvidenceReferences.Should().BeEmpty();
+        reviewService.CallCount.Should().Be(0);
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        var queryAudit = audit.Queries.Should().ContainSingle().Subject;
+        queryAudit.ExecutionStatus.Should().Be("failed");
+        queryAudit.ResultCount.Should().Be(0);
+        queryAudit.CitedEvidenceCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ReviewAsync_UncitedSuccessfulResult_IsLowRiskSuccessfulAudit()
     {
         await using var dbContext =
@@ -985,7 +1231,9 @@ public class McpRegulatoryKnowledgeSourceTests
         publisher.PublishedEvents.Count(item =>
             item.Type == "legal_cnv_queries_derived" ||
             item.Type == "legal_cnv_query_fallback_used").Should().Be(1);
-        result.RequiresHumanReview.Should().Be(fallback);
+        result.HasComplianceRisk.Should().BeTrue();
+        result.RiskLevel.Should().Be("Medium");
+        result.RequiresHumanReview.Should().BeTrue();
 
         var audit = result.QueryStrategy.Should()
             .BeOfType<LegalQueryStrategyAudit>().Subject;

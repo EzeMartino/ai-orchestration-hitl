@@ -216,6 +216,7 @@ public sealed class McpRegulatoryKnowledgeSource(
             QueryStrategy: audit,
             LegalReview: legalReviewResult,
             RequiresHumanReview:
+                hasRisk ||
                 !usedContextualPlan ||
                 outcome.FailedQueries > 0 ||
                 derivedQueries.Count == 0
@@ -347,12 +348,24 @@ public sealed class McpRegulatoryKnowledgeSource(
         return string.Join(" | ", parts.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
+    private static string CreateFindingKey(RegulatoryFinding finding)
+    {
+        return $"{finding.Regulation}||{finding.Section}||{finding.Finding}||{finding.Source}";
+    }
+
+    private static string CreateEvidenceKey(LegalEvidenceReference evidence)
+    {
+        return $"{evidence.Source}||{evidence.Title}||{evidence.Citation}||{evidence.Snippet}";
+    }
+
     private async Task<CnvSearchReviewResult> SearchFindingsAsync(
         IReadOnlyList<LegalCnvQuery> queries,
         CancellationToken cancellationToken)
     {
         var allFindings = new List<RegulatoryFinding>();
         var allEvidence = new List<LegalEvidenceReference>();
+        var findingKeys = new HashSet<string>(StringComparer.Ordinal);
+        var evidenceKeys = new HashSet<string>(StringComparer.Ordinal);
         var warnings = new List<string>();
         var queryAudits = new List<LegalCnvQueryAudit>(queries.Count);
         var completedQueries = 0;
@@ -362,6 +375,12 @@ public sealed class McpRegulatoryKnowledgeSource(
         for (var queryIndex = 0; queryIndex < queries.Count; queryIndex++)
         {
             var queryInfo = queries[queryIndex];
+            var queryFindings = new List<RegulatoryFinding>();
+            var queryEvidence = new List<LegalEvidenceReference>();
+            var queryWarnings = new List<string>();
+            var queryFindingKeys = new HashSet<string>(StringComparer.Ordinal);
+            var queryEvidenceKeys = new HashSet<string>(StringComparer.Ordinal);
+            var queryHasUncitedEvidence = false;
             var request = new CnvRegulationSearchRequest(
                 Query: queryInfo.Query,
                 Area: queryInfo.RegulationArea ?? "Agentes",
@@ -380,25 +399,33 @@ public sealed class McpRegulatoryKnowledgeSource(
 
                 if (response.Warnings != null)
                 {
-                    warnings.AddRange(response.Warnings);
+                    queryWarnings.AddRange(response.Warnings);
                 }
 
                 if (response.Results != null)
                 {
                     foreach (var result in response.Results)
                     {
+                        ArgumentNullException.ThrowIfNull(result);
                         if (result.Citations == null || result.Citations.Count == 0)
                         {
-                            hasUncitedEvidence = true;
+                            queryHasUncitedEvidence = true;
                         }
                         else
                         {
                             citedEvidenceCount += result.Citations.Count;
-                            var mapped = MapFindings(result);
-                            allFindings.AddRange(mapped);
+                            foreach (var finding in MapFindings(result))
+                            {
+                                var findingKey = CreateFindingKey(finding);
+                                if (queryFindingKeys.Add(findingKey))
+                                {
+                                    queryFindings.Add(finding);
+                                }
+                            }
 
                             foreach (var citation in result.Citations)
                             {
+                                ArgumentNullException.ThrowIfNull(citation);
                                 var source = BuildSource(citation);
                                 var title = citation.Title ?? result.Title;
                                 var url = citation.Url ?? result.Url;
@@ -415,7 +442,7 @@ public sealed class McpRegulatoryKnowledgeSource(
 
                                 if (!string.IsNullOrWhiteSpace(citationStr))
                                 {
-                                    allEvidence.Add(new LegalEvidenceReference(
+                                    var evidence = new LegalEvidenceReference(
                                         Source: source,
                                         Title: title,
                                         Url: string.IsNullOrWhiteSpace(url) ? null : url,
@@ -423,12 +450,36 @@ public sealed class McpRegulatoryKnowledgeSource(
                                         Snippet: string.IsNullOrWhiteSpace(snippet) ? null : snippet,
                                         RegulationArea: queryInfo.RegulationArea ?? "Agentes",
                                         Score: result.Score
-                                    ));
+                                    );
+                                    var evidenceKey = CreateEvidenceKey(evidence);
+                                    if (queryEvidenceKeys.Add(evidenceKey))
+                                    {
+                                        queryEvidence.Add(evidence);
+                                    }
                                 }
                             }
                         }
                     }
                 }
+
+                foreach (var finding in queryFindings)
+                {
+                    if (findingKeys.Add(CreateFindingKey(finding)))
+                    {
+                        allFindings.Add(finding);
+                    }
+                }
+
+                foreach (var evidence in queryEvidence)
+                {
+                    if (evidenceKeys.Add(CreateEvidenceKey(evidence)))
+                    {
+                        allEvidence.Add(evidence);
+                    }
+                }
+
+                warnings.AddRange(queryWarnings);
+                hasUncitedEvidence |= queryHasUncitedEvidence;
 
                 completedQueries++;
                 queryAudits.Add(CreateQueryAudit(
@@ -444,7 +495,7 @@ public sealed class McpRegulatoryKnowledgeSource(
             {
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 failedQueries++;
                 queryAudits.Add(CreateQueryAudit(
@@ -456,7 +507,6 @@ public sealed class McpRegulatoryKnowledgeSource(
                     0
                 ));
                 _logger.LogWarning(
-                    ex,
                     "CNV MCP search failed for query {QueryIndex} of {TotalQueries}.",
                     queryIndex + 1,
                     queries.Count
@@ -470,19 +520,7 @@ public sealed class McpRegulatoryKnowledgeSource(
             warnings.Add("Algunos resultados de búsqueda de CNV/Infoleg se ignoraron como evidencia sólida debido a que no incluían citas.");
         }
 
-        // Deduplicate findings
-        var uniqueFindings = allFindings
-            .GroupBy(f => $"{f.Regulation}||{f.Section}||{f.Finding}||{f.Source}")
-            .Select(g => g.First())
-            .ToList();
-
-        // Deduplicate evidence references
-        var uniqueEvidence = allEvidence
-            .GroupBy(e => $"{e.Source}||{e.Title}||{e.Citation}||{e.Snippet}")
-            .Select(g => g.First())
-            .ToList();
-
-        if (uniqueFindings.Count > 0)
+        if (allFindings.Count > 0)
         {
             warnings.Add("Recuperación regulatoria automatizada únicamente. Se requiere una revisión legal humana antes de tomar decisiones operativas.");
         }
@@ -492,8 +530,8 @@ public sealed class McpRegulatoryKnowledgeSource(
         }
 
         return new CnvSearchReviewResult(
-            Findings: Array.AsReadOnly(uniqueFindings.ToArray()),
-            EvidenceReferences: Array.AsReadOnly(uniqueEvidence.ToArray()),
+            Findings: Array.AsReadOnly(allFindings.ToArray()),
+            EvidenceReferences: Array.AsReadOnly(allEvidence.ToArray()),
             Warnings: Array.AsReadOnly(warnings.Distinct().ToArray()),
             QueryAudits: Array.AsReadOnly(queryAudits.ToArray()),
             CompletedQueries: completedQueries,
