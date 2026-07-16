@@ -14,6 +14,7 @@ using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Application.Persistence;
 using Orchestration.Tests.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Activity;
+using Orchestration.Infrastructure.Agents.Legal;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Application.Agents.Legal.AiReview;
@@ -168,6 +169,46 @@ public class McpRegulatoryKnowledgeSourceTests
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         return session;
+    }
+
+    private static async Task<(
+        LegalCompliancePluginResult Result,
+        QueryTrackingCnvRegulationMcpClient Client,
+        CapturingLegalCnvQueryStrategy Strategy)> ReviewThroughPluginAsync(
+            string? financialAnalysisJson,
+            string? dataEvidenceJson)
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var strategy = new CapturingLegalCnvQueryStrategy();
+        var source = CreateSource(client, dbContext, strategy);
+        var persistedAnalysis = CreateFinancialAnalysis(
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "High",
+                "Q1",
+                "Low current ratio",
+                Array.Empty<RiskEvidenceItem>())
+        );
+        var session = await PersistFinancialAnalysisAsync(
+            dbContext,
+            persistedAnalysis
+        );
+        var plugin = new LegalCompliancePlugin(source);
+
+        var result = await plugin.ReviewFinancialComplianceAsync(
+            reportName: "plugin-boundary-test",
+            totalAmount: 1000d,
+            transactionCount: 1,
+            sessionId: session.Id.ToString(),
+            financialAnalysisJson: financialAnalysisJson,
+            allowPersistedFinancialAnalysisFallback: false,
+            dataEvidenceJson: dataEvidenceJson,
+            cancellationToken: CancellationToken.None
+        );
+
+        return (result, client, strategy);
     }
 
     private sealed class MixedCitationCnvRegulationMcpClient : ICnvRegulationMcpClient
@@ -426,6 +467,24 @@ public class McpRegulatoryKnowledgeSourceTests
         }
     }
 
+    private sealed class CapturingLegalCnvQueryStrategy : ILegalCnvQueryStrategy
+    {
+        private readonly FinancialAnalysisLegalCnvQueryStrategy _inner = new();
+
+        public FinancialAnalysisContext? ReceivedFinancialAnalysis { get; private set; }
+
+        public LegalDataEvidenceContext? ReceivedDataEvidence { get; private set; }
+
+        public LegalCnvQueryPlan BuildPlan(
+            FinancialAnalysisContext? financialAnalysis,
+            LegalDataEvidenceContext dataEvidence)
+        {
+            ReceivedFinancialAnalysis = financialAnalysis;
+            ReceivedDataEvidence = dataEvidence;
+            return _inner.BuildPlan(financialAnalysis, dataEvidence);
+        }
+    }
+
     private sealed class FakeActivityEventPublisher : IActivityEventPublisher
     {
         public List<ActivityEvent> PublishedEvents { get; } = [];
@@ -450,6 +509,63 @@ public class McpRegulatoryKnowledgeSourceTests
         {
             throw new InvalidOperationException("transport failed at C:\\sensitive\\cnv\\server.log");
         }
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"execution\":null,\"riskSignals\":[]}")]
+    [InlineData("{\"riskSignals\":null,\"execution\":{\"overallStatus\":1,\"stages\":[]}}")]
+    [InlineData("{\"riskSignals\":[null],\"execution\":{\"overallStatus\":1,\"stages\":[]}}")]
+    [InlineData("{\"riskSignals\":[],\"execution\":{\"overallStatus\":1,\"stages\":[null]}}")]
+    [InlineData("{\"riskSignals\":[],\"execution\":{\"overallStatus\":1,\"stages\":null}}")]
+    [InlineData("{ invalid")]
+    public async Task Plugin_IncompleteFinancialAnalysis_UsesProvidedOnlyFallback(
+        string invalidFinancialAnalysisJson)
+    {
+        var probe = await ReviewThroughPluginAsync(
+            invalidFinancialAnalysisJson,
+            dataEvidenceJson: null
+        );
+
+        probe.Strategy.ReceivedFinancialAnalysis.Should().BeNull();
+        probe.Client.ReceivedRequests.Select(item => item.Query).Should().Equal(
+            "régimen informativo estados financieros emisoras"
+        );
+        probe.Client.ReceivedRequests.Should()
+            .NotContain(item => item.Query.Contains("liquidez"));
+        probe.Result.QueryStrategy.Should().BeOfType<LegalQueryStrategyAudit>()
+            .Which.Source.Should().Be("fallback");
+        probe.Result.LegalReview.Should().NotBeNull();
+        probe.Result.LegalReview!.FailureReason.Should().Be(
+            "financial_analysis_missing");
+        probe.Result.RequiresHumanReview.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"failedStages\":null}")]
+    [InlineData("{\"dataToolStatus\":\"executed\",\"failedStages\":[null]}")]
+    [InlineData("{\"fallbackReason\":\"sensitive arbitrary reason\",\"dataToolStatus\":\"sensitive arbitrary status\",\"failedStages\":null}")]
+    public async Task Plugin_IncompleteDataEvidence_IsRejectedWithoutLeakage(
+        string invalidDataEvidenceJson)
+    {
+        var probe = await ReviewThroughPluginAsync(
+            financialAnalysisJson: null,
+            dataEvidenceJson: invalidDataEvidenceJson
+        );
+        var expectedEvidence = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            financialAnalysis: null
+        );
+
+        probe.Strategy.ReceivedFinancialAnalysis.Should().BeNull();
+        probe.Strategy.ReceivedDataEvidence.Should().BeEquivalentTo(
+            expectedEvidence);
+        probe.Client.ReceivedRequests.Select(item => item.Query).Should().Equal(
+            "régimen informativo estados financieros emisoras"
+        );
+        System.Text.Json.JsonSerializer.Serialize(probe.Result)
+            .Should().NotContain("sensitive arbitrary");
     }
 
     [Fact]

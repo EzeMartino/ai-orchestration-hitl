@@ -94,12 +94,23 @@ public sealed class LegalCompliancePlugin(
 
         try
         {
-            return JsonSerializer.Deserialize<FinancialAnalysisContext>(
+            var financialAnalysis = JsonSerializer.Deserialize<FinancialAnalysisContext>(
                 financialAnalysisJson,
                 JsonOptions
             );
+            return IsValidFinancialAnalysis(financialAnalysis)
+                ? financialAnalysis
+                : null;
         }
         catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+        catch (ArgumentException)
         {
             return null;
         }
@@ -115,10 +126,13 @@ public sealed class LegalCompliancePlugin(
 
         try
         {
-            return JsonSerializer.Deserialize<LegalDataEvidenceContext>(
+            var dataEvidence = JsonSerializer.Deserialize<LegalDataEvidenceContext>(
                 dataEvidenceJson,
                 JsonOptions
             );
+            return IsValidDataEvidence(dataEvidence)
+                ? dataEvidence
+                : null;
         }
         catch (JsonException)
         {
@@ -128,5 +142,57 @@ public sealed class LegalCompliancePlugin(
         {
             return null;
         }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsValidFinancialAnalysis(
+        FinancialAnalysisContext? financialAnalysis)
+    {
+        if (financialAnalysis?.Execution is null ||
+            financialAnalysis.Execution.Stages is null ||
+            financialAnalysis.RiskSignals is null)
+        {
+            return false;
+        }
+
+        foreach (var stage in financialAnalysis.Execution.Stages)
+        {
+            if (stage is null)
+            {
+                return false;
+            }
+        }
+
+        foreach (var signal in financialAnalysis.RiskSignals)
+        {
+            if (signal is null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsValidDataEvidence(
+        LegalDataEvidenceContext? dataEvidence)
+    {
+        if (dataEvidence?.FailedStages is null)
+        {
+            return false;
+        }
+
+        foreach (var failedStage in dataEvidence.FailedStages)
+        {
+            if (failedStage is null)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
