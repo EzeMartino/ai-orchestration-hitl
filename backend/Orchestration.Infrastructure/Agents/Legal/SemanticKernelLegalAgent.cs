@@ -21,10 +21,24 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
         return kernel;
     }
 
-    public async Task<LegalAgentResult> ReviewAsync(
+    public Task<LegalAgentResult> ReviewAsync(
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
+        return ReviewAsync(
+            report,
+            LegalReviewContext.Default,
+            cancellationToken
+        );
+    }
+
+    public async Task<LegalAgentResult> ReviewAsync(
+        FinancialReportContext report,
+        LegalReviewContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
         var arguments = new KernelArguments
         {
             ["reportName"] = report.ReportName,
@@ -33,7 +47,13 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
             ["sessionId"] = report.SessionId.ToString(),
             ["financialAnalysisJson"] = report.FinancialAnalysis is null
                 ? null
-                : JsonSerializer.Serialize(report.FinancialAnalysis, JsonOptions)
+                : JsonSerializer.Serialize(report.FinancialAnalysis, JsonOptions),
+            ["allowPersistedFinancialAnalysisFallback"] =
+                context.ResolutionMode ==
+                    FinancialAnalysisResolutionMode.ProvidedOrPersisted,
+            ["dataEvidenceJson"] = context.DataEvidence is null
+                ? null
+                : JsonSerializer.Serialize(context.DataEvidence, JsonOptions)
         };
 
         var pluginResult = await _kernel.InvokeAsync<LegalCompliancePluginResult>(
@@ -62,7 +82,8 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
                 .ToList(),
             Warnings: pluginResult.Warnings,
             QueryStrategy: pluginResult.QueryStrategy,
-            LegalReview: pluginResult.LegalReview
+            LegalReview: pluginResult.LegalReview,
+            RequiresHumanReview: pluginResult.RequiresHumanReview
         );
     }
 }

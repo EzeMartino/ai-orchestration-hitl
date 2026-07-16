@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Persistence;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
@@ -42,10 +43,25 @@ public sealed class McpRegulatoryKnowledgeSource(
         List<string> Warnings
     );
 
-    public async Task<RegulatoryReviewResult> ReviewAsync(
+    public Task<RegulatoryReviewResult> ReviewAsync(
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
+        return ReviewAsync(
+            new RegulatoryReviewRequest(report, LegalReviewContext.Default),
+            cancellationToken
+        );
+    }
+
+    public async Task<RegulatoryReviewResult> ReviewAsync(
+        RegulatoryReviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Report);
+        ArgumentNullException.ThrowIfNull(request.Context);
+
+        var report = request.Report;
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
             ["SessionId"] = report.SessionId
@@ -53,11 +69,31 @@ public sealed class McpRegulatoryKnowledgeSource(
 
         _logger.LogInformation("Starting regulatory review for report: {ReportName}", report.ReportName);
 
-        var financialAnalysis = report.FinancialAnalysis
-            ?? await TryLoadFinancialAnalysisAsync(report.SessionId, cancellationToken);
-        var derivedQueries = _queryStrategy.BuildQueries(financialAnalysis);
+        var financialAnalysis = report.FinancialAnalysis;
+        if (financialAnalysis is null &&
+            request.Context.ResolutionMode ==
+                FinancialAnalysisResolutionMode.ProvidedOrPersisted)
+        {
+            financialAnalysis = await TryLoadFinancialAnalysisAsync(
+                report.SessionId,
+                cancellationToken
+            );
+        }
 
-        string sourceStr = (financialAnalysis != null && financialAnalysis.RiskSignals != null && financialAnalysis.RiskSignals.Count > 0)
+        var dataEvidence = request.Context.DataEvidence ??
+            LegalDataEvidenceClassifier.Classify(
+                LegalDataToolStatuses.Executed,
+                financialAnalysis
+            );
+        var queryPlan = _queryStrategy.BuildPlan(
+            financialAnalysis,
+            dataEvidence
+        );
+        var derivedQueries = queryPlan.Queries;
+        var usedContextualPlan =
+            queryPlan.Source == LegalCnvQuerySources.Contextual &&
+            queryPlan.FallbackReason is null;
+        var sourceStr = usedContextualPlan
             ? "financial_analysis"
             : "fallback";
 
@@ -181,7 +217,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             Findings: findings,
             Warnings: warnings.Distinct().ToList(),
             QueryStrategy: audit,
-            LegalReview: legalReviewResult
+            LegalReview: legalReviewResult,
+            RequiresHumanReview: hasRisk
         );
     }
 

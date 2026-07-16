@@ -11,16 +11,6 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
     private const string StrategyVersion = "financial_analysis_v2";
     private const string FallbackQueryString = "régimen informativo estados financieros emisoras";
 
-    public IReadOnlyList<LegalCnvQuery> BuildQueries(FinancialAnalysisContext? financialAnalysis)
-    {
-        return BuildPlan(
-            financialAnalysis,
-            LegalDataEvidenceClassifier.Classify(
-                LegalDataToolStatuses.Executed,
-                financialAnalysis)
-        ).Queries;
-    }
-
     public LegalCnvQueryPlan BuildPlan(
         FinancialAnalysisContext? financialAnalysis,
         LegalDataEvidenceContext dataEvidence)

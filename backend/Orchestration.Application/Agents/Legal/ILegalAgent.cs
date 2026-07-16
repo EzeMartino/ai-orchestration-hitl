@@ -8,4 +8,12 @@ public interface ILegalAgent
         FinancialReportContext report,
         CancellationToken cancellationToken
     );
+
+    Task<LegalAgentResult> ReviewAsync(
+        FinancialReportContext report,
+        LegalReviewContext context,
+        CancellationToken cancellationToken)
+    {
+        return ReviewAsync(report, cancellationToken);
+    }
 }

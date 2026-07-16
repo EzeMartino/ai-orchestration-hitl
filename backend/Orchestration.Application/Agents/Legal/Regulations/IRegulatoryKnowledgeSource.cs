@@ -8,4 +8,11 @@ public interface IRegulatoryKnowledgeSource
         FinancialReportContext report,
         CancellationToken cancellationToken
     );
+
+    Task<RegulatoryReviewResult> ReviewAsync(
+        RegulatoryReviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        return ReviewAsync(request.Report, cancellationToken);
+    }
 }

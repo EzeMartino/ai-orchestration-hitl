@@ -6,7 +6,9 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Shared;
+using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Domain.AnalysisSessions;
 using Orchestration.Application.Persistence;
@@ -129,6 +131,43 @@ public class McpRegulatoryKnowledgeSourceTests
             TransactionCount: 42,
             SubmittedAt: DateTimeOffset.UtcNow
         );
+    }
+
+    private static FinancialAnalysisContext CreateFinancialAnalysis(
+        params FinancialRiskSignal[] signals)
+    {
+        return new FinancialAnalysisContext(
+            Engine: "TestDataEngine",
+            DocumentId: "doc-123",
+            Company: "TestCorp",
+            Ratios: Array.Empty<FinancialRatio>(),
+            Comparisons: Array.Empty<FinancialPeriodComparison>(),
+            RiskSignals: signals,
+            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
+            Warnings: Array.Empty<string>(),
+            Limitations: Array.Empty<string>()
+        )
+        {
+            Execution = FinancialAnalysisExecution.FromStages(
+                FinancialAnalysisOperations.All.Select(operation =>
+                    new FinancialAnalysisStageExecution(
+                        operation,
+                        FinancialAnalysisExecutionStatus.Succeeded,
+                        DurationMilliseconds: 1)))
+        };
+    }
+
+    private static async Task<AnalysisSession> PersistFinancialAnalysisAsync(
+        IOrchestrationDbContext dbContext,
+        FinancialAnalysisContext financialAnalysis)
+    {
+        var session = AnalysisSession.Create(Guid.NewGuid());
+        session.SetContext(System.Text.Json.JsonSerializer.Serialize(
+            new { financialAnalysis }));
+
+        dbContext.AnalysisSessions.Add(session);
+        await dbContext.SaveChangesAsync();
+        return session;
     }
 
     private sealed class MixedCitationCnvRegulationMcpClient : ICnvRegulationMcpClient
@@ -414,6 +453,104 @@ public class McpRegulatoryKnowledgeSourceTests
     }
 
     [Fact]
+    public async Task ReviewAsync_ProvidedOnly_UsesSuppliedFailureEvidenceWithoutLoadingPersistedAnalysis()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new FinancialAnalysisLegalCnvQueryStrategy(),
+            publisher
+        );
+        var persistedAnalysis = CreateFinancialAnalysis(
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "High",
+                "Q1",
+                "Low current ratio",
+                Array.Empty<RiskEvidenceItem>())
+        );
+        var session = await PersistFinancialAnalysisAsync(
+            dbContext,
+            persistedAnalysis
+        );
+        var report = CreateReport() with { SessionId = session.Id };
+        var dataEvidence = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Failed,
+            financialAnalysis: null
+        );
+        var request = new RegulatoryReviewRequest(
+            report,
+            new LegalReviewContext(
+                FinancialAnalysisResolutionMode.ProvidedOnly,
+                dataEvidence)
+        );
+
+        var result = await source.ReviewAsync(request, CancellationToken.None);
+
+        client.ReceivedRequests.Select(item => item.Query).Should().Equal(
+            "régimen informativo estados financieros emisoras"
+        );
+        result.QueryStrategy.Should().BeOfType<LegalQueryStrategyAudit>()
+            .Which.Source.Should().Be("fallback");
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.FailureReason.Should().Be("financial_analysis_missing");
+        publisher.PublishedEvents.Should()
+            .NotContain(item => item.Type == "legal_cnv_queries_derived");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_LegacyProvidedAnalysis_UsesAuditableFallbackWithoutDerivedEvent()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new QueryTrackingCnvRegulationMcpClient();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new FinancialAnalysisLegalCnvQueryStrategy(),
+            publisher
+        );
+        var legacyAnalysis = CreateFinancialAnalysis(
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "High",
+                "Q1",
+                "Low current ratio",
+                Array.Empty<RiskEvidenceItem>())
+        ) with
+        {
+            Execution = FinancialAnalysisExecution.LegacyUnknown
+        };
+        var report = CreateReport() with
+        {
+            FinancialAnalysis = legacyAnalysis
+        };
+        var request = new RegulatoryReviewRequest(
+            report,
+            new LegalReviewContext(
+                FinancialAnalysisResolutionMode.ProvidedOnly)
+        );
+
+        var result = await source.ReviewAsync(request, CancellationToken.None);
+
+        client.ReceivedRequests.Select(item => item.Query).Should().Equal(
+            "régimen informativo estados financieros emisoras"
+        );
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Source.Should().Be("fallback");
+        audit.Queries.Should().ContainSingle()
+            .Which.Reason.Should().Contain("No había señales específicas");
+        publisher.PublishedEvents.Should()
+            .NotContain(item => item.Type == "legal_cnv_queries_derived");
+    }
+
+    [Fact]
     public async Task ReviewAsync_Should_use_queries_from_ILegalCnvQueryStrategy_and_pass_risk_signals()
     {
         // Arrange
@@ -427,23 +564,11 @@ public class McpRegulatoryKnowledgeSourceTests
             new FinancialRiskSignal("liquidity_risk", "High", "Q1", "Low current ratio", Array.Empty<RiskEvidenceItem>())
         };
 
-        var financialAnalysis = new FinancialAnalysisContext(
-            Engine: "TestDataEngine",
-            DocumentId: "doc-123",
-            Company: "TestCorp",
-            Ratios: Array.Empty<FinancialRatio>(),
-            Comparisons: Array.Empty<FinancialPeriodComparison>(),
-            RiskSignals: signals,
-            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
-            Warnings: Array.Empty<string>(),
-            Limitations: Array.Empty<string>()
+        var financialAnalysis = CreateFinancialAnalysis(signals);
+        var session = await PersistFinancialAnalysisAsync(
+            dbContext,
+            financialAnalysis
         );
-
-        var session = AnalysisSession.Create();
-        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
-        
-        dbContext.AnalysisSessions.Add(session);
-        await dbContext.SaveChangesAsync();
 
         var report = new FinancialReportContext(
             SessionId: session.Id,
@@ -454,7 +579,10 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         // Act
-        var result = await source.ReviewAsync(report, CancellationToken.None);
+        var result = await source.ReviewAsync(
+            new RegulatoryReviewRequest(report, LegalReviewContext.Default),
+            CancellationToken.None
+        );
 
         // Assert
         result.HasComplianceRisk.Should().BeTrue();
@@ -526,23 +654,11 @@ public class McpRegulatoryKnowledgeSourceTests
             new FinancialRiskSignal("leverage_warning", "High", "Q1", "High debt", Array.Empty<RiskEvidenceItem>())
         };
 
-        var financialAnalysis = new FinancialAnalysisContext(
-            Engine: "TestDataEngine",
-            DocumentId: "doc-123",
-            Company: "TestCorp",
-            Ratios: Array.Empty<FinancialRatio>(),
-            Comparisons: Array.Empty<FinancialPeriodComparison>(),
-            RiskSignals: signals,
-            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
-            Warnings: Array.Empty<string>(),
-            Limitations: Array.Empty<string>()
+        var financialAnalysis = CreateFinancialAnalysis(signals);
+        var session = await PersistFinancialAnalysisAsync(
+            dbContext,
+            financialAnalysis
         );
-
-        var session = AnalysisSession.Create();
-        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
-        
-        dbContext.AnalysisSessions.Add(session);
-        await dbContext.SaveChangesAsync();
 
         var report = new FinancialReportContext(
             SessionId: session.Id,
@@ -575,23 +691,11 @@ public class McpRegulatoryKnowledgeSourceTests
             new FinancialRiskSignal("margin_deterioration", "High", "Q1", "Low profit", Array.Empty<RiskEvidenceItem>())
         };
 
-        var financialAnalysis = new FinancialAnalysisContext(
-            Engine: "TestDataEngine",
-            DocumentId: "doc-123",
-            Company: "TestCorp",
-            Ratios: Array.Empty<FinancialRatio>(),
-            Comparisons: Array.Empty<FinancialPeriodComparison>(),
-            RiskSignals: signals,
-            RiskEvidence: Array.Empty<RiskEvidenceItem>(),
-            Warnings: Array.Empty<string>(),
-            Limitations: Array.Empty<string>()
+        var financialAnalysis = CreateFinancialAnalysis(signals);
+        var session = await PersistFinancialAnalysisAsync(
+            dbContext,
+            financialAnalysis
         );
-
-        var session = AnalysisSession.Create();
-        session.SetContext(System.Text.Json.JsonSerializer.Serialize(new { financialAnalysis }));
-        
-        dbContext.AnalysisSessions.Add(session);
-        await dbContext.SaveChangesAsync();
 
         var report = new FinancialReportContext(
             SessionId: session.Id,
