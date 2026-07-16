@@ -27,6 +27,237 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
             RiskEvidence: Array.Empty<RiskEvidenceItem>(),
             Warnings: warnings ?? Array.Empty<string>(),
             Limitations: limitations ?? Array.Empty<string>()
+        )
+        {
+            Execution = FinancialAnalysisExecution.FromStages(
+                FinancialAnalysisOperations.All.Select(operation =>
+                    new FinancialAnalysisStageExecution(
+                        operation,
+                        FinancialAnalysisExecutionStatus.Succeeded,
+                        DurationMilliseconds: 1)))
+        };
+    }
+
+    [Fact]
+    public void BuildPlan_ContextualSignals_ReturnsAuditableOrderedDeduplicatedPlanCappedAtFour()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_one",
+                "Medium",
+                "Q1",
+                "Low working_capital.",
+                Array.Empty<RiskEvidenceItem>()),
+            new FinancialRiskSignal(
+                "critical_leverage",
+                "High",
+                "Q1",
+                "Extremely high debt.",
+                Array.Empty<RiskEvidenceItem>()),
+            new FinancialRiskSignal(
+                "liquidity_two",
+                "Medium",
+                "Q1",
+                "Low current_ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var dataEvidence = Classify(context);
+
+        var result = _strategy.BuildPlan(context, dataEvidence);
+
+        result.StrategyVersion.Should().Be("financial_analysis_v2");
+        result.Source.Should().Be(LegalCnvQuerySources.Contextual);
+        result.FallbackReason.Should().BeNull();
+        result.DataEvidence.Should().BeSameAs(dataEvidence);
+        result.Queries.Select(query => query.Query).Should().Equal(
+            "hecho relevante información al mercado emisoras",
+            "endeudamiento información al mercado estados financieros",
+            "obligaciones negociables endeudamiento régimen informativo",
+            "régimen informativo estados financieros liquidez"
+        );
+        result.Queries.Should().HaveCount(4);
+        result.Queries.Select(query => query.Query).Should().OnlyHaveUniqueItems();
+    }
+
+    public static TheoryData<string> UnusableEvidenceReasons =>
+        new()
+        {
+            LegalCnvFallbackReasons.DataToolFailed,
+            LegalCnvFallbackReasons.DataStageAbsent,
+            LegalCnvFallbackReasons.FinancialAnalysisMissing,
+            LegalCnvFallbackReasons.SignalsStageFailed,
+            LegalCnvFallbackReasons.NoSpecificSignals,
+            LegalCnvFallbackReasons.SignalsUnmapped,
+            LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
+        };
+
+    [Theory]
+    [MemberData(nameof(UnusableEvidenceReasons))]
+    public void BuildPlan_UnusableEvidence_ReturnsSingleGenericFallbackPreservingReason(
+        string fallbackReason)
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var dataEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: fallbackReason,
+            DataToolStatus: LegalDataToolStatuses.Executed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: []
+        );
+
+        var result = _strategy.BuildPlan(context, dataEvidence);
+
+        AssertGenericFallback(result);
+        result.FallbackReason.Should().Be(fallbackReason);
+        result.DataEvidence.Should().BeSameAs(dataEvidence);
+    }
+
+    [Fact]
+    public void BuildPlan_UnsupportedSignal_ReturnsSignalsUnmappedFallback()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "unsupported_signal",
+                "Medium",
+                "Q1",
+                "No mapped category.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+
+        var result = _strategy.BuildPlan(context, Classify(context));
+
+        AssertGenericFallback(result);
+        result.FallbackReason.Should().Be(LegalCnvFallbackReasons.SignalsUnmapped);
+    }
+
+    [Fact]
+    public void BuildPlan_WarningsAndLimitations_DoNotChangeSignalQueries()
+    {
+        FinancialRiskSignal[] signals =
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ];
+        var cleanContext = CreateContext(signals);
+        var noisyContext = CreateContext(
+            signals,
+            warnings: ["Sensitive warning should not drive legal queries."],
+            limitations: ["Sensitive limitation should not drive legal queries."]
+        );
+
+        var clean = _strategy.BuildPlan(cleanContext, Classify(cleanContext));
+        var noisy = _strategy.BuildPlan(noisyContext, Classify(noisyContext));
+
+        noisy.Source.Should().Be(LegalCnvQuerySources.Contextual);
+        noisy.Queries.Should().BeEquivalentTo(
+            clean.Queries,
+            options => options.WithStrictOrdering()
+        );
+    }
+
+    [Fact]
+    public void BuildPlan_WarningsAndLimitationsWithoutSignals_NeverReturnsContextualQueries()
+    {
+        var context = CreateContext(
+            signals: [],
+            warnings: ["Data quality warning."],
+            limitations: ["Partial ratios only."]
+        );
+
+        var result = _strategy.BuildPlan(context, Classify(context));
+
+        AssertGenericFallback(result);
+        result.FallbackReason.Should().Be(LegalCnvFallbackReasons.NoSpecificSignals);
+        result.Queries.SelectMany(query => query.RelatedFinancialSignals)
+            .Should().NotContain("warning");
+    }
+
+    [Fact]
+    public void BuildPlan_UsableEvidenceWithoutFinancialAnalysis_FailsClosed()
+    {
+        var contradictoryEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: true,
+            FallbackReason: null,
+            DataToolStatus: LegalDataToolStatuses.Executed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: []
+        );
+
+        var result = _strategy.BuildPlan(
+            financialAnalysis: null,
+            contradictoryEvidence
+        );
+
+        AssertGenericFallback(result);
+        result.FallbackReason.Should().Be(
+            LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.DataEvidence.Should().BeSameAs(contradictoryEvidence);
+    }
+
+    [Fact]
+    public void BuildPlan_UsableEvidenceWithInconsistentExecution_FailsClosed()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]) with
+        {
+            Execution = FinancialAnalysisExecution.LegacyUnknown
+        };
+        var contradictoryEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: true,
+            FallbackReason: null,
+            DataToolStatus: LegalDataToolStatuses.Executed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: []
+        );
+
+        var result = _strategy.BuildPlan(context, contradictoryEvidence);
+
+        AssertGenericFallback(result);
+        result.FallbackReason.Should().Be(
+            LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.DataEvidence.Should().BeSameAs(contradictoryEvidence);
+    }
+
+    [Fact]
+    public void BuildQueries_LegacyAdapter_MatchesBuildPlanQueries()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var plan = _strategy.BuildPlan(context, Classify(context));
+
+        var legacyQueries = _strategy.BuildQueries(context);
+
+        legacyQueries.Should().BeEquivalentTo(
+            plan.Queries,
+            options => options.WithStrictOrdering()
         );
     }
 
@@ -209,5 +440,24 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         var result = _strategy.BuildQueries(context);
 
         result.Should().Contain(q => q.Query.Contains("liquidez", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static LegalDataEvidenceContext Classify(
+        FinancialAnalysisContext context)
+    {
+        return LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            context
+        );
+    }
+
+    private static void AssertGenericFallback(LegalCnvQueryPlan result)
+    {
+        result.StrategyVersion.Should().Be("financial_analysis_v2");
+        result.Source.Should().Be(LegalCnvQuerySources.Fallback);
+        var query = result.Queries.Should().ContainSingle().Subject;
+        query.Query.Should().Be("régimen informativo estados financieros emisoras");
+        query.RegulationArea.Should().Be("general_reporting");
+        query.RelatedFinancialSignals.Should().BeEmpty();
     }
 }

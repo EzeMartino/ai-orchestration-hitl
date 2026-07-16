@@ -8,21 +8,62 @@ namespace Orchestration.Application.Agents.Legal.Cnv;
 public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrategy
 {
     private const int MaxQueries = 4;
+    private const string StrategyVersion = "financial_analysis_v2";
     private const string FallbackQueryString = "régimen informativo estados financieros emisoras";
 
     public IReadOnlyList<LegalCnvQuery> BuildQueries(FinancialAnalysisContext? financialAnalysis)
     {
-        if (financialAnalysis == null || financialAnalysis.RiskSignals == null || financialAnalysis.RiskSignals.Count == 0)
+        return BuildPlan(
+            financialAnalysis,
+            LegalDataEvidenceClassifier.Classify(
+                LegalDataToolStatuses.Executed,
+                financialAnalysis)
+        ).Queries;
+    }
+
+    public LegalCnvQueryPlan BuildPlan(
+        FinancialAnalysisContext? financialAnalysis,
+        LegalDataEvidenceContext dataEvidence)
+    {
+        ArgumentNullException.ThrowIfNull(dataEvidence);
+
+        if (!dataEvidence.CanUseSignals)
         {
-            return new List<LegalCnvQuery>
-            {
-                new(
-                    Query: FallbackQueryString,
-                    RegulationArea: "general_reporting",
-                    Reason: "No había señales específicas de riesgo financiero disponibles; se usó una consulta general sobre información financiera.",
-                    RelatedFinancialSignals: Array.Empty<string>()
-                )
-            };
+            return CreateFallbackPlan(
+                dataEvidence,
+                dataEvidence.FallbackReason ??
+                    LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
+            );
+        }
+
+        if (financialAnalysis is null ||
+            financialAnalysis.RiskSignals is null ||
+            financialAnalysis.RiskSignals.Count == 0)
+        {
+            return CreateFallbackPlan(
+                dataEvidence,
+                LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
+            );
+        }
+
+        var currentEvidence = LegalDataEvidenceClassifier.Classify(
+            dataEvidence.DataToolStatus,
+            financialAnalysis
+        );
+        if (!currentEvidence.CanUseSignals ||
+            dataEvidence.FallbackReason is not null ||
+            !string.Equals(
+                currentEvidence.DataToolStatus,
+                dataEvidence.DataToolStatus,
+                StringComparison.Ordinal) ||
+            currentEvidence.FinancialAnalysisStatus !=
+                dataEvidence.FinancialAnalysisStatus ||
+            !currentEvidence.FailedStages.SequenceEqual(dataEvidence.FailedStages))
+        {
+            return CreateFallbackPlan(
+                dataEvidence,
+                LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
+            );
         }
 
         var orderedSignals = financialAnalysis.RiskSignals
@@ -64,61 +105,15 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             }
         }
 
-        // Tarea 3 / 2 (warnings / limitations fallback metrics)
-        // If we still have capacity, and there are warnings/limitations or metrics provenance issues, we can add the quality queries
-        if (queryList.Count < MaxQueries &&
-            (financialAnalysis.Warnings?.Count > 0 || financialAnalysis.Limitations?.Count > 0))
-        {
-            var qualityCandidates = new[]
-            {
-                ("deberes informativos emisoras información periódica", "data_quality", "Derivada de métricas faltantes, problemas de calidad de datos o advertencias."),
-                ("régimen informativo estados financieros emisoras", "data_quality", "Derivada de métricas faltantes, problemas de calidad de datos o advertencias.")
-            };
-
-            foreach (var (candQuery, candArea, candReason) in qualityCandidates)
-            {
-                var normalized = NormalizeQuery(candQuery);
-                if (string.IsNullOrEmpty(normalized))
-                    continue;
-
-                if (queryDetails.TryGetValue(normalized, out var existing))
-                {
-                    if (!existing.RelatedSignals.Contains("warning"))
-                    {
-                        existing.RelatedSignals.Add("warning");
-                    }
-                }
-                else
-                {
-                    if (queryList.Count < MaxQueries)
-                    {
-                        queryList.Add(normalized);
-                        queryDetails[normalized] = (
-                            Query: candQuery,
-                            RegulationArea: candArea,
-                            Reason: candReason,
-                            RelatedSignals: new List<string> { "warning" }
-                        );
-                    }
-                }
-            }
-        }
-
-        // If for some reason we still have nothing (e.g. risk signals exist but didn't match any category), return fallback
         if (queryList.Count == 0)
         {
-            return new List<LegalCnvQuery>
-            {
-                new(
-                    Query: FallbackQueryString,
-                    RegulationArea: "general_reporting",
-                    Reason: "No había señales específicas de riesgo financiero disponibles; se usó una consulta general sobre información financiera.",
-                    RelatedFinancialSignals: Array.Empty<string>()
-                )
-            };
+            return CreateFallbackPlan(
+                dataEvidence,
+                LegalCnvFallbackReasons.SignalsUnmapped
+            );
         }
 
-        return queryList
+        var queries = queryList
             .Select(norm =>
             {
                 var details = queryDetails[norm];
@@ -129,7 +124,38 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
                     RelatedFinancialSignals: details.RelatedSignals.AsReadOnly()
                 );
             })
-            .ToList();
+            .ToArray();
+
+        return new LegalCnvQueryPlan(
+            StrategyVersion,
+            LegalCnvQuerySources.Contextual,
+            FallbackReason: null,
+            dataEvidence,
+            queries
+        );
+    }
+
+    private static LegalCnvQueryPlan CreateFallbackPlan(
+        LegalDataEvidenceContext dataEvidence,
+        string fallbackReason)
+    {
+        return new LegalCnvQueryPlan(
+            StrategyVersion,
+            LegalCnvQuerySources.Fallback,
+            fallbackReason,
+            dataEvidence,
+            [CreateFallbackQuery()]
+        );
+    }
+
+    private static LegalCnvQuery CreateFallbackQuery()
+    {
+        return new LegalCnvQuery(
+            Query: FallbackQueryString,
+            RegulationArea: "general_reporting",
+            Reason: "No había señales específicas de riesgo financiero disponibles; se usó una consulta general sobre información financiera.",
+            RelatedFinancialSignals: Array.Empty<string>()
+        );
     }
 
     private static bool IsHighSeverity(string? severity)
