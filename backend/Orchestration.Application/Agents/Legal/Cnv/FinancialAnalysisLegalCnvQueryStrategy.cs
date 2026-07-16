@@ -25,13 +25,22 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         FinancialAnalysisContext? financialAnalysis,
         LegalDataEvidenceContext dataEvidence)
     {
-        ArgumentNullException.ThrowIfNull(dataEvidence);
+        var canonicalEvidence = LegalDataEvidenceClassifier.Classify(
+            dataEvidence?.DataToolStatus!,
+            financialAnalysis
+        );
 
-        if (!dataEvidence.CanUseSignals)
+        if (dataEvidence is null ||
+            !EvidenceIsEquivalent(dataEvidence, canonicalEvidence))
+        {
+            canonicalEvidence = CreateAmbiguousEvidence(canonicalEvidence);
+        }
+
+        if (!canonicalEvidence.CanUseSignals)
         {
             return CreateFallbackPlan(
-                dataEvidence,
-                dataEvidence.FallbackReason ??
+                canonicalEvidence,
+                canonicalEvidence.FallbackReason ??
                     LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
             );
         }
@@ -41,27 +50,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             financialAnalysis.RiskSignals.Count == 0)
         {
             return CreateFallbackPlan(
-                dataEvidence,
-                LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
-            );
-        }
-
-        var currentEvidence = LegalDataEvidenceClassifier.Classify(
-            dataEvidence.DataToolStatus,
-            financialAnalysis
-        );
-        if (!currentEvidence.CanUseSignals ||
-            dataEvidence.FallbackReason is not null ||
-            !string.Equals(
-                currentEvidence.DataToolStatus,
-                dataEvidence.DataToolStatus,
-                StringComparison.Ordinal) ||
-            currentEvidence.FinancialAnalysisStatus !=
-                dataEvidence.FinancialAnalysisStatus ||
-            !currentEvidence.FailedStages.SequenceEqual(dataEvidence.FailedStages))
-        {
-            return CreateFallbackPlan(
-                dataEvidence,
+                CreateAmbiguousEvidence(canonicalEvidence),
                 LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
             );
         }
@@ -108,7 +97,7 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
         if (queryList.Count == 0)
         {
             return CreateFallbackPlan(
-                dataEvidence,
+                canonicalEvidence,
                 LegalCnvFallbackReasons.SignalsUnmapped
             );
         }
@@ -130,8 +119,38 @@ public sealed class FinancialAnalysisLegalCnvQueryStrategy : ILegalCnvQueryStrat
             StrategyVersion,
             LegalCnvQuerySources.Contextual,
             FallbackReason: null,
-            dataEvidence,
+            canonicalEvidence,
             queries
+        );
+    }
+
+    private static bool EvidenceIsEquivalent(
+        LegalDataEvidenceContext supplied,
+        LegalDataEvidenceContext canonical)
+    {
+        return supplied.CanUseSignals == canonical.CanUseSignals &&
+            string.Equals(
+                supplied.FallbackReason,
+                canonical.FallbackReason,
+                StringComparison.Ordinal) &&
+            string.Equals(
+                supplied.DataToolStatus,
+                canonical.DataToolStatus,
+                StringComparison.Ordinal) &&
+            supplied.FinancialAnalysisStatus == canonical.FinancialAnalysisStatus &&
+            supplied.FailedStages is not null &&
+            supplied.FailedStages.SequenceEqual(canonical.FailedStages);
+    }
+
+    private static LegalDataEvidenceContext CreateAmbiguousEvidence(
+        LegalDataEvidenceContext canonical)
+    {
+        return new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: LegalCnvFallbackReasons.LegacyOrAmbiguousExecution,
+            DataToolStatus: LegalDataToolStatuses.Unknown,
+            FinancialAnalysisStatus: canonical.FinancialAnalysisStatus,
+            FailedStages: canonical.FailedStages
         );
     }
 

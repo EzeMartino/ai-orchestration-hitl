@@ -69,7 +69,8 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         result.StrategyVersion.Should().Be("financial_analysis_v2");
         result.Source.Should().Be(LegalCnvQuerySources.Contextual);
         result.FallbackReason.Should().BeNull();
-        result.DataEvidence.Should().BeSameAs(dataEvidence);
+        result.DataEvidence.Should().BeEquivalentTo(dataEvidence);
+        result.DataEvidence.Should().NotBeSameAs(dataEvidence);
         result.Queries.Select(query => query.Query).Should().Equal(
             "hecho relevante información al mercado emisoras",
             "endeudamiento información al mercado estados financieros",
@@ -80,22 +81,8 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         result.Queries.Select(query => query.Query).Should().OnlyHaveUniqueItems();
     }
 
-    public static TheoryData<string> UnusableEvidenceReasons =>
-        new()
-        {
-            LegalCnvFallbackReasons.DataToolFailed,
-            LegalCnvFallbackReasons.DataStageAbsent,
-            LegalCnvFallbackReasons.FinancialAnalysisMissing,
-            LegalCnvFallbackReasons.SignalsStageFailed,
-            LegalCnvFallbackReasons.NoSpecificSignals,
-            LegalCnvFallbackReasons.SignalsUnmapped,
-            LegalCnvFallbackReasons.LegacyOrAmbiguousExecution
-        };
-
-    [Theory]
-    [MemberData(nameof(UnusableEvidenceReasons))]
-    public void BuildPlan_UnusableEvidence_ReturnsSingleGenericFallbackPreservingReason(
-        string fallbackReason)
+    [Fact]
+    public void BuildPlan_CanonicalUnusableEvidence_PreservesCanonicalReasons()
     {
         var context = CreateContext(
         [
@@ -106,19 +93,47 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
                 "Low current ratio.",
                 Array.Empty<RiskEvidenceItem>())
         ]);
-        var dataEvidence = new LegalDataEvidenceContext(
-            CanUseSignals: false,
-            FallbackReason: fallbackReason,
-            DataToolStatus: LegalDataToolStatuses.Executed,
-            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
-            FailedStages: []
-        );
+        var failedSignalsContext = context with
+        {
+            Execution = FinancialAnalysisExecution.FromStages(
+            [
+                new FinancialAnalysisStageExecution(
+                    FinancialAnalysisOperations.Signals,
+                    FinancialAnalysisExecutionStatus.Failed,
+                    DurationMilliseconds: 1,
+                    FinancialAnalysisFailureCodes.PythonInvocationFailed)
+            ])
+        };
+        var noSignalsContext = CreateContext([]);
+        var legacyContext = context with
+        {
+            Execution = FinancialAnalysisExecution.LegacyUnknown
+        };
+        (FinancialAnalysisContext? Context, LegalDataEvidenceContext Evidence)[] cases =
+        [
+            (context, Classify(LegalDataToolStatuses.Failed, context)),
+            (context, Classify(LegalDataToolStatuses.Absent, context)),
+            (null, Classify(LegalDataToolStatuses.Executed, null)),
+            (failedSignalsContext, Classify(
+                LegalDataToolStatuses.Executed,
+                failedSignalsContext)),
+            (noSignalsContext, Classify(
+                LegalDataToolStatuses.Executed,
+                noSignalsContext)),
+            (legacyContext, Classify(
+                LegalDataToolStatuses.Executed,
+                legacyContext))
+        ];
 
-        var result = _strategy.BuildPlan(context, dataEvidence);
+        foreach (var (financialAnalysis, dataEvidence) in cases)
+        {
+            var result = _strategy.BuildPlan(financialAnalysis, dataEvidence);
 
-        AssertGenericFallback(result);
-        result.FallbackReason.Should().Be(fallbackReason);
-        result.DataEvidence.Should().BeSameAs(dataEvidence);
+            AssertGenericFallback(result);
+            result.FallbackReason.Should().Be(dataEvidence.FallbackReason);
+            result.DataEvidence.Should().BeEquivalentTo(dataEvidence);
+            result.DataEvidence.Should().NotBeSameAs(dataEvidence);
+        }
     }
 
     [Fact]
@@ -134,10 +149,16 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
                 Array.Empty<RiskEvidenceItem>())
         ]);
 
-        var result = _strategy.BuildPlan(context, Classify(context));
+        var dataEvidence = Classify(context);
+
+        var result = _strategy.BuildPlan(context, dataEvidence);
 
         AssertGenericFallback(result);
         result.FallbackReason.Should().Be(LegalCnvFallbackReasons.SignalsUnmapped);
+        result.DataEvidence.Should().BeEquivalentTo(dataEvidence);
+        result.DataEvidence.Should().NotBeSameAs(dataEvidence);
+        result.DataEvidence.CanUseSignals.Should().BeTrue();
+        result.DataEvidence.FallbackReason.Should().BeNull();
     }
 
     [Fact]
@@ -205,7 +226,10 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         AssertGenericFallback(result);
         result.FallbackReason.Should().Be(
             LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
-        result.DataEvidence.Should().BeSameAs(contradictoryEvidence);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            expectedFinancialAnalysisStatus: null
+        );
     }
 
     [Fact]
@@ -236,7 +260,191 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
         AssertGenericFallback(result);
         result.FallbackReason.Should().Be(
             LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
-        result.DataEvidence.Should().BeSameAs(contradictoryEvidence);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            FinancialAnalysisExecutionStatus.LegacyUnknown
+        );
+    }
+
+    [Fact]
+    public void BuildPlan_ArbitraryAuditInput_IsSanitizedWithoutSensitiveLeakage()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var untrustedEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: "sensitive arbitrary fallback reason",
+            DataToolStatus: "sensitive arbitrary data status",
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages:
+            [
+                new LegalDataStageFailureAudit(
+                    "sensitive arbitrary operation",
+                    "sensitive arbitrary failure code")
+            ]
+        );
+
+        var result = _strategy.BuildPlan(context, untrustedEvidence);
+
+        AssertGenericFallback(result);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            FinancialAnalysisExecutionStatus.Succeeded
+        );
+        result.ToString().Should().NotContain("sensitive arbitrary");
+    }
+
+    [Theory]
+    [InlineData(LegalCnvFallbackReasons.DataToolFailed)]
+    [InlineData(LegalCnvFallbackReasons.SignalsUnmapped)]
+    public void BuildPlan_InconsistentFallbackReason_IsSanitized(
+        string inconsistentReason)
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var inconsistentEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: inconsistentReason,
+            DataToolStatus: LegalDataToolStatuses.Executed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: []
+        );
+
+        var result = _strategy.BuildPlan(context, inconsistentEvidence);
+
+        AssertGenericFallback(result);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            FinancialAnalysisExecutionStatus.Succeeded
+        );
+    }
+
+    [Fact]
+    public void BuildPlan_DataToolFailureMarkedUsable_IsSanitized()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+        var inconsistentEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: true,
+            FallbackReason: null,
+            DataToolStatus: LegalDataToolStatuses.Failed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: []
+        );
+
+        var result = _strategy.BuildPlan(context, inconsistentEvidence);
+
+        AssertGenericFallback(result);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            FinancialAnalysisExecutionStatus.Succeeded
+        );
+    }
+
+    [Fact]
+    public void BuildPlan_NullRuntimeEvidence_FailsClosedWithCanonicalContextMetadata()
+    {
+        var context = CreateContext(
+        [
+            new FinancialRiskSignal(
+                "liquidity_risk",
+                "Medium",
+                "Q1",
+                "Low current ratio.",
+                Array.Empty<RiskEvidenceItem>())
+        ]);
+
+        var result = _strategy.BuildPlan(context, dataEvidence: null!);
+
+        AssertGenericFallback(result);
+        AssertSanitizedAmbiguousEvidence(
+            result,
+            FinancialAnalysisExecutionStatus.Succeeded
+        );
+    }
+
+    [Fact]
+    public void LegalCnvQueryPlan_ConstructorSnapshotsMutableAuditCollectionsAsReadOnly()
+    {
+        var mutableFailures = new List<LegalDataStageFailureAudit>
+        {
+            new(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed)
+        };
+        var mutableQueries = new List<LegalCnvQuery>
+        {
+            new(
+                "test query",
+                "test_area",
+                "Test reason.",
+                Array.Empty<string>())
+        };
+        var sourceEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: LegalCnvFallbackReasons.DataToolFailed,
+            DataToolStatus: LegalDataToolStatuses.Failed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Failed,
+            FailedStages: mutableFailures
+        );
+
+        var result = new LegalCnvQueryPlan(
+            "financial_analysis_v2",
+            LegalCnvQuerySources.Fallback,
+            LegalCnvFallbackReasons.DataToolFailed,
+            sourceEvidence,
+            mutableQueries
+        );
+
+        mutableFailures.Add(new LegalDataStageFailureAudit(
+            FinancialAnalysisOperations.Comparisons,
+            FinancialAnalysisFailureCodes.PythonResponseInvalid));
+        mutableQueries.Clear();
+
+        result.DataEvidence.Should().NotBeSameAs(sourceEvidence);
+        result.DataEvidence.FailedStages.Should().ContainSingle();
+        result.Queries.Should().ContainSingle();
+
+        var failedStageSnapshot = result.DataEvidence.FailedStages
+            .Should().BeAssignableTo<System.Collections.IList>().Subject;
+        var querySnapshot = result.Queries
+            .Should().BeAssignableTo<System.Collections.IList>().Subject;
+        failedStageSnapshot.IsReadOnly.Should().BeTrue();
+        querySnapshot.IsReadOnly.Should().BeTrue();
+
+        Action addFailure = () =>
+        {
+            failedStageSnapshot.Add(new LegalDataStageFailureAudit(
+                FinancialAnalysisOperations.Summary,
+                FinancialAnalysisFailureCodes.UnexpectedFailure));
+        };
+        Action addQuery = () =>
+        {
+            querySnapshot.Add(mutableQueries.FirstOrDefault());
+        };
+        addFailure.Should().Throw<NotSupportedException>();
+        addQuery.Should().Throw<NotSupportedException>();
     }
 
     [Fact]
@@ -445,10 +653,27 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
     private static LegalDataEvidenceContext Classify(
         FinancialAnalysisContext context)
     {
-        return LegalDataEvidenceClassifier.Classify(
-            LegalDataToolStatuses.Executed,
-            context
-        );
+        return Classify(LegalDataToolStatuses.Executed, context);
+    }
+
+    private static LegalDataEvidenceContext Classify(
+        string dataToolStatus,
+        FinancialAnalysisContext? context)
+    {
+        return LegalDataEvidenceClassifier.Classify(dataToolStatus, context);
+    }
+
+    private static void AssertSanitizedAmbiguousEvidence(
+        LegalCnvQueryPlan result,
+        FinancialAnalysisExecutionStatus? expectedFinancialAnalysisStatus,
+        params LegalDataStageFailureAudit[] expectedFailedStages)
+    {
+        result.FallbackReason.Should().Be(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.DataEvidence.CanUseSignals.Should().BeFalse();
+        result.DataEvidence.FallbackReason.Should().Be(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.DataEvidence.DataToolStatus.Should().Be(LegalDataToolStatuses.Unknown);
+        result.DataEvidence.FinancialAnalysisStatus.Should().Be(expectedFinancialAnalysisStatus);
+        result.DataEvidence.FailedStages.Should().Equal(expectedFailedStages);
     }
 
     private static void AssertGenericFallback(LegalCnvQueryPlan result)
