@@ -575,7 +575,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             executionMode == ToolCallingExecutionMode.PlanDriven
                 ? new ControlledToolExecutor(
                     dataAgent,
-                    cnvClient,
+                    legalAgent,
                     NullLogger<ControlledToolExecutor>.Instance
                 )
                 : new ThrowingControlledToolExecutor(),
@@ -1475,7 +1475,8 @@ public sealed class ProductionLikeWorkflowE2ETests
     {
         public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
             IReadOnlyList<ApprovedToolCall> calls,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PlannerToolExecutionContext? runtimeContext = null)
         {
             throw new InvalidOperationException("Shadow mode should not execute controlled tool calls.");
         }

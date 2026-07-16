@@ -9,7 +9,6 @@ using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Domain.AnalysisSessions;
-using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 using Orchestration.Tests.Agents;
 
@@ -771,7 +770,7 @@ public class PlannerAgentTests
     public async Task RunAsync_Should_map_plan_driven_tool_outputs_with_real_mapper()
     {
         var mappedDataResult = CreateDataResult(hasAnomaly: true);
-        var mappedLegalOutput = CreateCitedLegalSearchResponse();
+        var mappedLegalOutput = CreateLegalResult(hasComplianceRisk: true);
         var dataAgent = new FakeDataAgent(CreateDataResult(hasAnomaly: false));
         var legalAgent = new FakeLegalAgent(CreateLegalResult(hasComplianceRisk: false));
         var executor = new MappingControlledToolExecutor(mappedDataResult, mappedLegalOutput);
@@ -800,7 +799,7 @@ public class PlannerAgentTests
         legalAgent.WasCalled.Should().BeFalse();
         result.DataResult.Should().BeEquivalentTo(mappedDataResult);
         result.LegalResult.HasComplianceRisk.Should().BeTrue();
-        result.LegalResult.Engine.Should().Be("Semantic Kernel + MCP CNV Regulation Server");
+        result.LegalResult.Engine.Should().Be(mappedLegalOutput.Engine);
         result.LegalResult.Evidence.Should().ContainSingle();
         result.ToolPlan.ExecutedCalls
             .Should()
@@ -951,44 +950,6 @@ public class PlannerAgentTests
         );
     }
 
-    private static CnvRegulationSearchResponse CreateCitedLegalSearchResponse()
-    {
-        return new CnvRegulationSearchResponse(
-            Query: "agentes",
-            Results:
-            [
-                new CnvRegulationSearchResult(
-                    DocumentId: "cnv-plan-driven-result",
-                    ChunkId: "chunk-1",
-                    Title: "Plan-driven CNV cited result",
-                    Chapter: null,
-                    Section: "Agentes",
-                    Article: "Articulo 1",
-                    Source: "CNV test fixture",
-                    Url: "https://example.test/cnv",
-                    Snippet: "Cited plan-driven evidence.",
-                    Score: 0.9,
-                    Citations:
-                    [
-                        new CnvRegulationCitation(
-                            Source: "CNV test fixture",
-                            DocumentType: "test_fixture",
-                            ResolutionNumber: "PD",
-                            Title: "Plan-driven CNV cited result",
-                            Chapter: null,
-                            Section: "Agentes",
-                            Article: "Articulo 1",
-                            PublicationDate: null,
-                            Url: "https://example.test/cnv",
-                            QuotedText: "Cited plan-driven evidence."
-                        )
-                    ]
-                )
-            ],
-            Warnings: []
-        );
-    }
-
     private static ToolCallingOptions CreatePlanDrivenOptions()
     {
         return new ToolCallingOptions
@@ -1097,7 +1058,8 @@ public class PlannerAgentTests
 
         public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
             IReadOnlyList<ApprovedToolCall> calls,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PlannerToolExecutionContext? runtimeContext = null)
         {
             WasCalled = true;
             ReceivedCalls = calls;
@@ -1146,13 +1108,13 @@ public class PlannerAgentTests
     {
         private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
         private readonly DataAgentResult _dataResult;
-        private readonly CnvRegulationSearchResponse _legalOutput;
+        private readonly LegalAgentResult _legalOutput;
 
         public bool WasCalled { get; private set; }
 
         public MappingControlledToolExecutor(
             DataAgentResult dataResult,
-            CnvRegulationSearchResponse legalOutput)
+            LegalAgentResult legalOutput)
         {
             _dataResult = dataResult;
             _legalOutput = legalOutput;
@@ -1160,7 +1122,8 @@ public class PlannerAgentTests
 
         public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
             IReadOnlyList<ApprovedToolCall> calls,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PlannerToolExecutionContext? runtimeContext = null)
         {
             WasCalled = true;
 

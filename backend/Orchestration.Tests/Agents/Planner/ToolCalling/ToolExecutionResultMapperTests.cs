@@ -3,8 +3,9 @@ using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Planner.ToolCalling;
-using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
@@ -46,109 +47,85 @@ public class ToolExecutionResultMapperTests
     }
 
     [Fact]
-    public void TryMapLegalResult_Should_map_cited_results_to_legal_evidence()
+    public void TryMapLegalResult_Should_round_trip_full_aggregate_result()
     {
         var mapper = new ToolExecutionResultMapper();
-        var response = new CnvRegulationSearchResponse(
-            Query: "agentes",
-            Results:
-            [
-                new CnvRegulationSearchResult(
-                    DocumentId: "doc-1",
-                    ChunkId: "chunk-1",
-                    Title: "Normas CNV",
-                    Chapter: null,
-                    Section: "Agentes",
-                    Article: null,
-                    Source: "CNV",
-                    Url: "https://example.test/cnv",
-                    Snippet: "Snippet text.",
-                    Score: 0.9,
-                    Citations:
-                    [
-                        new CnvRegulationCitation(
-                            Source: "CNV",
-                            DocumentType: "Resolucion",
-                            ResolutionNumber: "123",
-                            Title: "Normas CNV",
-                            Chapter: null,
-                            Section: "Agentes",
-                            Article: "Articulo 1",
-                            PublicationDate: null,
-                            Url: "https://example.test/cnv",
-                            QuotedText: "Texto citado."
-                        )
-                    ]
-                )
-            ],
-            Warnings: ["Candidate source."]
-        );
+        var legalResult = CreateLegalResult();
 
         var result = mapper.TryMapLegalResult(
             [
                 CreateExecutionResult(
                     "legal.search_cnv_regulation",
-                    JsonSerializer.Serialize(response, JsonOptions)
+                    JsonSerializer.Serialize(legalResult, JsonOptions)
                 )
             ]
         );
 
         result.Should().NotBeNull();
         result!.HasComplianceRisk.Should().BeTrue();
-        result.RiskLevel.Should().Be("Medium");
-        result.Engine.Should().Be("Semantic Kernel + MCP CNV Regulation Server");
-        result.Evidence.Should().ContainSingle().Which.Should().Be(
-            new LegalEvidence(
-                Regulation: "Normas CNV",
-                Section: "Articulo 1",
-                Finding: "Texto citado.",
-                Source: "CNV | Resolucion | 123 | https://example.test/cnv"
-            )
-        );
-        result.Warnings.Should().Contain("Candidate source.");
-        result.Warnings.Should().Contain(
-            "Recuperación regulatoria automatizada únicamente. Se requiere revisión legal humana antes de tomar decisiones operativas."
-        );
+        result.RiskLevel.Should().Be("High");
+        result.Summary.Should().Be("Full aggregate legal review.");
+        result.Engine.Should().Be("Aggregate LegalAgent");
+        result.Evidence.Should().BeEquivalentTo(legalResult.Evidence);
+        result.Warnings.Should().Equal(legalResult.Warnings);
+        result.RequiresHumanReview.Should().BeTrue();
+        result.LegalReview.Should().BeEquivalentTo(legalResult.LegalReview);
+        var queryStrategy = result.QueryStrategy.Should()
+            .BeOfType<JsonElement>().Subject;
+        queryStrategy.GetProperty("strategyVersion").GetString().Should()
+            .Be("mapper_strategy_v1");
+        queryStrategy.GetProperty("queries")[0]
+            .GetProperty("citedEvidenceCount").GetInt32().Should().Be(2);
     }
 
-    [Fact]
-    public void TryMapLegalResult_Should_ignore_uncited_results()
+    [Theory]
+    [InlineData("{ invalid-json")]
+    [InlineData("null")]
+    public void TryMapLegalResult_Should_return_null_for_malformed_or_null_json(
+        string outputJson)
     {
         var mapper = new ToolExecutionResultMapper();
-        var response = new CnvRegulationSearchResponse(
-            Query: "agentes",
-            Results:
-            [
-                new CnvRegulationSearchResult(
-                    DocumentId: "doc-1",
-                    ChunkId: "chunk-1",
-                    Title: "Normas CNV",
-                    Chapter: null,
-                    Section: "Agentes",
-                    Article: null,
-                    Source: "CNV",
-                    Url: "https://example.test/cnv",
-                    Snippet: "Snippet text.",
-                    Score: 0.9,
-                    Citations: []
-                )
-            ],
-            Warnings: []
-        );
 
         var result = mapper.TryMapLegalResult(
             [
                 CreateExecutionResult(
                     "legal.search_cnv_regulation",
-                    JsonSerializer.Serialize(response, JsonOptions)
+                    outputJson
                 )
             ]
         );
 
-        result.Should().NotBeNull();
-        result!.HasComplianceRisk.Should().BeFalse();
-        result.RiskLevel.Should().Be("Low");
-        result.Evidence.Should().BeEmpty();
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_not_reconstruct_legacy_raw_cnv_response()
+    {
+        var mapper = new ToolExecutionResultMapper();
+        const string rawCnvResponse = """
+            {
+              "query": "legacy raw query",
+              "results": [
+                {
+                  "title": "Legacy citation",
+                  "snippet": "Legacy snippet",
+                  "citations": [
+                    {
+                      "source": "CNV",
+                      "title": "Legacy citation",
+                      "article": "Artículo 1"
+                    }
+                  ]
+                }
+              ],
+              "warnings": []
+            }
+            """;
+
+        var result = mapper.TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", rawCnvResponse)]);
+
+        result.Should().BeNull();
     }
 
     [Fact]
@@ -611,6 +588,50 @@ public class ToolExecutionResultMapperTests
             : $",\"failureCode\":\"{failureCode}\"";
 
         return $$"""{"operation":"{{operation}}","status":"{{status}}","durationMilliseconds":{{durationMilliseconds}}{{failureCodeProperty}}}""";
+    }
+
+    private static LegalAgentResult CreateLegalResult()
+    {
+        var evidenceReference = new LegalEvidenceReference(
+            "CNV", "Mapper citation", "https://example.test/cnv",
+            "Artículo 1", "Texto citado.", "Emisoras", 0.9);
+        var queryStrategy = new LegalQueryStrategyAudit(
+            "mapper_strategy_v1",
+            LegalCnvQuerySources.Contextual,
+            null,
+            LegalDataToolStatuses.Executed,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            [],
+            [
+                new LegalCnvQueryAudit(
+                    1, 1, "mapper query", "Emisoras", "Mapper reason.",
+                    ["signal"], LegalCnvQueryExecutionStatuses.Succeeded, 2, 2)
+            ]
+        );
+        var legalReview = new LegalAnalysisReviewResult(
+            "Mapper AI review.",
+            [],
+            [evidenceReference],
+            ["AI warning"],
+            ["AI limitation"],
+            true,
+            false,
+            "provider",
+            "model",
+            null
+        );
+
+        return new LegalAgentResult(
+            true,
+            "High",
+            "Full aggregate legal review.",
+            "Aggregate LegalAgent",
+            [new LegalEvidence("Mapper citation", "Artículo 1", "Texto citado.", "CNV")],
+            ["Aggregate warning"],
+            queryStrategy,
+            legalReview,
+            true
+        );
     }
 
     private static ToolExecutionResult CreateExecutionResult(
