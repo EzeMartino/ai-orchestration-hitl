@@ -8,6 +8,13 @@ public static class LegalDataEvidenceClassifier
         string dataToolStatus,
         FinancialAnalysisContext? financialAnalysis)
     {
+        var safeDataToolStatus = dataToolStatus switch
+        {
+            LegalDataToolStatuses.Executed => LegalDataToolStatuses.Executed,
+            LegalDataToolStatuses.Failed => LegalDataToolStatuses.Failed,
+            LegalDataToolStatuses.Absent => LegalDataToolStatuses.Absent,
+            _ => LegalDataToolStatuses.Unknown
+        };
         var financialAnalysisStatus = financialAnalysis?.Execution.OverallStatus;
         var failedStages = MapAllowlistedFailures(financialAnalysis);
 
@@ -16,14 +23,14 @@ public static class LegalDataEvidenceClassifier
             return new LegalDataEvidenceContext(
                 CanUseSignals: false,
                 FallbackReason: reason,
-                DataToolStatus: dataToolStatus,
+                DataToolStatus: safeDataToolStatus,
                 FinancialAnalysisStatus: financialAnalysisStatus,
                 FailedStages: failedStages
             );
         }
 
         if (string.Equals(
-                dataToolStatus,
+                safeDataToolStatus,
                 LegalDataToolStatuses.Failed,
                 StringComparison.Ordinal))
         {
@@ -31,11 +38,16 @@ public static class LegalDataEvidenceClassifier
         }
 
         if (string.Equals(
-                dataToolStatus,
+                safeDataToolStatus,
                 LegalDataToolStatuses.Absent,
                 StringComparison.Ordinal))
         {
             return Fallback(LegalCnvFallbackReasons.DataStageAbsent);
+        }
+
+        if (safeDataToolStatus != LegalDataToolStatuses.Executed)
+        {
+            return Fallback(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
         }
 
         if (financialAnalysis is null)
@@ -43,8 +55,9 @@ public static class LegalDataEvidenceClassifier
             return Fallback(LegalCnvFallbackReasons.FinancialAnalysisMissing);
         }
 
-        if (financialAnalysis.Execution.OverallStatus ==
-            FinancialAnalysisExecutionStatus.LegacyUnknown)
+        if (financialAnalysis.Execution.OverallStatus is
+            FinancialAnalysisExecutionStatus.LegacyUnknown or
+            FinancialAnalysisExecutionStatus.Failed)
         {
             return Fallback(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
         }
@@ -75,7 +88,7 @@ public static class LegalDataEvidenceClassifier
         return new LegalDataEvidenceContext(
             CanUseSignals: true,
             FallbackReason: null,
-            DataToolStatus: dataToolStatus,
+            DataToolStatus: safeDataToolStatus,
             FinancialAnalysisStatus: financialAnalysisStatus,
             FailedStages: failedStages
         );
@@ -89,16 +102,36 @@ public static class LegalDataEvidenceClassifier
             return [];
         }
 
-        return financialAnalysis.Execution.Stages
-            .Where(stage =>
-                stage.Status == FinancialAnalysisExecutionStatus.Failed &&
-                FinancialAnalysisOperations.All.Contains(
-                    stage.Operation,
-                    StringComparer.Ordinal))
-            .Select(stage => new LegalDataStageFailureAudit(
-                stage.Operation,
-                SanitizeFailureCode(stage.FailureCode)))
+        var failedStages = financialAnalysis.Execution.Stages
+            .Where(stage => stage.Status == FinancialAnalysisExecutionStatus.Failed)
             .ToArray();
+        var audits = new List<LegalDataStageFailureAudit>();
+
+        foreach (var operation in FinancialAnalysisOperations.All)
+        {
+            var failureCodes = failedStages
+                .Where(stage => string.Equals(
+                    stage.Operation,
+                    operation,
+                    StringComparison.Ordinal))
+                .Select(stage => SanitizeFailureCode(stage.FailureCode))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+
+            if (failureCodes.Length == 0)
+            {
+                continue;
+            }
+
+            audits.Add(new LegalDataStageFailureAudit(
+                operation,
+                failureCodes.Length == 1
+                    ? failureCodes[0]
+                    : FinancialAnalysisFailureCodes.UnexpectedFailure
+            ));
+        }
+
+        return audits.ToArray();
     }
 
     private static string SanitizeFailureCode(string? failureCode)

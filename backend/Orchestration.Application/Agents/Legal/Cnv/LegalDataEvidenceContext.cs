@@ -7,6 +7,7 @@ public static class LegalDataToolStatuses
     public const string Executed = "executed";
     public const string Failed = "failed";
     public const string Absent = "absent";
+    public const string Unknown = "unknown";
 }
 
 public static class LegalCnvFallbackReasons

@@ -39,6 +39,35 @@ public sealed class LegalDataEvidenceClassifierTests
         result.DataToolStatus.Should().Be(LegalDataToolStatuses.Absent);
     }
 
+    public static TheoryData<string?> UntrustedDataToolStatuses =>
+        new()
+        {
+            { null },
+            { string.Empty },
+            { "   " },
+            { "sensitive arbitrary status" }
+        };
+
+    [Theory]
+    [MemberData(nameof(UntrustedDataToolStatuses))]
+    public void Classify_UntrustedDataToolStatus_FailsClosedWithoutLeakingInput(
+        string? dataToolStatus)
+    {
+        var result = LegalDataEvidenceClassifier.Classify(
+            dataToolStatus!,
+            CreateFinancialAnalysis()
+        );
+
+        result.CanUseSignals.Should().BeFalse();
+        result.FallbackReason.Should().Be(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.DataToolStatus.Should().Be("unknown");
+
+        if (!string.IsNullOrWhiteSpace(dataToolStatus))
+        {
+            result.ToString().Should().NotContain(dataToolStatus);
+        }
+    }
+
     [Fact]
     public void Classify_FinancialAnalysisMissing_ReturnsMissingFallback()
     {
@@ -64,6 +93,35 @@ public sealed class LegalDataEvidenceClassifierTests
         result.CanUseSignals.Should().BeFalse();
         result.FallbackReason.Should().Be(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
         result.FinancialAnalysisStatus.Should().Be(FinancialAnalysisExecutionStatus.LegacyUnknown);
+    }
+
+    [Fact]
+    public void Classify_FailedOverallStatusWithSuccessfulSignals_ReturnsAmbiguousFallback()
+    {
+        var result = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            CreateFinancialAnalysis(
+                FinancialAnalysisExecutionStatus.Failed,
+                [
+                    Stage(
+                        FinancialAnalysisOperations.Ratios,
+                        FinancialAnalysisExecutionStatus.Failed,
+                        FinancialAnalysisFailureCodes.PythonInvocationFailed),
+                    Stage(
+                        FinancialAnalysisOperations.Signals,
+                        FinancialAnalysisExecutionStatus.Succeeded)
+                ]
+            )
+        );
+
+        result.CanUseSignals.Should().BeFalse();
+        result.FallbackReason.Should().Be(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
+        result.FinancialAnalysisStatus.Should().Be(FinancialAnalysisExecutionStatus.Failed);
+        result.FailedStages.Should().Equal(
+            new LegalDataStageFailureAudit(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed)
+        );
     }
 
     public static TheoryData<IReadOnlyList<FinancialAnalysisStageExecution>> AmbiguousSignalStages =>
@@ -99,7 +157,7 @@ public sealed class LegalDataEvidenceClassifierTests
         var result = LegalDataEvidenceClassifier.Classify(
             LegalDataToolStatuses.Executed,
             CreateFinancialAnalysis(
-                FinancialAnalysisExecutionStatus.Failed,
+                FinancialAnalysisExecutionStatus.Degraded,
                 [Stage(
                     FinancialAnalysisOperations.Signals,
                     FinancialAnalysisExecutionStatus.Failed,
@@ -183,6 +241,70 @@ public sealed class LegalDataEvidenceClassifierTests
         result.FailedStages.Should().NotContain(stage =>
             stage.Operation.Contains("sensitive", StringComparison.Ordinal) ||
             stage.FailureCode.Contains("sensitive", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Classify_FailedStageAudit_IsCanonicalDeduplicatedAndOrderIndependent()
+    {
+        FinancialAnalysisStageExecution[] stages =
+        [
+            Stage(
+                FinancialAnalysisOperations.Summary,
+                FinancialAnalysisExecutionStatus.Failed,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed),
+            Stage(
+                FinancialAnalysisOperations.Comparisons,
+                FinancialAnalysisExecutionStatus.Failed,
+                FinancialAnalysisFailureCodes.PythonResponseInvalid),
+            Stage(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisExecutionStatus.Failed,
+                "unknown failure"),
+            Stage(
+                FinancialAnalysisOperations.Comparisons,
+                FinancialAnalysisExecutionStatus.Failed,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed),
+            Stage(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisExecutionStatus.Failed,
+                failureCode: null),
+            Stage(
+                FinancialAnalysisOperations.Summary,
+                FinancialAnalysisExecutionStatus.Failed,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed),
+            Stage(
+                "sensitive arbitrary operation",
+                FinancialAnalysisExecutionStatus.Failed,
+                "sensitive arbitrary failure"),
+            Stage(
+                FinancialAnalysisOperations.Signals,
+                FinancialAnalysisExecutionStatus.Succeeded)
+        ];
+
+        var forward = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            CreateFinancialAnalysis(FinancialAnalysisExecutionStatus.Degraded, stages)
+        );
+        var reversed = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            CreateFinancialAnalysis(
+                FinancialAnalysisExecutionStatus.Degraded,
+                stages.Reverse().ToArray())
+        );
+
+        forward.FailedStages.Should().Equal(
+            new LegalDataStageFailureAudit(
+                FinancialAnalysisOperations.Ratios,
+                FinancialAnalysisFailureCodes.UnexpectedFailure),
+            new LegalDataStageFailureAudit(
+                FinancialAnalysisOperations.Comparisons,
+                FinancialAnalysisFailureCodes.UnexpectedFailure),
+            new LegalDataStageFailureAudit(
+                FinancialAnalysisOperations.Summary,
+                FinancialAnalysisFailureCodes.PythonInvocationFailed)
+        );
+        reversed.FailedStages.Should().Equal(forward.FailedStages);
+        forward.FailedStages.Should().OnlyHaveUniqueItems(stage => stage.Operation);
     }
 
     private static FinancialAnalysisContext CreateFinancialAnalysis(
