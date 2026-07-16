@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
@@ -71,11 +72,45 @@ public class ToolExecutionResultMapperTests
         result.RequiresHumanReview.Should().BeTrue();
         result.LegalReview.Should().BeEquivalentTo(legalResult.LegalReview);
         var queryStrategy = result.QueryStrategy.Should()
-            .BeOfType<JsonElement>().Subject;
-        queryStrategy.GetProperty("strategyVersion").GetString().Should()
-            .Be("mapper_strategy_v1");
-        queryStrategy.GetProperty("queries")[0]
-            .GetProperty("citedEvidenceCount").GetInt32().Should().Be(2);
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        queryStrategy.StrategyVersion.Should().Be("mapper_strategy_v1");
+        queryStrategy.Queries.Should().HaveCount(2);
+        queryStrategy.Queries[0].CitedEvidenceCount.Should().Be(2);
+        queryStrategy.Queries[1].ExecutionStatus.Should().Be(
+            LegalCnvQueryExecutionStatuses.Failed);
+
+        result.Evidence.Should().BeAssignableTo<IList<LegalEvidence>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.Warnings.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.FailedStages.Should()
+            .BeAssignableTo<IList<LegalDataStageFailureAudit>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.Queries.Should().BeAssignableTo<IList<LegalCnvQueryAudit>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.Queries[0].RelatedFinancialSignals.Should()
+            .BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should()
+            .BeAssignableTo<IList<PossibleRegulatoryReviewArea>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.EvidenceReferences.Should()
+            .BeAssignableTo<IList<LegalEvidenceReference>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.Warnings.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.Limitations.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.PossibleRegulatoryReviewAreas[0]
+            .RelatedFinancialSignals.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.PossibleRegulatoryReviewAreas[0]
+            .EvidenceCitations.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+
+        Action mutate = () => ((IList<string>)queryStrategy.Queries[0]
+            .RelatedFinancialSignals).Add("mutated");
+        mutate.Should().Throw<NotSupportedException>();
     }
 
     [Theory]
@@ -126,6 +161,37 @@ public class ToolExecutionResultMapperTests
             [CreateExecutionResult("legal.search_cnv_regulation", rawCnvResponse)]);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_allow_null_optional_aggregate_sections()
+    {
+        var aggregate = CreateLegalResult() with
+        {
+            QueryStrategy = null,
+            LegalReview = null
+        };
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                JsonSerializer.Serialize(aggregate, JsonOptions))]);
+
+        result.Should().NotBeNull();
+        result!.QueryStrategy.Should().BeNull();
+        result.LegalReview.Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidLegalAggregateJsonCases))]
+    public void TryMapLegalResult_Should_reject_semantically_invalid_aggregate(
+        string caseName,
+        string outputJson)
+    {
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().BeNull(caseName);
     }
 
     [Fact]
@@ -590,6 +656,57 @@ public class ToolExecutionResultMapperTests
         return $$"""{"operation":"{{operation}}","status":"{{status}}","durationMilliseconds":{{durationMilliseconds}}{{failureCodeProperty}}}""";
     }
 
+    public static IEnumerable<object[]> InvalidLegalAggregateJsonCases()
+    {
+        yield return InvalidCase("risk level", root => root["riskLevel"] = "Critical");
+        yield return InvalidCase("blank summary", root => root["summary"] = " ");
+        yield return InvalidCase("null evidence item", root =>
+            root["evidence"] = JsonNode.Parse("[null]"));
+        yield return InvalidCase("null warning item", root =>
+            root["warnings"] = JsonNode.Parse("[null]"));
+        yield return InvalidCase("null audit query", root =>
+            root["queryStrategy"]!["queries"]![0] = null);
+        yield return InvalidCase("bad query status", root =>
+            root["queryStrategy"]!["queries"]![0]!["executionStatus"] = "partial");
+        yield return InvalidCase("negative query count", root =>
+            root["queryStrategy"]!["queries"]![0]!["resultCount"] = -1);
+        yield return InvalidCase("failed query nonzero counts", root =>
+            root["queryStrategy"]!["queries"]![1]!["citedEvidenceCount"] = 1);
+        yield return InvalidCase("bad query index", root =>
+            root["queryStrategy"]!["queries"]![0]!["index"] = 2);
+        yield return InvalidCase("bad query total", root =>
+            root["queryStrategy"]!["queries"]![0]!["total"] = 3);
+        yield return InvalidCase("null related signal", root =>
+            root["queryStrategy"]!["queries"]![0]!["relatedFinancialSignals"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidCase("contextual fallback reason", root =>
+            root["queryStrategy"]!["fallbackReason"] =
+                LegalCnvFallbackReasons.NoSpecificSignals);
+        yield return InvalidCase("unknown data status", root =>
+            root["queryStrategy"]!["dataToolStatus"] = "tampered");
+        yield return InvalidCase("unknown failed stage operation", root =>
+            root["queryStrategy"]!["failedStages"] = JsonNode.Parse(
+                "[{\"operation\":\"tampered\",\"failureCode\":\"PYTHON_RESPONSE_INVALID\"}]"));
+        yield return InvalidCase("null legal review warnings", root =>
+            root["legalReview"]!["warnings"] = null);
+        yield return InvalidCase("null legal review area", root =>
+            root["legalReview"]!["possibleRegulatoryReviewAreas"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidCase("null legal evidence reference", root =>
+            root["legalReview"]!["evidenceReferences"] = JsonNode.Parse("[null]"));
+    }
+
+    private static object[] InvalidCase(
+        string caseName,
+        Action<JsonObject> mutate)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        mutate(root);
+        return [caseName, root.ToJsonString(JsonOptions)];
+    }
+
     private static LegalAgentResult CreateLegalResult()
     {
         var evidenceReference = new LegalEvidenceReference(
@@ -604,13 +721,23 @@ public class ToolExecutionResultMapperTests
             [],
             [
                 new LegalCnvQueryAudit(
-                    1, 1, "mapper query", "Emisoras", "Mapper reason.",
-                    ["signal"], LegalCnvQueryExecutionStatuses.Succeeded, 2, 2)
+                    1, 2, "mapper query", "Emisoras", "Mapper reason.",
+                    ["signal"], LegalCnvQueryExecutionStatuses.Succeeded, 2, 2),
+                new LegalCnvQueryAudit(
+                    2, 2, "fallback query", null, "Fallback reason.",
+                    [], LegalCnvQueryExecutionStatuses.Failed, 0, 0)
             ]
         );
         var legalReview = new LegalAnalysisReviewResult(
             "Mapper AI review.",
-            [],
+            [
+                new PossibleRegulatoryReviewArea(
+                    "Disclosure review",
+                    "Review disclosure obligations.",
+                    "Medium",
+                    ["signal"],
+                    ["Artículo 1"])
+            ],
             [evidenceReference],
             ["AI warning"],
             ["AI limitation"],

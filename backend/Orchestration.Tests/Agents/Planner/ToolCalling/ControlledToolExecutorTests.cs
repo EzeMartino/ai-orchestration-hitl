@@ -240,6 +240,52 @@ public class ControlledToolExecutorTests
         legalAgent.CallCount.Should().Be(0);
     }
 
+    [Theory]
+    [InlineData(InvalidTrustedContextPart.Report)]
+    [InlineData(InvalidTrustedContextPart.DataResult)]
+    [InlineData(InvalidTrustedContextPart.DataEvidence)]
+    [InlineData(InvalidTrustedContextPart.FailedStages)]
+    [InlineData(InvalidTrustedContextPart.FailedStageItem)]
+    public async Task ExecuteAsync_LegalWithStructurallyInvalidRuntimeContext_FailsSafely(
+        InvalidTrustedContextPart invalidPart)
+    {
+        var runtimeContext = CreateInvalidRuntimeContext(invalidPart);
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            runtimeContext);
+
+        var result = results.Should().ContainSingle().Subject;
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Trusted planner runtime context is required.");
+        result.OutputJson.Should().Be("{}");
+        legalAgent.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LegalAllowsDataResultWithoutFinancialAnalysis()
+    {
+        var context = CreateRuntimeContext() with
+        {
+            DataResult = CreateDataResult(financialAnalysis: null)
+        };
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            context);
+
+        results.Should().ContainSingle().Which.Succeeded.Should().BeTrue();
+        legalAgent.CallCount.Should().Be(1);
+        legalAgent.ReceivedReport!.FinancialAnalysis.Should().BeNull();
+    }
+
     [Fact]
     public async Task ExecuteAsync_Should_reject_unknown_tool_defensively()
     {
@@ -327,16 +373,14 @@ public class ControlledToolExecutorTests
         mapped.LegalReview.Should().BeEquivalentTo(legalResult.LegalReview);
 
         var queryStrategy = mapped.QueryStrategy.Should()
-            .BeOfType<JsonElement>().Subject;
-        queryStrategy.GetProperty("strategyVersion").GetString().Should()
-            .Be("aggregate_strategy_v1");
-        var queryAudits = queryStrategy.GetProperty("queries");
-        queryAudits.GetArrayLength().Should().Be(2);
-        queryAudits[0].GetProperty("executionStatus").GetString().Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        queryStrategy.StrategyVersion.Should().Be("aggregate_strategy_v1");
+        queryStrategy.Queries.Should().HaveCount(2);
+        queryStrategy.Queries[0].ExecutionStatus.Should()
             .Be(LegalCnvQueryExecutionStatuses.Succeeded);
-        queryAudits[1].GetProperty("executionStatus").GetString().Should()
+        queryStrategy.Queries[1].ExecutionStatus.Should()
             .Be(LegalCnvQueryExecutionStatuses.Failed);
-        queryAudits[1].GetProperty("resultCount").GetInt32().Should().Be(0);
+        queryStrategy.Queries[1].ResultCount.Should().Be(0);
     }
 
     [Fact]
@@ -379,6 +423,22 @@ public class ControlledToolExecutorTests
             call.Arguments["reportName"]);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_DataIgnoresStructurallyInvalidRuntimeContext()
+    {
+        var dataAgent = new FakeDataAgent();
+        var executor = CreateExecutor(dataAgent: dataAgent);
+        var invalidContext = CreateRuntimeContext() with { Report = null! };
+
+        var results = await executor.ExecuteAsync(
+            [CreateValidDataCall()],
+            CancellationToken.None,
+            invalidContext);
+
+        results.Should().ContainSingle().Which.Succeeded.Should().BeTrue();
+        dataAgent.WasCalled.Should().BeTrue();
+    }
+
     private static ControlledToolExecutor CreateExecutor(
         FakeDataAgent? dataAgent = null,
         FakeLegalAgent? legalAgent = null)
@@ -412,7 +472,7 @@ public class ControlledToolExecutorTests
     }
 
     private static DataAgentResult CreateDataResult(
-        FinancialAnalysisContext financialAnalysis)
+        FinancialAnalysisContext? financialAnalysis)
     {
         return new DataAgentResult(
             true,
@@ -422,6 +482,39 @@ public class ControlledToolExecutorTests
             [],
             financialAnalysis
         );
+    }
+
+    private static PlannerToolExecutionContext CreateInvalidRuntimeContext(
+        InvalidTrustedContextPart invalidPart)
+    {
+        var context = CreateRuntimeContext();
+        return invalidPart switch
+        {
+            InvalidTrustedContextPart.Report => context with { Report = null! },
+            InvalidTrustedContextPart.DataResult => context with { DataResult = null! },
+            InvalidTrustedContextPart.DataEvidence => context with { DataEvidence = null! },
+            InvalidTrustedContextPart.FailedStages => context with
+            {
+                DataEvidence = context.DataEvidence with { FailedStages = null! }
+            },
+            InvalidTrustedContextPart.FailedStageItem => context with
+            {
+                DataEvidence = context.DataEvidence with
+                {
+                    FailedStages = [null!]
+                }
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(invalidPart))
+        };
+    }
+
+    public enum InvalidTrustedContextPart
+    {
+        Report,
+        DataResult,
+        DataEvidence,
+        FailedStages,
+        FailedStageItem
     }
 
     private static FinancialAnalysisContext CreateFinancialAnalysis(

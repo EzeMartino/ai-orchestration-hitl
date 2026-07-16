@@ -124,20 +124,21 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         CancellationToken cancellationToken,
         PlannerToolExecutionContext? runtimeContext)
     {
-        if (runtimeContext is null)
+        if (!IsTrustedRuntimeContextValid(runtimeContext))
         {
             return Failed(
                 call.ToolName,
                 "Trusted planner runtime context is required.");
         }
 
-        var legalReport = runtimeContext.Report with
+        var trustedContext = runtimeContext!;
+        var legalReport = trustedContext.Report with
         {
-            FinancialAnalysis = runtimeContext.DataResult.FinancialAnalysis
+            FinancialAnalysis = trustedContext.DataResult.FinancialAnalysis
         };
         var legalReviewContext = new LegalReviewContext(
             FinancialAnalysisResolutionMode.ProvidedOnly,
-            runtimeContext.DataEvidence
+            trustedContext.DataEvidence
         );
         var result = await _legalAgent.ReviewAsync(
             legalReport,
@@ -151,6 +152,18 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
             result.Engine,
             result
         );
+    }
+
+    private static bool IsTrustedRuntimeContextValid(
+        PlannerToolExecutionContext? runtimeContext)
+    {
+        return runtimeContext is
+            {
+                Report: not null,
+                DataResult: not null,
+                DataEvidence.FailedStages: not null
+            } &&
+            runtimeContext.DataEvidence.FailedStages.All(stage => stage is not null);
     }
 
     private static ToolExecutionResult Succeeded(
