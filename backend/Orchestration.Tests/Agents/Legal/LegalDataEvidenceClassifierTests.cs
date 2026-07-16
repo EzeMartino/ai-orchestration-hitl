@@ -154,15 +154,23 @@ public sealed class LegalDataEvidenceClassifierTests
     [Fact]
     public void Classify_FailedSignalsStage_ReturnsSignalsFailureFallback()
     {
-        var result = LegalDataEvidenceClassifier.Classify(
-            LegalDataToolStatuses.Executed,
-            CreateFinancialAnalysis(
-                FinancialAnalysisExecutionStatus.Degraded,
-                [Stage(
+        var financialAnalysis = CreateFinancialAnalysis() with
+        {
+            Execution = FinancialAnalysisExecution.FromStages(
+            [
+                Stage(
                     FinancialAnalysisOperations.Signals,
                     FinancialAnalysisExecutionStatus.Failed,
-                    FinancialAnalysisFailureCodes.PythonInvocationFailed)]
-            )
+                    FinancialAnalysisFailureCodes.PythonInvocationFailed)
+            ])
+        };
+
+        financialAnalysis.Execution.OverallStatus.Should().Be(
+            FinancialAnalysisExecutionStatus.Failed);
+
+        var result = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            financialAnalysis
         );
 
         result.CanUseSignals.Should().BeFalse();

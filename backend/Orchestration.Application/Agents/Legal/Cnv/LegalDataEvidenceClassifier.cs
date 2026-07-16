@@ -55,9 +55,8 @@ public static class LegalDataEvidenceClassifier
             return Fallback(LegalCnvFallbackReasons.FinancialAnalysisMissing);
         }
 
-        if (financialAnalysis.Execution.OverallStatus is
-            FinancialAnalysisExecutionStatus.LegacyUnknown or
-            FinancialAnalysisExecutionStatus.Failed)
+        if (financialAnalysis.Execution.OverallStatus ==
+            FinancialAnalysisExecutionStatus.LegacyUnknown)
         {
             return Fallback(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
         }
@@ -78,6 +77,12 @@ public static class LegalDataEvidenceClassifier
         if (signalStages[0].Status != FinancialAnalysisExecutionStatus.Succeeded)
         {
             return Fallback(LegalCnvFallbackReasons.SignalsStageFailed);
+        }
+
+        if (financialAnalysis.Execution.OverallStatus ==
+            FinancialAnalysisExecutionStatus.Failed)
+        {
+            return Fallback(LegalCnvFallbackReasons.LegacyOrAmbiguousExecution);
         }
 
         if (financialAnalysis.RiskSignals.Count == 0)
