@@ -26,7 +26,35 @@ public sealed record LegalCnvQueryPlan
         {
             FailedStages = Array.AsReadOnly(DataEvidence.FailedStages.ToArray())
         };
-        this.Queries = Array.AsReadOnly(Queries.ToArray());
+
+        var querySnapshots = new LegalCnvQuery[Queries.Count];
+        for (var index = 0; index < Queries.Count; index++)
+        {
+            var query = Queries[index];
+            if (query is null)
+            {
+                throw new ArgumentException(
+                    $"Queries cannot contain a null query (index {index}).",
+                    nameof(Queries)
+                );
+            }
+
+            if (query.RelatedFinancialSignals is null)
+            {
+                throw new ArgumentException(
+                    $"Queries cannot contain a query with null RelatedFinancialSignals (index {index}).",
+                    nameof(Queries)
+                );
+            }
+
+            querySnapshots[index] = query with
+            {
+                RelatedFinancialSignals = Array.AsReadOnly(
+                    query.RelatedFinancialSignals.ToArray())
+            };
+        }
+
+        this.Queries = Array.AsReadOnly(querySnapshots);
     }
 
     public string StrategyVersion { get; }

@@ -448,6 +448,101 @@ public class FinancialAnalysisLegalCnvQueryStrategyTests
     }
 
     [Fact]
+    public void LegalCnvQueryPlan_ConstructorDeepSnapshotsRelatedSignalsAsReadOnly()
+    {
+        var mutableRelatedSignals = new List<string> { "liquidity_signal" };
+        var sourceQuery = new LegalCnvQuery(
+            "test query",
+            "test_area",
+            "Test reason.",
+            mutableRelatedSignals
+        );
+        var mutableQueries = new List<LegalCnvQuery> { sourceQuery };
+        var dataEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: LegalCnvFallbackReasons.DataToolFailed,
+            DataToolStatus: LegalDataToolStatuses.Failed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Failed,
+            FailedStages: []
+        );
+
+        var result = new LegalCnvQueryPlan(
+            "financial_analysis_v2",
+            LegalCnvQuerySources.Fallback,
+            LegalCnvFallbackReasons.DataToolFailed,
+            dataEvidence,
+            mutableQueries
+        );
+
+        mutableRelatedSignals.Add("leverage_signal");
+        mutableQueries.Clear();
+
+        var querySnapshot = result.Queries.Should().ContainSingle().Subject;
+        querySnapshot.Should().NotBeSameAs(sourceQuery);
+        querySnapshot.RelatedFinancialSignals.Should().Equal("liquidity_signal");
+
+        var relatedSignalsSnapshot = querySnapshot.RelatedFinancialSignals
+            .Should().BeAssignableTo<IList<string>>().Subject;
+        relatedSignalsSnapshot.IsReadOnly.Should().BeTrue();
+        Action addSignal = () => relatedSignalsSnapshot.Add("new_signal");
+        addSignal.Should().Throw<NotSupportedException>();
+    }
+
+    [Fact]
+    public void LegalCnvQueryPlan_ConstructorRejectsNullQueryElement()
+    {
+        var dataEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: LegalCnvFallbackReasons.DataToolFailed,
+            DataToolStatus: LegalDataToolStatuses.Failed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Failed,
+            FailedStages: []
+        );
+
+        Action act = () => new LegalCnvQueryPlan(
+            "financial_analysis_v2",
+            LegalCnvQuerySources.Fallback,
+            LegalCnvFallbackReasons.DataToolFailed,
+            dataEvidence,
+            [null!]
+        );
+
+        var exception = act.Should().Throw<ArgumentException>().Which;
+        exception.ParamName.Should().Be("Queries");
+        exception.Message.Should().Contain("null query");
+    }
+
+    [Fact]
+    public void LegalCnvQueryPlan_ConstructorRejectsNullRelatedSignals()
+    {
+        var dataEvidence = new LegalDataEvidenceContext(
+            CanUseSignals: false,
+            FallbackReason: LegalCnvFallbackReasons.DataToolFailed,
+            DataToolStatus: LegalDataToolStatuses.Failed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Failed,
+            FailedStages: []
+        );
+        var query = new LegalCnvQuery(
+            "test query",
+            "test_area",
+            "Test reason.",
+            RelatedFinancialSignals: null!
+        );
+
+        Action act = () => new LegalCnvQueryPlan(
+            "financial_analysis_v2",
+            LegalCnvQuerySources.Fallback,
+            LegalCnvFallbackReasons.DataToolFailed,
+            dataEvidence,
+            [query]
+        );
+
+        var exception = act.Should().Throw<ArgumentException>().Which;
+        exception.ParamName.Should().Be("Queries");
+        exception.Message.Should().Contain("null RelatedFinancialSignals");
+    }
+
+    [Fact]
     public void BuildQueries_LegacyAdapter_MatchesBuildPlanQueries()
     {
         var context = CreateContext(
