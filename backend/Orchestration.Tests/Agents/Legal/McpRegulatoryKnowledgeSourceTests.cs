@@ -211,6 +211,58 @@ public class McpRegulatoryKnowledgeSourceTests
         return (result, client, strategy);
     }
 
+    private static LegalCnvQueryPlan CreateAuditPlan(
+        bool fallback = false,
+        int queryCount = 2)
+    {
+        var financialAnalysis = fallback
+            ? null
+            : CreateFinancialAnalysis(
+                new FinancialRiskSignal(
+                    "audit_signal",
+                    "Medium",
+                    "Q1",
+                    "Audit signal.",
+                    Array.Empty<RiskEvidenceItem>())
+            );
+        var dataEvidence = LegalDataEvidenceClassifier.Classify(
+            LegalDataToolStatuses.Executed,
+            financialAnalysis
+        );
+        var queries = Enumerable.Range(1, queryCount)
+            .Select(index => new LegalCnvQuery(
+                $"audit query {index}",
+                $"audit_area_{index}",
+                $"Audit reason {index}.",
+                [$"audit_signal_{index}"]
+            ))
+            .ToArray();
+
+        return new LegalCnvQueryPlan(
+            "audit_strategy_v1",
+            fallback
+                ? LegalCnvQuerySources.Fallback
+                : LegalCnvQuerySources.Contextual,
+            fallback ? dataEvidence.FallbackReason : null,
+            dataEvidence,
+            queries
+        );
+    }
+
+    private static FinancialReportContext CreateReportWithFinancialAnalysis()
+    {
+        return CreateReport() with
+        {
+            FinancialAnalysis = CreateFinancialAnalysis(
+                new FinancialRiskSignal(
+                    "audit_signal",
+                    "Medium",
+                    "Q1",
+                    "Audit signal.",
+                    Array.Empty<RiskEvidenceItem>()))
+        };
+    }
+
     private sealed class MixedCitationCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
         public bool IsConnected => true;
@@ -485,6 +537,152 @@ public class McpRegulatoryKnowledgeSourceTests
         }
     }
 
+    private sealed class StaticLegalCnvQueryStrategy(
+        LegalCnvQueryPlan plan) : ILegalCnvQueryStrategy
+    {
+        public LegalCnvQueryPlan Plan { get; } = plan;
+
+        public LegalCnvQueryPlan BuildPlan(
+            FinancialAnalysisContext? financialAnalysis,
+            LegalDataEvidenceContext dataEvidence)
+        {
+            return Plan;
+        }
+    }
+
+    private sealed class PartialFailureCnvRegulationMcpClient : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+        public int CallCount { get; private set; }
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (CallCount > 1)
+            {
+                throw new InvalidOperationException(
+                    "sensitive partial failure payload");
+            }
+
+            return Task.FromResult(new CnvRegulationSearchResponse(
+                request.Query,
+                [
+                    CreateResult(
+                        "partial-success",
+                        "Partial success",
+                        "Partial cited evidence.",
+                        [CreateCitation()])
+                ],
+                []
+            ));
+        }
+    }
+
+    private sealed class AlwaysFailingCnvRegulationMcpClient : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("sensitive total failure payload");
+        }
+    }
+
+    private sealed class CancelingCnvRegulationMcpClient : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            throw new OperationCanceledException("MCP canceled without token state.");
+        }
+    }
+
+    private sealed class OrderedSuccessCnvRegulationMcpClient(
+        List<string> steps) : ICnvRegulationMcpClient
+    {
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+        public int CallCount { get; private set; }
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            steps.Add($"query:{CallCount}");
+            return Task.FromResult(new CnvRegulationSearchResponse(
+                request.Query,
+                [
+                    CreateResult(
+                        $"ordered-{CallCount}",
+                        "Ordered result",
+                        "Ordered cited evidence.",
+                        [CreateCitation()])
+                ],
+                []
+            ));
+        }
+    }
+
+    private sealed class TrackingLegalAnalysisReviewService : ILegalAnalysisReviewService
+    {
+        private readonly DeterministicLegalAnalysisReviewService _inner = new();
+
+        public int CallCount { get; private set; }
+
+        public Task<LegalAnalysisReviewResult> ReviewAsync(
+            LegalAnalysisReviewInput input,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return _inner.ReviewAsync(input, cancellationToken);
+        }
+    }
+
+    private sealed class OrderedActivityEventPublisher(
+        List<string> steps,
+        bool cancelOnPlanEvent = false) : IActivityEventPublisher
+    {
+        public List<ActivityEvent> PublishedEvents { get; } = [];
+
+        public Task PublishAsync(
+            ActivityEvent @event,
+            CancellationToken cancellationToken = default)
+        {
+            PublishedEvents.Add(@event);
+            steps.Add($"event:{@event.Type}");
+
+            var isPlanEvent =
+                @event.Type == "legal_cnv_queries_derived" ||
+                @event.Type == "legal_cnv_query_fallback_used";
+            if (cancelOnPlanEvent && isPlanEvent)
+            {
+                throw new OperationCanceledException(
+                    "Publisher canceled without token state.");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class FakeActivityEventPublisher : IActivityEventPublisher
     {
         public List<ActivityEvent> PublishedEvents { get; } = [];
@@ -566,6 +764,256 @@ public class McpRegulatoryKnowledgeSourceTests
         );
         System.Text.Json.JsonSerializer.Serialize(probe.Result)
             .Should().NotContain("sensitive arbitrary");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_PartialFailure_PreservesSuccessfulEvidenceAndAuditsEveryQuery()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var plan = CreateAuditPlan();
+        var client = new PartialFailureCnvRegulationMcpClient();
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(plan),
+            reviewService: reviewService
+        );
+
+        var result = await source.ReviewAsync(
+            new RegulatoryReviewRequest(
+                CreateReportWithFinancialAnalysis(),
+                new LegalReviewContext(
+                    FinancialAnalysisResolutionMode.ProvidedOnly)),
+            CancellationToken.None
+        );
+
+        result.RiskLevel.Should().Be("Medium");
+        result.Findings.Should().ContainSingle();
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.EvidenceReferences.Should().NotBeEmpty();
+        result.RequiresHumanReview.Should().BeTrue();
+        result.Warnings.Should().Contain(
+            "La búsqueda en la CNV a través de MCP falló para una consulta.");
+        result.Warnings.Should().NotContain(item =>
+            item.Contains("sensitive partial failure payload"));
+        reviewService.CallCount.Should().Be(1);
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.StrategyVersion.Should().Be("audit_strategy_v1");
+        audit.Source.Should().Be(LegalCnvQuerySources.Contextual);
+        audit.FallbackReason.Should().BeNull();
+        audit.DataToolStatus.Should().Be(LegalDataToolStatuses.Executed);
+        audit.FinancialAnalysisStatus.Should().Be(
+            FinancialAnalysisExecutionStatus.Succeeded);
+        audit.FailedStages.Should().BeEmpty();
+        audit.Queries.Should().HaveCount(2);
+        audit.Queries[0].Index.Should().Be(1);
+        audit.Queries[0].Total.Should().Be(2);
+        audit.Queries[0].ExecutionStatus.Should().Be("succeeded");
+        audit.Queries[0].ResultCount.Should().Be(1);
+        audit.Queries[0].CitedEvidenceCount.Should().Be(1);
+        audit.Queries[1].Index.Should().Be(2);
+        audit.Queries[1].Total.Should().Be(2);
+        audit.Queries[1].ExecutionStatus.Should().Be("failed");
+        audit.Queries[1].ResultCount.Should().Be(0);
+        audit.Queries[1].CitedEvidenceCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_AllQueriesFail_ReturnsUnknownAndSkipsAiReview()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new AlwaysFailingCnvRegulationMcpClient(),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan()),
+            reviewService: reviewService
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("Unknown");
+        result.Findings.Should().BeEmpty();
+        result.RequiresHumanReview.Should().BeTrue();
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.FailureReason.Should().Be("cnv_queries_failed");
+        result.LegalReview.EvidenceReferences.Should().BeEmpty();
+        reviewService.CallCount.Should().Be(0);
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Queries.Should().HaveCount(2);
+        audit.Queries.Should().OnlyContain(item =>
+            item.ExecutionStatus == "failed" &&
+            item.ResultCount == 0 &&
+            item.CitedEvidenceCount == 0);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_UncitedSuccessfulResult_IsLowRiskSuccessfulAudit()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new UncitedCnvRegulationMcpClient(),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            reviewService: reviewService
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        result.RiskLevel.Should().Be("Low");
+        result.Findings.Should().BeEmpty();
+        result.RequiresHumanReview.Should().BeFalse();
+        reviewService.CallCount.Should().Be(1);
+        var queryAudit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject
+            .Queries.Should().ContainSingle().Subject;
+        queryAudit.ExecutionStatus.Should().Be("succeeded");
+        queryAudit.ResultCount.Should().Be(1);
+        queryAudit.CitedEvidenceCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_McpCancellationWithoutCanceledToken_PropagatesBeforeEventsOrAi()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var steps = new List<string>();
+        var publisher = new OrderedActivityEventPublisher(steps);
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new CancelingCnvRegulationMcpClient(),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan()),
+            publisher,
+            reviewService
+        );
+
+        Func<Task> act = () => source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        publisher.PublishedEvents.Should().BeEmpty();
+        reviewService.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_PlanEventCancellation_PropagatesBeforeAiCompletion()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var steps = new List<string>();
+        var client = new OrderedSuccessCnvRegulationMcpClient(steps);
+        var publisher = new OrderedActivityEventPublisher(
+            steps,
+            cancelOnPlanEvent: true
+        );
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan()),
+            publisher,
+            reviewService
+        );
+
+        Func<Task> act = () => source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        steps.Should().Equal(
+            "query:1",
+            "query:2",
+            "event:legal_cnv_queries_derived"
+        );
+        reviewService.CallCount.Should().Be(0);
+        publisher.PublishedEvents.Should().NotContain(item =>
+            item.Type == "legal_agent_ai_review_completed");
+    }
+
+    [Theory]
+    [InlineData(false, "legal_cnv_queries_derived")]
+    [InlineData(true, "legal_cnv_query_fallback_used")]
+    public async Task ReviewAsync_PublishesPlanEventAfterQueriesWithFullImmutableAudit(
+        bool fallback,
+        string expectedEventType)
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var steps = new List<string>();
+        var client = new OrderedSuccessCnvRegulationMcpClient(steps);
+        var publisher = new OrderedActivityEventPublisher(steps);
+        var plan = CreateAuditPlan(fallback);
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(plan),
+            publisher
+        );
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None
+        );
+
+        steps.Take(3).Should().Equal(
+            "query:1",
+            "query:2",
+            $"event:{expectedEventType}"
+        );
+        publisher.PublishedEvents.Count(item =>
+            item.Type == expectedEventType).Should().Be(1);
+        publisher.PublishedEvents.Count(item =>
+            item.Type == "legal_cnv_queries_derived" ||
+            item.Type == "legal_cnv_query_fallback_used").Should().Be(1);
+        result.RequiresHumanReview.Should().Be(fallback);
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.StrategyVersion.Should().Be(plan.StrategyVersion);
+        audit.Source.Should().Be(plan.Source);
+        audit.FallbackReason.Should().Be(plan.FallbackReason);
+        audit.DataToolStatus.Should().Be(plan.DataEvidence.DataToolStatus);
+        audit.FinancialAnalysisStatus.Should().Be(
+            plan.DataEvidence.FinancialAnalysisStatus);
+        audit.FailedStages.Should().NotBeSameAs(
+            plan.DataEvidence.FailedStages);
+        ReferenceEquals(audit.Queries, plan.Queries).Should().BeFalse();
+        audit.Queries.Select(item => item.Index).Should().Equal(1, 2);
+        audit.Queries.Should().OnlyContain(item =>
+            item.Total == 2 &&
+            item.ExecutionStatus == "succeeded" &&
+            item.ResultCount == 1 &&
+            item.CitedEvidenceCount == 1);
+
+        var failedStages = audit.FailedStages.Should()
+            .BeAssignableTo<System.Collections.IList>().Subject;
+        var queryAudits = audit.Queries.Should()
+            .BeAssignableTo<System.Collections.IList>().Subject;
+        var relatedSignals = audit.Queries[0].RelatedFinancialSignals.Should()
+            .BeAssignableTo<IList<string>>().Subject;
+        failedStages.IsReadOnly.Should().BeTrue();
+        queryAudits.IsReadOnly.Should().BeTrue();
+        relatedSignals.IsReadOnly.Should().BeTrue();
     }
 
     [Fact]
@@ -751,7 +1199,7 @@ public class McpRegulatoryKnowledgeSourceTests
         );
 
         // Assert
-        result.Warnings.Should().Contain("La búsqueda en la CNV a través de MCP falló para una consulta. Consulte los registros de la aplicación para más detalles.");
+        result.Warnings.Should().Contain("La búsqueda en la CNV a través de MCP falló para una consulta.");
         result.Warnings.Should().NotContain(w => w.Contains("transport failed"));
         result.Warnings.Should().NotContain(w => w.Contains("C:\\sensitive"));
     }

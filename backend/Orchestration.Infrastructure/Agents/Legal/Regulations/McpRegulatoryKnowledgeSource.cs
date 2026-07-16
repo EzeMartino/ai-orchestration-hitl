@@ -38,9 +38,12 @@ public sealed class McpRegulatoryKnowledgeSource(
     private readonly IActivityEventPublisher? _activityPublisher = activityPublisher;
 
     private sealed record CnvSearchReviewResult(
-        List<RegulatoryFinding> Findings,
-        List<LegalEvidenceReference> EvidenceReferences,
-        List<string> Warnings
+        IReadOnlyList<RegulatoryFinding> Findings,
+        IReadOnlyList<LegalEvidenceReference> EvidenceReferences,
+        IReadOnlyList<string> Warnings,
+        IReadOnlyList<LegalCnvQueryAudit> QueryAudits,
+        int CompletedQueries,
+        int FailedQueries
     );
 
     public Task<RegulatoryReviewResult> ReviewAsync(
@@ -93,64 +96,53 @@ public sealed class McpRegulatoryKnowledgeSource(
         var usedContextualPlan =
             queryPlan.Source == LegalCnvQuerySources.Contextual &&
             queryPlan.FallbackReason is null;
-        var sourceStr = usedContextualPlan
-            ? "financial_analysis"
-            : "fallback";
-
-        var audit = new LegalQueryStrategyAudit(
-            Source: sourceStr,
-            Queries: derivedQueries.Select(dq => new LegalCnvQueryAudit(
-                Query: dq.Query,
-                RegulationArea: dq.RegulationArea,
-                Reason: dq.Reason,
-                RelatedFinancialSignals: dq.RelatedFinancialSignals
-            )).ToList()
-        );
-
-        // Publish this event only when the query strategy actually used financial analysis signals.
-        if (_activityPublisher != null && sourceStr == "financial_analysis")
-        {
-            try
-            {
-                await _activityPublisher.PublishAsync(
-                    new ActivityEvent(
-                        report.SessionId,
-                        "legal_cnv_queries_derived",
-                        "LegalAgent",
-                        "LegalAgent derivó consultas de búsqueda CNV a partir de las señales de riesgo del análisis financiero.",
-                        DateTimeOffset.UtcNow
-                    ),
-                    cancellationToken
-                );
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to publish activity feed event for derived queries.");
-            }
-        }
 
         var outcome = await SearchFindingsAsync(
-            report,
             derivedQueries,
             cancellationToken
         );
 
+        var audit = new LegalQueryStrategyAudit(
+            StrategyVersion: queryPlan.StrategyVersion,
+            Source: queryPlan.Source,
+            FallbackReason: queryPlan.FallbackReason,
+            DataToolStatus: queryPlan.DataEvidence.DataToolStatus,
+            FinancialAnalysisStatus: queryPlan.DataEvidence.FinancialAnalysisStatus,
+            FailedStages: queryPlan.DataEvidence.FailedStages.ToList().AsReadOnly(),
+            Queries: outcome.QueryAudits.ToList().AsReadOnly()
+        );
+
+        await PublishQueryPlanEventAsync(
+            report.SessionId,
+            usedContextualPlan,
+            cancellationToken
+        );
+
         var warnings = new List<string>(outcome.Warnings);
-        if (sourceStr == "fallback")
+        if (!usedContextualPlan)
         {
             warnings.Add("No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera.");
         }
 
         var findings = outcome.Findings;
+        var allQueriesFailed =
+            outcome.CompletedQueries == 0 &&
+            (outcome.FailedQueries > 0 || derivedQueries.Count == 0);
         var hasRisk = findings.Count > 0;
 
-        var summary = hasRisk
-            ? "Se encontró evidencia regulatoria de la CNV para la anomalía financiera enviada. Se requiere revisión legal humana."
-            : "No se encontró evidencia regulatoria de la CNV con citas para la anomalía financiera enviada.";
+        var summary = allQueriesFailed
+            ? "No fue posible completar las consultas regulatorias a la CNV. Se requiere revisión legal humana."
+            : hasRisk
+                ? "Se encontró evidencia regulatoria de la CNV para la anomalía financiera enviada. Se requiere revisión legal humana."
+                : "No se encontró evidencia regulatoria de la CNV con citas para la anomalía financiera enviada.";
 
         // AI Review Execution
         LegalAnalysisReviewResult legalReviewResult;
-        if (financialAnalysis == null)
+        if (allQueriesFailed)
+        {
+            legalReviewResult = LegalAnalysisReviewResults.NotRun("cnv_queries_failed");
+        }
+        else if (financialAnalysis == null)
         {
             legalReviewResult = LegalAnalysisReviewResults.NotRun("financial_analysis_missing");
         }
@@ -183,7 +175,8 @@ public sealed class McpRegulatoryKnowledgeSource(
                 {
                     activityMsg = "Revisión de IA de LegalAgent completada usando LLM.";
                 }
-                else if (legalReviewResult.FailureReason == "financial_analysis_missing")
+                else if (legalReviewResult.FailureReason is
+                    "financial_analysis_missing" or "cnv_queries_failed")
                 {
                     activityMsg = "La revisión de IA de LegalAgent no fue ejecutada.";
                 }
@@ -203,6 +196,10 @@ public sealed class McpRegulatoryKnowledgeSource(
                     cancellationToken
                 );
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to publish activity feed event for AI review.");
@@ -211,15 +208,58 @@ public sealed class McpRegulatoryKnowledgeSource(
 
         return new RegulatoryReviewResult(
             HasComplianceRisk: hasRisk,
-            RiskLevel: hasRisk ? "Medium" : "Low",
+            RiskLevel: allQueriesFailed ? "Unknown" : hasRisk ? "Medium" : "Low",
             Summary: summary,
             SourceEngine: "MCP CNV Regulation Server",
             Findings: findings,
             Warnings: warnings.Distinct().ToList(),
             QueryStrategy: audit,
             LegalReview: legalReviewResult,
-            RequiresHumanReview: hasRisk
+            RequiresHumanReview:
+                !usedContextualPlan ||
+                outcome.FailedQueries > 0 ||
+                derivedQueries.Count == 0
         );
+    }
+
+    private async Task PublishQueryPlanEventAsync(
+        Guid sessionId,
+        bool usedContextualPlan,
+        CancellationToken cancellationToken)
+    {
+        if (_activityPublisher is null)
+        {
+            return;
+        }
+
+        var eventType = usedContextualPlan
+            ? "legal_cnv_queries_derived"
+            : "legal_cnv_query_fallback_used";
+        var message = usedContextualPlan
+            ? "LegalAgent derivó consultas de búsqueda CNV a partir de las señales de riesgo del análisis financiero."
+            : "LegalAgent utilizó una estrategia general de búsqueda CNV por falta de señales financieras específicas.";
+
+        try
+        {
+            await _activityPublisher.PublishAsync(
+                new ActivityEvent(
+                    sessionId,
+                    eventType,
+                    "LegalAgent",
+                    message,
+                    DateTimeOffset.UtcNow
+                ),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish activity feed event for CNV query plan.");
+        }
     }
 
     private async Task<FinancialAnalysisContext?> TryLoadFinancialAnalysisAsync(
@@ -254,6 +294,10 @@ public sealed class McpRegulatoryKnowledgeSource(
             };
 
             return node.Deserialize<FinancialAnalysisContext>(options);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -304,17 +348,20 @@ public sealed class McpRegulatoryKnowledgeSource(
     }
 
     private async Task<CnvSearchReviewResult> SearchFindingsAsync(
-        FinancialReportContext report,
         IReadOnlyList<LegalCnvQuery> queries,
         CancellationToken cancellationToken)
     {
         var allFindings = new List<RegulatoryFinding>();
         var allEvidence = new List<LegalEvidenceReference>();
         var warnings = new List<string>();
+        var queryAudits = new List<LegalCnvQueryAudit>(queries.Count);
+        var completedQueries = 0;
+        var failedQueries = 0;
         bool hasUncitedEvidence = false;
 
-        foreach (var queryInfo in queries)
+        for (var queryIndex = 0; queryIndex < queries.Count; queryIndex++)
         {
+            var queryInfo = queries[queryIndex];
             var request = new CnvRegulationSearchRequest(
                 Query: queryInfo.Query,
                 Area: queryInfo.RegulationArea ?? "Agentes",
@@ -328,6 +375,8 @@ public sealed class McpRegulatoryKnowledgeSource(
                     request,
                     cancellationToken
                 );
+                var resultCount = response.Results?.Count ?? 0;
+                var citedEvidenceCount = 0;
 
                 if (response.Warnings != null)
                 {
@@ -344,6 +393,7 @@ public sealed class McpRegulatoryKnowledgeSource(
                         }
                         else
                         {
+                            citedEvidenceCount += result.Citations.Count;
                             var mapped = MapFindings(result);
                             allFindings.AddRange(mapped);
 
@@ -379,11 +429,39 @@ public sealed class McpRegulatoryKnowledgeSource(
                         }
                     }
                 }
+
+                completedQueries++;
+                queryAudits.Add(CreateQueryAudit(
+                    queryIndex,
+                    queries.Count,
+                    queryInfo,
+                    LegalCnvQueryExecutionStatuses.Succeeded,
+                    resultCount,
+                    citedEvidenceCount
+                ));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "CNV MCP search failed for query: {Query}", queryInfo.Query);
-                warnings.Add("La búsqueda en la CNV a través de MCP falló para una consulta. Consulte los registros de la aplicación para más detalles.");
+                failedQueries++;
+                queryAudits.Add(CreateQueryAudit(
+                    queryIndex,
+                    queries.Count,
+                    queryInfo,
+                    LegalCnvQueryExecutionStatuses.Failed,
+                    0,
+                    0
+                ));
+                _logger.LogWarning(
+                    ex,
+                    "CNV MCP search failed for query {QueryIndex} of {TotalQueries}.",
+                    queryIndex + 1,
+                    queries.Count
+                );
+                warnings.Add("La búsqueda en la CNV a través de MCP falló para una consulta.");
             }
         }
 
@@ -414,9 +492,34 @@ public sealed class McpRegulatoryKnowledgeSource(
         }
 
         return new CnvSearchReviewResult(
-            Findings: uniqueFindings,
-            EvidenceReferences: uniqueEvidence,
-            Warnings: warnings.Distinct().ToList()
+            Findings: Array.AsReadOnly(uniqueFindings.ToArray()),
+            EvidenceReferences: Array.AsReadOnly(uniqueEvidence.ToArray()),
+            Warnings: Array.AsReadOnly(warnings.Distinct().ToArray()),
+            QueryAudits: Array.AsReadOnly(queryAudits.ToArray()),
+            CompletedQueries: completedQueries,
+            FailedQueries: failedQueries
+        );
+    }
+
+    private static LegalCnvQueryAudit CreateQueryAudit(
+        int queryIndex,
+        int totalQueries,
+        LegalCnvQuery query,
+        string executionStatus,
+        int resultCount,
+        int citedEvidenceCount)
+    {
+        return new LegalCnvQueryAudit(
+            Index: queryIndex + 1,
+            Total: totalQueries,
+            Query: query.Query,
+            RegulationArea: query.RegulationArea,
+            Reason: query.Reason,
+            RelatedFinancialSignals:
+                query.RelatedFinancialSignals.ToList().AsReadOnly(),
+            ExecutionStatus: executionStatus,
+            ResultCount: resultCount,
+            CitedEvidenceCount: citedEvidenceCount
         );
     }
 }
