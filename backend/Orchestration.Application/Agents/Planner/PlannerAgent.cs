@@ -20,6 +20,8 @@ public sealed class PlannerAgent : IPlannerAgent
         "Controlled tool executor returned no matching result.";
     private const string UnexpectedExecutionResultsReason =
         "Controlled tool executor returned unexpected results.";
+    private const string InconsistentExecutionResultReason =
+        "Controlled tool executor returned inconsistent result.";
 
     private readonly IDataAgent _dataAgent;
     private readonly ILegalAgent _legalAgent;
@@ -104,6 +106,7 @@ public sealed class PlannerAgent : IPlannerAgent
             report,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var reasoningResult = await GenerateReasoningAsync(
             sessionId,
@@ -112,6 +115,7 @@ public sealed class PlannerAgent : IPlannerAgent
             legalResult,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var proposedPlan = await _toolPlanProposalService.ProposeAsync(
             BuildToolPlanProposalInput(report, reasoningResult),
@@ -128,12 +132,14 @@ public sealed class PlannerAgent : IPlannerAgent
             ),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishToolPlanAuditEventsAsync(
             sessionId,
             toolPlan,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return await CompletePlannerAsync(
             sessionId,
@@ -280,11 +286,13 @@ public sealed class PlannerAgent : IPlannerAgent
             "Delegando detección de anomalías a DataAgent (Agente de Datos).",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var dataResult = await _dataAgent.AnalyzeAsync(
             report,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -293,6 +301,7 @@ public sealed class PlannerAgent : IPlannerAgent
             $"Detección de anomalías completada usando {dataResult.Engine}.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -301,6 +310,7 @@ public sealed class PlannerAgent : IPlannerAgent
             dataResult.Summary,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -309,6 +319,7 @@ public sealed class PlannerAgent : IPlannerAgent
             "Delegando revisión de cumplimiento normativo a LegalAgent (Agente Legal).",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var legalReport = dataResult.FinancialAnalysis is null
             ? report
@@ -318,6 +329,7 @@ public sealed class PlannerAgent : IPlannerAgent
             legalReport,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -326,6 +338,7 @@ public sealed class PlannerAgent : IPlannerAgent
             $"Revisión de cumplimiento completada usando {legalResult.Engine}.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -334,6 +347,7 @@ public sealed class PlannerAgent : IPlannerAgent
             legalResult.Summary,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return (dataResult, legalResult);
     }
@@ -358,6 +372,7 @@ public sealed class PlannerAgent : IPlannerAgent
             GetReasoningEventMessage(reasoningResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return reasoningResult;
     }
@@ -448,6 +463,7 @@ public sealed class PlannerAgent : IPlannerAgent
                     callsToExecute,
                     cancellationToken,
                     runtimeContext);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
@@ -466,8 +482,10 @@ public sealed class PlannerAgent : IPlannerAgent
                     Error: "La ejecución de la herramienta falló."
                 ))
                 .ToList();
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var reconciledExecutionResults = ReconcileExecutionResults(
             callsToExecute,
             executionResults);
@@ -604,7 +622,11 @@ public sealed class PlannerAgent : IPlannerAgent
                 continue;
             }
 
-            matchedResults[matchedIndex] = result;
+            matchedResults[matchedIndex] = IsConsistentExecutionResult(result)
+                ? result
+                : CreateFailedExecutionResult(
+                    requestedCalls[matchedIndex],
+                    InconsistentExecutionResultReason);
         }
 
         if (hasUnexpectedResult)
@@ -620,6 +642,12 @@ public sealed class PlannerAgent : IPlannerAgent
             .Select((call, index) =>
                 matchedResults[index] ?? CreateMissingExecutionResult(call))
             .ToArray();
+    }
+
+    private static bool IsConsistentExecutionResult(ToolExecutionResult result)
+    {
+        return (result.Status == ToolExecutionStatus.Executed && result.Succeeded) ||
+            (result.Status == ToolExecutionStatus.Failed && !result.Succeeded);
     }
 
     internal static (
