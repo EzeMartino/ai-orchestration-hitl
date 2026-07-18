@@ -106,7 +106,14 @@ __pycache__/
 *.py[cod]
 
 # Local agent tooling
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/aihitl-temp-output-verification/
+!.agents/skills/aihitl-cnv-mcp-quality-gate/
+!.agents/skills/aihitl-live-e2e-verification/
+!.agents/skills/aihitl-agent-tool-audit/
+!.agents/skills/aihitl-localization-pass/
 skills-lock.json
 .worktrees/
 

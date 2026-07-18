@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIHITL Agent Tool Audit"
+  short_description: "Audit Planner, Legal, and Data tool wiring"
+  default_prompt: "Use $aihitl-agent-tool-audit to audit these agent tools without changing the repository."
