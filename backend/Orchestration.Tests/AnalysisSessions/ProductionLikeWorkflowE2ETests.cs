@@ -259,6 +259,9 @@ public sealed class ProductionLikeWorkflowE2ETests
 
         using var reloadedContext = JsonDocument.Parse(reloadedSession.ContextJson);
         AssertPlanDrivenContext(reloadedContext.RootElement);
+        AssertPersistedContextualLegalQueryAudit(
+            reloadedContext.RootElement,
+            cnvClient.ReceivedRequests);
         var persistedEvents = await dbContext.ActivityEvents
             .AsNoTracking()
             .Where(evt => evt.SessionId == session.Id)
