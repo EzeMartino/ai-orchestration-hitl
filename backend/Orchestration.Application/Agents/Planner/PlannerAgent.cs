@@ -12,6 +12,9 @@ namespace Orchestration.Application.Agents.Planner;
 
 public sealed class PlannerAgent : IPlannerAgent
 {
+    private const string UnsupportedSatisfactionKindReason =
+        "Unsupported planner satisfaction kind.";
+
     private readonly IDataAgent _dataAgent;
     private readonly ILegalAgent _legalAgent;
     private readonly IActivityEventPublisher _activityPublisher;
@@ -169,12 +172,9 @@ public sealed class PlannerAgent : IPlannerAgent
         );
         cancellationToken.ThrowIfCancellationRequested();
 
-        var dataDecisions = SelectPolicyDecisions(
-            policyDecisions,
-            PlannerToolSatisfactionKind.DataAnalysis);
-        var legalDecisions = SelectPolicyDecisions(
-            policyDecisions,
-            PlannerToolSatisfactionKind.LegalReview);
+        var decisionPartitions = PartitionPolicyDecisions(policyDecisions);
+        var dataDecisions = decisionPartitions.Data;
+        var legalDecisions = decisionPartitions.Legal;
 
         var dataAudit = await BuildExecutionAuditAsync(
             dataDecisions,
@@ -211,11 +211,25 @@ public sealed class PlannerAgent : IPlannerAgent
         );
         cancellationToken.ThrowIfCancellationRequested();
 
+        // Unsupported decisions are never executable stages. Record them only
+        // after the actual Data -> Legal execution order has been audited.
+        var unsupportedAudit = CreateUnsupportedExecutionAudit(
+            decisionPartitions.Unsupported);
+        await PublishToolExecutionAuditEventsAsync(
+            sessionId,
+            unsupportedAudit,
+            cancellationToken
+        );
+        cancellationToken.ThrowIfCancellationRequested();
+
         var legalResult = _executionResultMapper.TryMapLegalResult(legalAudit) ??
             PlannerStageSafeResults.LegalUnavailable();
         var toolPlan = planBeforeExecution with
         {
-            ExecutedCalls = dataAudit.Concat(legalAudit).ToArray()
+            ExecutedCalls = dataAudit
+                .Concat(legalAudit)
+                .Concat(unsupportedAudit)
+                .ToArray()
         };
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -319,6 +333,7 @@ public sealed class PlannerAgent : IPlannerAgent
             BuildReasoningInput(report, dataResult, legalResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -454,14 +469,56 @@ public sealed class PlannerAgent : IPlannerAgent
         return executedCalls;
     }
 
-    private static IReadOnlyList<ToolExecutionPolicyDecision> SelectPolicyDecisions(
-        IReadOnlyList<ToolExecutionPolicyDecision> policyDecisions,
-        PlannerToolSatisfactionKind satisfactionKind)
+    internal static (
+        IReadOnlyList<ToolExecutionPolicyDecision> Data,
+        IReadOnlyList<ToolExecutionPolicyDecision> Legal,
+        IReadOnlyList<ToolExecutionPolicyDecision> Unsupported)
+        PartitionPolicyDecisions(
+            IReadOnlyList<ToolExecutionPolicyDecision> policyDecisions)
     {
-        return policyDecisions
-            .Where(decision =>
-                PlannerToolCatalog.Find(decision.Call.ToolName)?.SatisfactionKind ==
-                    satisfactionKind)
+        var data = new List<ToolExecutionPolicyDecision>();
+        var legal = new List<ToolExecutionPolicyDecision>();
+        var unsupported = new List<ToolExecutionPolicyDecision>();
+
+        foreach (var decision in policyDecisions)
+        {
+            switch (PlannerToolCatalog.Find(decision.Call.ToolName)?.SatisfactionKind)
+            {
+                case PlannerToolSatisfactionKind.DataAnalysis:
+                    data.Add(decision);
+                    break;
+                case PlannerToolSatisfactionKind.LegalReview:
+                    legal.Add(decision);
+                    break;
+                default:
+                    unsupported.Add(decision);
+                    break;
+            }
+        }
+
+        if (data.Count + legal.Count + unsupported.Count != policyDecisions.Count)
+        {
+            throw new InvalidOperationException(
+                "Planner policy decision partition was not exhaustive.");
+        }
+
+        return (data, legal, unsupported);
+    }
+
+    private static IReadOnlyList<ToolExecutionResult> CreateUnsupportedExecutionAudit(
+        IReadOnlyList<ToolExecutionPolicyDecision> unsupportedDecisions)
+    {
+        return unsupportedDecisions
+            .Select(decision => decision.Status == ToolExecutionStatus.Executed
+                ? new ToolExecutionResult(
+                    ToolName: decision.Call.ToolName,
+                    Status: ToolExecutionStatus.Failed,
+                    Succeeded: false,
+                    Summary: UnsupportedSatisfactionKindReason,
+                    Engine: "Tool Execution Policy",
+                    OutputJson: "{}",
+                    Error: UnsupportedSatisfactionKindReason)
+                : CreatePolicyAuditResult(decision))
             .ToArray();
     }
 
