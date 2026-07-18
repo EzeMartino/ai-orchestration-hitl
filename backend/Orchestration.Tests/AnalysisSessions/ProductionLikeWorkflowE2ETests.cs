@@ -345,15 +345,17 @@ public sealed class ProductionLikeWorkflowE2ETests
         toolPlan.GetProperty("proposedCalls").EnumerateArray().First()
             .GetProperty("toolName").GetString()
             .Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
-        toolPlan.GetProperty("executedCalls").EnumerateArray()
+        var executedCallNames = toolPlan.GetProperty("executedCalls").EnumerateArray()
             .Select(call => call.GetProperty("toolName").GetString())
-            .Should().ContainInOrder(
-                PlannerToolCatalog.AnalyzeTransactionsName,
-                PlannerToolCatalog.SearchCnvRegulationName);
-        activityPublisher.PublishedEvents
+            .ToArray();
+        executedCallNames.Should().Equal(
+            PlannerToolCatalog.AnalyzeTransactionsName,
+            PlannerToolCatalog.SearchCnvRegulationName);
+        var toolExecutionAgents = activityPublisher.PublishedEvents
             .Where(activityEvent => activityEvent.Type == "tool_call_executed")
             .Select(activityEvent => activityEvent.Agent)
-            .Should().ContainInOrder("DataAgent", "LegalAgent");
+            .ToArray();
+        toolExecutionAgents.Should().Equal("DataAgent", "LegalAgent");
     }
 
     [Fact]
@@ -1054,6 +1056,10 @@ public sealed class ProductionLikeWorkflowE2ETests
             call.GetProperty("status").GetString() == "Executed" &&
             call.GetProperty("succeeded").GetBoolean()
         );
+        executedCalls.Select(call => call.GetProperty("toolName").GetString())
+            .Should().Equal(
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                PlannerToolCatalog.SearchCnvRegulationName);
         executedCalls.All(DoesNotHaveOutputJson).Should().BeTrue();
         toolPlan.GetProperty("approvedCalls").EnumerateArray()
             .Count(call => call.GetProperty("toolName").GetString() ==
