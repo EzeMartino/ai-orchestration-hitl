@@ -197,6 +197,25 @@ public class ControlledToolExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_LegalWithRuntimeContext_LegacyAgentFailsSafely()
+    {
+        var legalAgent = new LegacyLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            CreateRuntimeContext());
+
+        var result = results.Should().ContainSingle().Subject;
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Tool execution failed.");
+        result.OutputJson.Should().Be("{}");
+        legalAgent.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_Should_reject_removed_granular_tool()
     {
         var executor = CreateExecutor();
@@ -441,7 +460,7 @@ public class ControlledToolExecutorTests
 
     private static ControlledToolExecutor CreateExecutor(
         FakeDataAgent? dataAgent = null,
-        FakeLegalAgent? legalAgent = null)
+        ILegalAgent? legalAgent = null)
     {
         return new ControlledToolExecutor(
             dataAgent ?? new FakeDataAgent(),
@@ -698,6 +717,20 @@ public class ControlledToolExecutorTests
                     "LegalAgent canceled without token state.");
             }
 
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class LegacyLegalAgent(
+        LegalAgentResult result) : ILegalAgent
+    {
+        public int CallCount { get; private set; }
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
             return Task.FromResult(result);
         }
     }

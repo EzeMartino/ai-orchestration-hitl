@@ -11,7 +11,7 @@ public sealed class ToolCallingOptions
 
     public int MaxToolCalls { get; init; } = 3;
 
-    public string[] AllowedTools { get; init; } =
+    public string[] AllowedTools { get; set; } =
     [
         "data.analyze_transactions",
         "legal.search_cnv_regulation"

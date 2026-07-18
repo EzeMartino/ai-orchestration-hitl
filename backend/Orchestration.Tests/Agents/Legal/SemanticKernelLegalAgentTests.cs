@@ -136,7 +136,7 @@ public class SemanticKernelLegalAgentTests
     }
 
     [Fact]
-    public async Task RegulatorySource_DefaultRequestOverload_PreservesLegacyDouble()
+    public async Task RegulatorySource_DefaultRequestOverload_DelegatesToLegacyDouble()
     {
         var legacySource = new LegacyRegulatoryKnowledgeSource();
         IRegulatoryKnowledgeSource source = legacySource;
@@ -145,8 +145,7 @@ public class SemanticKernelLegalAgentTests
         await source.ReviewAsync(
             new RegulatoryReviewRequest(
                 report,
-                new LegalReviewContext(
-                    FinancialAnalysisResolutionMode.ProvidedOnly)),
+                LegalReviewContext.Default),
             CancellationToken.None
         );
 
@@ -154,19 +153,212 @@ public class SemanticKernelLegalAgentTests
     }
 
     [Fact]
-    public async Task LegalAgent_DefaultContextOverload_PreservesLegacyDouble()
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsProvidedOnlyContext()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+
+        Func<Task> act = () => source.ReviewAsync(
+            new RegulatoryReviewRequest(
+                CreateReport(),
+                new LegalReviewContext(
+                    FinancialAnalysisResolutionMode.ProvidedOnly)),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                "Legacy regulatory knowledge sources support only the default review context.");
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsNullRequest()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+
+        Func<Task> act = () => source.ReviewAsync(
+            request: null!,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("request");
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsNullReportBeforeContext()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+        var request = new RegulatoryReviewRequest(
+            Report: null!,
+            Context: null!);
+
+        Func<Task> act = () => source.ReviewAsync(
+            request,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("request.Report");
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsNullContext()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+
+        Func<Task> act = () => source.ReviewAsync(
+            new RegulatoryReviewRequest(CreateReport(), Context: null!),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("request.Context");
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsNullReport()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+        var request = new RegulatoryReviewRequest(
+            Report: null!,
+            LegalReviewContext.Default);
+
+        Func<Task> act = () => source.ReviewAsync(
+            request,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("request.Report");
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_CanceledProvidedOnly_ThrowsCancellation()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+        using var cancellationSource = new CancellationTokenSource();
+        cancellationSource.Cancel();
+
+        Func<Task> act = () => source.ReviewAsync(
+            new RegulatoryReviewRequest(
+                CreateReport(),
+                new LegalReviewContext(
+                    FinancialAnalysisResolutionMode.ProvidedOnly)),
+            cancellationSource.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task RegulatorySource_DefaultRequestOverload_RejectsDataEvidence()
+    {
+        IRegulatoryKnowledgeSource source = new LegacyRegulatoryKnowledgeSource();
+
+        Func<Task> act = () => source.ReviewAsync(
+            new RegulatoryReviewRequest(
+                CreateReport(),
+                new LegalReviewContext(
+                    FinancialAnalysisResolutionMode.ProvidedOrPersisted,
+                    CreateDataEvidence())),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                "Legacy regulatory knowledge sources support only the default review context.");
+    }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_DelegatesToLegacyDouble()
     {
         ILegalAgent agent = new MockLegalAgent();
 
         var result = await agent.ReviewAsync(
             CreateReport(),
-            new LegalReviewContext(
-                FinancialAnalysisResolutionMode.ProvidedOnly),
+            LegalReviewContext.Default,
             CancellationToken.None
         );
 
         result.Engine.Should().Be("Mock Compliance Knowledge Base");
     }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_RejectsProvidedOnlyContext()
+    {
+        ILegalAgent agent = new MockLegalAgent();
+
+        Func<Task> act = () => agent.ReviewAsync(
+            CreateReport(),
+            new LegalReviewContext(
+                FinancialAnalysisResolutionMode.ProvidedOnly),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                "Legacy legal agent implementations support only the default review context.");
+    }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_RejectsNullContext()
+    {
+        ILegalAgent agent = new MockLegalAgent();
+
+        Func<Task> act = () => agent.ReviewAsync(
+            CreateReport(),
+            context: null!,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("context");
+    }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_RejectsNullReportBeforeContext()
+    {
+        ILegalAgent agent = new MockLegalAgent();
+
+        Func<Task> act = () => agent.ReviewAsync(
+            report: null!,
+            context: null!,
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ArgumentNullException>();
+        exception.Which.ParamName.Should().Be("report");
+    }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_CanceledProvidedOnly_ThrowsCancellation()
+    {
+        ILegalAgent agent = new MockLegalAgent();
+        using var cancellationSource = new CancellationTokenSource();
+        cancellationSource.Cancel();
+
+        Func<Task> act = () => agent.ReviewAsync(
+            CreateReport(),
+            new LegalReviewContext(
+                FinancialAnalysisResolutionMode.ProvidedOnly),
+            cancellationSource.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task LegalAgent_DefaultContextOverload_RejectsDataEvidence()
+    {
+        ILegalAgent agent = new MockLegalAgent();
+
+        Func<Task> act = () => agent.ReviewAsync(
+            CreateReport(),
+            new LegalReviewContext(
+                FinancialAnalysisResolutionMode.ProvidedOrPersisted,
+                CreateDataEvidence()),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(
+                "Legacy legal agent implementations support only the default review context.");
+    }
+
+    private static LegalDataEvidenceContext CreateDataEvidence() => new(
+        CanUseSignals: true,
+        FallbackReason: null,
+        DataToolStatus: LegalDataToolStatuses.Executed,
+        FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+        FailedStages: []);
 
     private static FinancialReportContext CreateReport()
     {
