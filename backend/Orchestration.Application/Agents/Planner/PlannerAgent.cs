@@ -70,6 +70,7 @@ public sealed class PlannerAgent : IPlannerAgent
             "PlannerAgent (Agente Planificador) inicializado. Construyendo plan de ejecución.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (IsPlanDrivenMode())
         {
@@ -116,6 +117,7 @@ public sealed class PlannerAgent : IPlannerAgent
             BuildToolPlanProposalInput(report, reasoningResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var toolPlan = await BuildToolPlanAuditAsync(
             proposedPlan,
@@ -152,6 +154,7 @@ public sealed class PlannerAgent : IPlannerAgent
             BuildInitialToolPlanProposalInput(report),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
         var normalizedPlan = _toolPlanNormalizer.Normalize(proposedPlan);
         var validationResult = _toolPlanValidator.Validate(normalizedPlan);
         var returnedPolicyDecisions = _toolExecutionPolicy.Decide(
@@ -197,7 +200,9 @@ public sealed class PlannerAgent : IPlannerAgent
         );
         cancellationToken.ThrowIfCancellationRequested();
 
-        var dataResult = _executionResultMapper.TryMapDataResult(dataAudit) ??
+        var dataResult = TryMapExecutionResult(
+                () => _executionResultMapper.TryMapDataResult(dataAudit),
+                cancellationToken) ??
             PlannerStageSafeResults.DataUnavailable();
         var dataToolStatus = GetDataToolStatus(dataDecisions, dataAudit);
         var dataEvidence = LegalDataEvidenceClassifier.Classify(
@@ -231,7 +236,9 @@ public sealed class PlannerAgent : IPlannerAgent
         );
         cancellationToken.ThrowIfCancellationRequested();
 
-        var legalResult = _executionResultMapper.TryMapLegalResult(legalAudit) ??
+        var legalResult = TryMapExecutionResult(
+                () => _executionResultMapper.TryMapLegalResult(legalAudit),
+                cancellationToken) ??
             PlannerStageSafeResults.LegalUnavailable();
         var toolPlan = planBeforeExecution with
         {
@@ -496,7 +503,9 @@ public sealed class PlannerAgent : IPlannerAgent
 
             foreach (var decision in policyDecisions)
             {
-                if (decision is null || decision.Call is null)
+                if (decision is null ||
+                    decision.Call is null ||
+                    !IsAllowedPolicyStatus(decision.Status))
                 {
                     isExactMatch = false;
                     break;
@@ -525,6 +534,39 @@ public sealed class PlannerAgent : IPlannerAgent
                 ToolExecutionStatus.Failed,
                 PolicyDecisionMismatchReason))
             .ToArray();
+    }
+
+    private static bool IsAllowedPolicyStatus(ToolExecutionStatus status)
+    {
+        return status is
+            ToolExecutionStatus.Executed or
+            ToolExecutionStatus.SkippedAlreadySatisfied or
+            ToolExecutionStatus.SkippedDisabled or
+            ToolExecutionStatus.Failed;
+    }
+
+    private static TResult? TryMapExecutionResult<TResult>(
+        Func<TResult?> map,
+        CancellationToken cancellationToken)
+        where TResult : class
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            var result = map();
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return null;
+        }
     }
 
     internal static IReadOnlyList<ToolExecutionResult> ReconcileExecutionResults(
