@@ -268,6 +268,124 @@ public class ToolPlanValidatorTests
         );
     }
 
+    [Fact]
+    public void Validate_Should_reject_later_data_call_for_the_same_satisfaction_stage()
+    {
+        var validator = new ToolPlanValidator();
+        var firstCall = CreateCall(PlannerToolCatalog.AnalyzeTransactionsName);
+        var laterCall = CreateCall(PlannerToolCatalog.AnalyzeTransactionsName) with
+        {
+            ToolName = "DATA.ANALYZE_TRANSACTIONS",
+            Reason = "A different data analysis request."
+        };
+
+        var result = validator.Validate(CreatePlan(firstCall, laterCall));
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(firstCall.ToolName);
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                laterCall.ToolName,
+                "Solo se permite una llamada aprobada por etapa de satisfacción."
+            )
+        );
+    }
+
+    [Fact]
+    public void Normalize_then_validate_Should_reject_later_data_call_with_distinct_arguments()
+    {
+        var firstCall = CreateCall(PlannerToolCatalog.AnalyzeTransactionsName);
+        var laterArguments = new Dictionary<string, string>(firstCall.Arguments)
+        {
+            ["reportName"] = "another-financial-report"
+        };
+        var laterCall = firstCall with
+        {
+            Arguments = laterArguments,
+            Reason = "Analyze a different report."
+        };
+        var normalizedPlan = new ToolPlanNormalizer().Normalize(
+            CreatePlan(firstCall, laterCall));
+
+        normalizedPlan.ProposedCalls.Should().HaveCount(2);
+
+        var result = new ToolPlanValidator().Validate(normalizedPlan);
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().ContainSingle()
+            .Which.Arguments["reportName"].Should().Be("financial-report");
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                laterCall.ToolName,
+                "Solo se permite una llamada aprobada por etapa de satisfacción."
+            )
+        );
+    }
+
+    [Fact]
+    public void Validate_Should_reject_later_legal_call_for_the_same_satisfaction_stage()
+    {
+        var validator = new ToolPlanValidator();
+        var firstCall = CreateCall(PlannerToolCatalog.SearchCnvRegulationName);
+        var laterCall = CreateCall(PlannerToolCatalog.SearchCnvRegulationName) with
+        {
+            ToolName = "LEGAL.SEARCH_CNV_REGULATION",
+            Reason = "A repeated legal review request."
+        };
+
+        var result = validator.Validate(CreatePlan(firstCall, laterCall));
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(firstCall.ToolName);
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                laterCall.ToolName,
+                "Solo se permite una llamada aprobada por etapa de satisfacción."
+            )
+        );
+    }
+
+    [Fact]
+    public void Validate_Should_approve_calls_for_different_satisfaction_stages()
+    {
+        var validator = new ToolPlanValidator();
+        var dataCall = CreateCall(PlannerToolCatalog.AnalyzeTransactionsName);
+        var legalCall = CreateCall(PlannerToolCatalog.SearchCnvRegulationName);
+
+        var result = validator.Validate(CreatePlan(dataCall, legalCall));
+
+        result.IsValid.Should().BeTrue();
+        result.ApprovedCalls.Select(call => call.ToolName).Should().Equal(
+            dataCall.ToolName,
+            legalCall.ToolName);
+        result.RejectedCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_Should_approve_valid_call_after_hostile_call_did_not_reserve_its_stage()
+    {
+        var validator = new ToolPlanValidator();
+        var hostileCall = new ProposedToolCall(
+            PlannerToolCatalog.SearchCnvRegulationName,
+            new Dictionary<string, string> { ["query"] = "hostile" },
+            "Hostile arguments.");
+        var validCall = CreateCall(PlannerToolCatalog.SearchCnvRegulationName);
+
+        var result = validator.Validate(CreatePlan(hostileCall, validCall));
+
+        result.IsValid.Should().BeFalse();
+        result.ApprovedCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(validCall.ToolName);
+        result.RejectedCalls.Should().ContainSingle().Which.Should().Be(
+            new RejectedToolCall(
+                hostileCall.ToolName,
+                "Argumento no permitido: query."
+            )
+        );
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
