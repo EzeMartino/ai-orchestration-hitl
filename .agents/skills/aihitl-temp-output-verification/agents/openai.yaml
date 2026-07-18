@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIHITL Temp Output Verification"
+  short_description: "Verify .NET around locked outputs safely"
+  default_prompt: "Use $aihitl-temp-output-verification to rerun this blocked .NET verification without stopping the app."

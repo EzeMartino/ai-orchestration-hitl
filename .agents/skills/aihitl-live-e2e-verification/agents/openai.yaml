@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIHITL Live E2E Verification"
+  short_description: "Prove live Aspire and financial workflows"
+  default_prompt: "Use $aihitl-live-e2e-verification to verify this AIHITL workflow in the running app."

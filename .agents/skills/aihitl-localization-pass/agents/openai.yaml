@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIHITL Localization Pass"
+  short_description: "Localize visible copy across the AIHITL stack"
+  default_prompt: "Use $aihitl-localization-pass to finish this Spanish localization safely."
