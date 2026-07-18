@@ -46,6 +46,9 @@ namespace Orchestration.Tests.AnalysisSessions;
 public sealed class ProductionLikeWorkflowE2ETests
 {
     private const string AllowedCnvCitation = "TEST-CNV-E2E-001";
+    private const string UncitedCnvTitle = "Uncited test result";
+    private const string UncitedCnvSnippet =
+        "Uncited result should not become strong legal support.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
@@ -223,6 +226,9 @@ public sealed class ProductionLikeWorkflowE2ETests
         startedSession.ContextJson.Should().NotContain("outputJson");
         startedSession.ContextJson.Should().NotContain("rawPrompt");
         startedSession.ContextJson.Should().NotContain("modelResponse");
+        AssertPersistedContextualLegalQueryAudit(
+            startedContext.RootElement,
+            cnvClient.ReceivedRequests);
 
         var preApprovalActivityTypes = await dbContext.ActivityEvents
             .AsNoTracking()
@@ -1028,6 +1034,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         var compliance = root.GetProperty("compliance");
         compliance.GetProperty("riskDetected").GetBoolean().Should().BeTrue();
         compliance.GetProperty("evidence").GetArrayLength().Should().BeGreaterThan(0);
+        AssertPersistedComplianceEvidence(compliance);
         GetProperty(compliance.GetProperty("queryStrategy"), "source", "Source")
             .GetString().Should().Be("contextual");
         var legalReview = compliance.GetProperty("legalReview");
@@ -1049,6 +1056,57 @@ public sealed class ProductionLikeWorkflowE2ETests
             .Count(call => call.GetProperty("toolName").GetString() ==
                 PlannerToolCatalog.SearchCnvRegulationName)
             .Should().Be(1);
+    }
+
+    private static void AssertPersistedContextualLegalQueryAudit(
+        JsonElement root,
+        IReadOnlyList<CnvRegulationSearchRequest> receivedRequests)
+    {
+        var toolPlan = root.GetProperty("toolPlan");
+        toolPlan.GetProperty("approvedCalls").EnumerateArray()
+            .Count(call => call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.SearchCnvRegulationName)
+            .Should().Be(1);
+
+        var queries = root.GetProperty("compliance")
+            .GetProperty("queryStrategy")
+            .GetProperty("queries")
+            .EnumerateArray()
+            .ToArray();
+        queries.Should().HaveCountGreaterThanOrEqualTo(1);
+        queries.Should().HaveCountLessThanOrEqualTo(4);
+        receivedRequests.Should().HaveSameCount(queries);
+
+        for (var index = 0; index < queries.Length; index++)
+        {
+            var queryAudit = queries[index];
+            queryAudit.GetProperty("index").GetInt32().Should().Be(index + 1);
+            queryAudit.GetProperty("total").GetInt32().Should().Be(queries.Length);
+            queryAudit.GetProperty("query").GetString().Should()
+                .Be(receivedRequests[index].Query);
+            queryAudit.GetProperty("regulationArea").GetString().Should()
+                .Be(receivedRequests[index].Area);
+            queryAudit.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+            queryAudit.GetProperty("relatedFinancialSignals").GetArrayLength()
+                .Should().BeGreaterThan(0);
+            queryAudit.GetProperty("executionStatus").GetString()
+                .Should().Be(LegalCnvQueryExecutionStatuses.Succeeded);
+            queryAudit.GetProperty("resultCount").GetInt32().Should().Be(2);
+            queryAudit.GetProperty("citedEvidenceCount").GetInt32().Should().Be(1);
+        }
+    }
+
+    private static void AssertPersistedComplianceEvidence(JsonElement compliance)
+    {
+        var evidence = compliance.GetProperty("evidence").EnumerateArray().ToArray();
+        evidence.Should().NotBeEmpty();
+        evidence.Should().Contain(item =>
+            item.GetProperty("regulation").GetString() == AllowedCnvCitation &&
+            item.GetProperty("finding").GetString() ==
+                "Cited test fixture evidence for financial disclosure review.");
+        evidence.Should().NotContain(item =>
+            item.GetProperty("regulation").GetString() == UncitedCnvTitle ||
+            item.GetProperty("finding").GetString() == UncitedCnvSnippet);
     }
 
     private static void AssertIsolatedFinalContext(
@@ -1570,13 +1628,13 @@ public sealed class ProductionLikeWorkflowE2ETests
                     new CnvRegulationSearchResult(
                         DocumentId: "cnv-e2e-uncited",
                         ChunkId: "chunk-2",
-                        Title: "Uncited test result",
+                        Title: UncitedCnvTitle,
                         Chapter: null,
                         Section: null,
                         Article: null,
                         Source: "CNV test fixture",
                         Url: null,
-                        Snippet: "Uncited result should not become strong legal support.",
+                        Snippet: UncitedCnvSnippet,
                         Score: 0.5,
                         Citations: []
                     )
