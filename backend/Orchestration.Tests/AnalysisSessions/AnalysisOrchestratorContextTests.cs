@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
@@ -301,6 +302,7 @@ public class AnalysisOrchestratorContextTests
     [Fact]
     public void BuildAnalysisContext_Should_persist_staged_planner_and_legal_audit_metadata()
     {
+        const string sensitiveToolOutput = "sensitive-output-sentinel";
         var toolPlan = new ToolPlanAuditResult(
             ProposedCalls: [],
             ApprovedCalls: [],
@@ -313,7 +315,7 @@ public class AnalysisOrchestratorContextTests
                     Succeeded: true,
                     Summary: "Cited evidence retrieved.",
                     Engine: "Controlled Tool Executor",
-                    OutputJson: "{\"sensitive\":\"payload\"}",
+                    OutputJson: $"{{\"sensitive\":\"{sensitiveToolOutput}\"}}",
                     Error: null
                 )
             ],
@@ -325,7 +327,31 @@ public class AnalysisOrchestratorContextTests
         {
             LegalResult = plannerResult.LegalResult with
             {
-                QueryStrategy = new { fallbackReason = "signals_stage_failed" },
+                QueryStrategy = new LegalQueryStrategyAudit(
+                    StrategyVersion: "financial_analysis_v2",
+                    Source: "contextual",
+                    FallbackReason: "signals_stage_failed",
+                    DataToolStatus: LegalDataToolStatuses.Executed,
+                    FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Degraded,
+                    FailedStages:
+                    [
+                        new LegalDataStageFailureAudit(
+                            FinancialAnalysisOperations.Signals,
+                            FinancialAnalysisFailureCodes.PythonInvocationFailed)
+                    ],
+                    Queries:
+                    [
+                        new LegalCnvQueryAudit(
+                            Index: 1,
+                            Total: 1,
+                            Query: "liquidez",
+                            RegulationArea: "agentes",
+                            Reason: "Signal mapped to liquidity review.",
+                            RelatedFinancialSignals: ["LOW_CURRENT_RATIO"],
+                            ExecutionStatus: LegalCnvQueryExecutionStatuses.Failed,
+                            ResultCount: 0,
+                            CitedEvidenceCount: 0)
+                    ]),
                 RequiresHumanReview = true
             }
         };
@@ -341,10 +367,31 @@ public class AnalysisOrchestratorContextTests
             .GetString().Should().Be("llm_response_invalid");
         root.GetProperty("compliance").GetProperty("requiresHumanReview")
             .GetBoolean().Should().BeTrue();
-        root.GetProperty("compliance").GetProperty("queryStrategy")
-            .GetProperty("fallbackReason").GetString()
+        var queryStrategy = root.GetProperty("compliance").GetProperty("queryStrategy");
+        queryStrategy.GetProperty("strategyVersion").GetString()
+            .Should().Be("financial_analysis_v2");
+        queryStrategy.GetProperty("source").GetString().Should().Be("contextual");
+        queryStrategy.GetProperty("fallbackReason").GetString()
             .Should().Be("signals_stage_failed");
-        root.GetRawText().Should().NotContain("outputJson");
+        queryStrategy.GetProperty("dataToolStatus").GetString().Should().Be("executed");
+        queryStrategy.GetProperty("financialAnalysisStatus").GetString().Should().Be("degraded");
+        queryStrategy.GetProperty("failedStages")[0].GetProperty("operation").GetString()
+            .Should().Be(FinancialAnalysisOperations.Signals);
+        queryStrategy.GetProperty("failedStages")[0].GetProperty("failureCode").GetString()
+            .Should().Be(FinancialAnalysisFailureCodes.PythonInvocationFailed);
+        var query = queryStrategy.GetProperty("queries")[0];
+        query.GetProperty("index").GetInt32().Should().Be(1);
+        query.GetProperty("total").GetInt32().Should().Be(1);
+        query.GetProperty("query").GetString().Should().Be("liquidez");
+        query.GetProperty("regulationArea").GetString().Should().Be("agentes");
+        query.GetProperty("reason").GetString().Should().Be("Signal mapped to liquidity review.");
+        query.GetProperty("relatedFinancialSignals")[0].GetString().Should().Be("LOW_CURRENT_RATIO");
+        query.GetProperty("executionStatus").GetString().Should().Be("failed");
+        query.GetProperty("resultCount").GetInt32().Should().Be(0);
+        query.GetProperty("citedEvidenceCount").GetInt32().Should().Be(0);
+        var persistedJson = root.GetRawText();
+        persistedJson.ToUpperInvariant().Should().NotContain("OUTPUTJSON");
+        persistedJson.Should().NotContain(sensitiveToolOutput);
     }
 
     [Fact]
