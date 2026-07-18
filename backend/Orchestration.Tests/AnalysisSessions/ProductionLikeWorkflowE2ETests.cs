@@ -351,11 +351,15 @@ public sealed class ProductionLikeWorkflowE2ETests
         executedCallNames.Should().Equal(
             PlannerToolCatalog.AnalyzeTransactionsName,
             PlannerToolCatalog.SearchCnvRegulationName);
-        var toolExecutionAgents = activityPublisher.PublishedEvents
-            .Where(activityEvent => activityEvent.Type == "tool_call_executed")
+        var persistedToolExecutionAgents = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(activityEvent =>
+                activityEvent.SessionId == session.Id &&
+                activityEvent.Type == "tool_call_executed")
+            .OrderBy(activityEvent => activityEvent.Timestamp)
             .Select(activityEvent => activityEvent.Agent)
-            .ToArray();
-        toolExecutionAgents.Should().Equal("DataAgent", "LegalAgent");
+            .ToArrayAsync();
+        persistedToolExecutionAgents.Should().Equal("DataAgent", "LegalAgent");
     }
 
     [Fact]
