@@ -310,6 +310,8 @@ namespace Orchestration.Application.AnalysisSessions
                 },
                 toolPlan = new
                 {
+                    proposalSource = plannerResult.ToolPlan.ProposalSource,
+                    proposalFallbackReason = plannerResult.ToolPlan.ProposalFallbackReason,
                     proposedCalls = plannerResult.ToolPlan.ProposedCalls.Select(call => new
                     {
                         toolName = call.ToolName,
@@ -497,6 +499,7 @@ namespace Orchestration.Application.AnalysisSessions
                 {
                     riskDetected = plannerResult.LegalResult.HasComplianceRisk,
                     riskLevel = plannerResult.LegalResult.RiskLevel,
+                    requiresHumanReview = plannerResult.LegalResult.RequiresHumanReview,
                     engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
                     warnings = plannerResult.LegalResult.Warnings,

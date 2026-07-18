@@ -299,6 +299,55 @@ public class AnalysisOrchestratorContextTests
     }
 
     [Fact]
+    public void BuildAnalysisContext_Should_persist_staged_planner_and_legal_audit_metadata()
+    {
+        var toolPlan = new ToolPlanAuditResult(
+            ProposedCalls: [],
+            ApprovedCalls: [],
+            RejectedCalls: [],
+            ExecutedCalls:
+            [
+                new ToolExecutionResult(
+                    ToolName: "legal.search_cnv_regulation",
+                    Status: ToolExecutionStatus.Executed,
+                    Succeeded: true,
+                    Summary: "Cited evidence retrieved.",
+                    Engine: "Controlled Tool Executor",
+                    OutputJson: "{\"sensitive\":\"payload\"}",
+                    Error: null
+                )
+            ],
+            ProposalSource: ToolPlanProposalSource.DeterministicFallback,
+            ProposalFallbackReason: ToolPlanProposalFallbackReason.LlmResponseInvalid
+        );
+        var plannerResult = CreatePlannerResult(toolPlan);
+        plannerResult = plannerResult with
+        {
+            LegalResult = plannerResult.LegalResult with
+            {
+                QueryStrategy = new { fallbackReason = "signals_stage_failed" },
+                RequiresHumanReview = true
+            }
+        };
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        var root = document.RootElement;
+
+        root.GetProperty("toolPlan").GetProperty("proposalSource")
+            .GetString().Should().Be("deterministic_fallback");
+        root.GetProperty("toolPlan").GetProperty("proposalFallbackReason")
+            .GetString().Should().Be("llm_response_invalid");
+        root.GetProperty("compliance").GetProperty("requiresHumanReview")
+            .GetBoolean().Should().BeTrue();
+        root.GetProperty("compliance").GetProperty("queryStrategy")
+            .GetProperty("fallbackReason").GetString()
+            .Should().Be("signals_stage_failed");
+        root.GetRawText().Should().NotContain("outputJson");
+    }
+
+    [Fact]
     public void BuildAnalysisContext_Should_include_financial_analysis_when_available()
     {
         var financialContext = new FinancialAnalysisContext(
