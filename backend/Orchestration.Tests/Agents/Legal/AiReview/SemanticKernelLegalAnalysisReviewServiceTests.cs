@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -14,6 +16,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.AiReview;
 using Orchestration.Infrastructure.Agents.Planner.Reasoning;
 
@@ -167,7 +170,373 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
         result.FailureReason.Should().BeNull();
         result.ReviewSummary.Should().Be("Valid review summary.");
         result.PossibleRegulatoryReviewAreas.Should().ContainSingle();
+        result.PossibleRegulatoryReviewAreas[0].Severity.Should().Be("High");
         result.PossibleRegulatoryReviewAreas[0].EvidenceCitations.Should().ContainSingle().Which.Should().Be("CNV Art. 42");
+    }
+
+    [Theory]
+    [InlineData("High", "Info")]
+    [InlineData("Critical", "Warning")]
+    public async Task ReviewAsync_Should_clamp_severity_and_sanitize_conclusive_language_when_assessed(
+        string responseSeverity,
+        string assessmentSeverity)
+    {
+        var response = $$"""
+        {
+          "reviewSummary": "ES ILEGAL y infringe la normativa.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Incumplimiento confirmado",
+              "description": "Violación legal confirmada; la entidad es culpable y cometió fraude.",
+              "severity": "{{responseSeverity}}",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [],
+          "warnings": [
+            "La evidencia menciona riesgo de fraude sin concluir responsabilidad.",
+            "FRAUDE CONFIRMADO"
+          ],
+          "limitations": [
+            "No constituye asesoramiento legal",
+            "La entidad incumple la normativa."
+          ]
+        }
+        """;
+        var chat = new FakeChatCompletionService(response);
+        var service = CreateService(chat);
+        var input = CreateInput(evidenceAssessment: CreateAssessment(assessmentSeverity));
+
+        var result = await service.ReviewAsync(input, CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.PossibleRegulatoryReviewAreas.Should().OnlyContain(area => area.Severity == assessmentSeverity);
+        result.Warnings.Should().Contain("La evidencia menciona riesgo de fraude sin concluir responsabilidad.");
+        result.Limitations.Should().Contain("No constituye asesoramiento legal");
+        result.Limitations.Count(value => string.Equals(
+                value,
+                "No constituye asesoramiento legal",
+                StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1);
+
+        var visibleText = string.Join(" ",
+            result.ReviewSummary,
+            string.Join(" ", result.PossibleRegulatoryReviewAreas.SelectMany(area =>
+                new[] { area.Title, area.Description }
+                    .Concat(area.RelatedFinancialSignals)
+                    .Concat(area.EvidenceCitations))),
+            string.Join(" ", result.Warnings),
+            string.Join(" ", result.Limitations));
+
+        foreach (var forbidden in new[]
+                 {
+                     "es ilegal",
+                     "infringe la normativa",
+                     "incumplimiento confirmado",
+                     "violación legal confirmada",
+                     "culpable",
+                     "cometió fraude",
+                     "fraude confirmado",
+                     "incumple la normativa"
+                 })
+        {
+            visibleText.ToLowerInvariant().Should().NotContain(forbidden);
+        }
+
+        visibleText.Should().Contain("aplicabilidad no está establecida");
+    }
+
+    [Theory]
+    [InlineData("violacion legal confirmada")]
+    [InlineData("cometio fraude")]
+    [InlineData("violacio\u0301n legal confirmada")]
+    [InlineData("infringe     la normativa")]
+    [InlineData("FRAUDE CONFIRMADO")]
+    [InlineData("incumple la normativa")]
+    public async Task ReviewAsync_Should_sanitize_normalized_conclusive_language_variants_when_assessed(
+        string conclusiveLanguage)
+    {
+        var response = $$"""
+        {
+          "reviewSummary": "La evidencia indica que {{conclusiveLanguage}}.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "Requiere revisión humana.",
+              "severity": "Critical",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.ReviewSummary.Should().NotContain(conclusiveLanguage);
+        result.ReviewSummary.Should().Contain("aplicabilidad no está establecida");
+        result.ReviewSummary.IsNormalized(NormalizationForm.FormC).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("cometió un fraude")]
+    [InlineData("comete fraude")]
+    [InlineData("comete un fraude")]
+    [InlineData("se confirmó el incumplimiento")]
+    [InlineData("se confirma incumplimiento")]
+    public async Task ReviewAsync_Should_sanitize_specific_affirmative_language_families_when_assessed(
+        string conclusiveLanguage)
+    {
+        var response = CreateResponseWithSummary($"La evidencia afirma que {conclusiveLanguage}.");
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.ReviewSummary.Should().NotContain(conclusiveLanguage);
+        result.ReviewSummary.Should().Contain("aplicabilidad no está establecida");
+    }
+
+    [Theory]
+    [InlineData("no es ilegal")]
+    [InlineData("no infringe la normativa")]
+    [InlineData("no es culpable")]
+    [InlineData("not guilty")]
+    [InlineData("no cometió un fraude")]
+    [InlineData("no se confirmó el incumplimiento")]
+    public async Task ReviewAsync_Should_preserve_explicitly_negated_legal_language_when_assessed(
+        string cautiousLanguage)
+    {
+        var summary = $"La evidencia indica que {cautiousLanguage}.";
+        var service = CreateService(new FakeChatCompletionService(CreateResponseWithSummary(summary)));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.ReviewSummary.Should().Be(summary);
+    }
+
+    [Theory]
+    [InlineData("No. Cometió fraude.")]
+    [InlineData("No; es ilegal.")]
+    [InlineData("No… cometió fraude.")]
+    [InlineData("No) cometió fraude.")]
+    [InlineData("No/ cometió fraude.")]
+    [InlineData("No\ncometió fraude.")]
+    public async Task ReviewAsync_Should_not_apply_negation_across_clause_boundaries(
+        string conclusiveLanguage)
+    {
+        var service = CreateService(new FakeChatCompletionService(
+            CreateResponseWithSummary(conclusiveLanguage)));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.ReviewSummary.Should().NotBe(conclusiveLanguage);
+        result.ReviewSummary.Should().Contain("aplicabilidad no está establecida");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_canonicalize_related_financial_signals_against_input_allowlist()
+    {
+        var response = """
+        {
+          "reviewSummary": "La aplicabilidad requiere revisión humana.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "La evidencia podría ser relevante.",
+              "severity": "High",
+              "relatedFinancialSignals": [
+                " invented_signal ",
+                " low_current_ratio ",
+                "LOW_CURRENT_RATIO"
+              ],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(
+            CreateInput(
+                riskSignals: [CreateSignal("LOW_CURRENT_RATIO", "High")],
+                evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.PossibleRegulatoryReviewAreas.Should().ContainSingle()
+            .Which.RelatedFinancialSignals.Should().Equal("LOW_CURRENT_RATIO");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_return_allowed_evidence_exactly_without_sanitizing_provenance()
+    {
+        var allowedEvidence = new LegalEvidenceReference(
+            Source: "CNV",
+            Title: "Resolución General 923",
+            Url: "https://www.argentina.gob.ar/cnv/rg-923",
+            Citation: "CNV Art. 42",
+            Snippet: "Texto citado: violación legal confirmada.",
+            RegulationArea: "Transparencia",
+            Score: 0.91);
+        var response = """
+        {
+          "reviewSummary": "La aplicabilidad requiere revisión humana.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "La evidencia podría ser relevante.",
+              "severity": "High",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["  cnv art. 42  "]
+            }
+          ],
+          "evidenceReferences": [
+            {
+              "source": "Reescritura LLM",
+              "title": "Título alterado",
+              "url": "https://example.invalid/inventado",
+              "citation": "cnv art. 42",
+              "snippet": "Resumen alterado",
+              "regulationArea": "Área alterada",
+              "score": 0.1
+            }
+          ],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(
+            CreateInput(
+                evidenceAssessment: CreateAssessment("Warning"),
+                cnvEvidence: [allowedEvidence]),
+            CancellationToken.None);
+
+        result.UsedLlm.Should().BeTrue();
+        result.UsedFallback.Should().BeFalse();
+        result.PossibleRegulatoryReviewAreas.Should().ContainSingle()
+            .Which.EvidenceCitations.Should().Equal(allowedEvidence.Citation!);
+        result.EvidenceReferences.Should().ContainSingle().Which.Should().Be(allowedEvidence);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_insert_one_legal_disclaimer_when_assessed_limitations_are_empty()
+    {
+        var service = CreateService(new FakeChatCompletionService(CreateValidResponse()));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.Limitations.Count(value => string.Equals(
+                value,
+                "No constituye asesoramiento legal",
+                StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_canonicalize_equivalent_legal_disclaimers_once()
+    {
+        var response = """
+        {
+          "reviewSummary": "La aplicabilidad requiere revisión humana.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "La evidencia podría ser relevante.",
+              "severity": "High",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [],
+          "warnings": [],
+          "limitations": [
+            "NO  CONSTITUYE ASESORAMIENTO LEGAL.",
+            "No constituye asesoramiento legal…",
+            "No constituye asesoramiento legal",
+            "La aplicabilidad todavía requiere revisión humana."
+          ]
+        }
+        """;
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        result.Limitations.Should().Contain("La aplicabilidad todavía requiere revisión humana.");
+        result.Limitations.Should().HaveCount(2);
+        result.Limitations.Count(value => string.Equals(
+                value,
+                "No constituye asesoramiento legal",
+                StringComparison.OrdinalIgnoreCase))
+            .Should().Be(1);
+        result.Limitations.Should().NotContain("NO  CONSTITUYE ASESORAMIENTO LEGAL.");
+        result.Limitations.Should().NotContain("No constituye asesoramiento legal…");
+    }
+
+
+    [Fact]
+    public async Task ReviewAsync_Should_fail_safe_to_warning_for_invalid_assessment_severity()
+    {
+        var chat = new FakeChatCompletionService(CreateValidResponse());
+        var service = CreateService(chat);
+
+        var result = await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Critical")),
+            CancellationToken.None);
+
+        result.PossibleRegulatoryReviewAreas.Should().OnlyContain(area => area.Severity == "Warning");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_send_explicit_evidence_assessment_safety_instructions()
+    {
+        var chat = new FakeChatCompletionService(CreateValidResponse());
+        var service = CreateService(chat);
+
+        await service.ReviewAsync(
+            CreateInput(evidenceAssessment: CreateAssessment("Warning")),
+            CancellationToken.None);
+
+        var prompt = string.Join("\n", chat.LastChatHistory!.Select(message => message.Content))
+            .ToLowerInvariant();
+        prompt.Should().Contain("retrieval and citations do not establish compliance risk");
+        prompt.Should().Contain("relevance");
+        prompt.Should().Contain("applicability");
+        prompt.Should().Contain("evidence quality");
+        prompt.Should().Contain("notestablished");
+        prompt.Should().Contain("maximum severity is warning");
+        prompt.Should().Contain("not legal advice");
+        prompt.Should().Contain("must not assert");
+        prompt.Should().Contain("legal violation");
     }
 
     [Fact]
@@ -270,6 +639,28 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
         var service = CreateService(chat);
 
         var result = await service.ReviewAsync(CreateInput(), CancellationToken.None);
+
+        result.UsedLlm.Should().BeFalse();
+        result.UsedFallback.Should().BeTrue();
+        result.FailureReason.Should().Be("forbidden_language");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_preserve_legacy_substring_language_detection_without_assessment()
+    {
+        var responseWithForbidden = """
+        {
+          "reviewSummary": "The evidence suggests fraudulent conduct.",
+          "possibleRegulatoryReviewAreas": [],
+          "evidenceReferences": [],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+        var chat = new FakeChatCompletionService(responseWithForbidden);
+        var service = CreateService(chat);
+
+        var result = await service.ReviewAsync(CreateInput(evidenceAssessment: null), CancellationToken.None);
 
         result.UsedLlm.Should().BeFalse();
         result.UsedFallback.Should().BeTrue();
@@ -513,7 +904,9 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
     }
 
     private static LegalAnalysisReviewInput CreateInput(
-        IReadOnlyList<FinancialRiskSignal>? riskSignals = null)
+        IReadOnlyList<FinancialRiskSignal>? riskSignals = null,
+        RegulatoryEvidenceAssessment? evidenceAssessment = null,
+        IReadOnlyList<LegalEvidenceReference>? cnvEvidence = null)
     {
         return new LegalAnalysisReviewInput(
             SessionId: "33333333-3333-3333-3333-333333333333",
@@ -526,7 +919,21 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
             FinancialRiskEvidence: Array.Empty<RiskEvidenceItem>(),
             FinancialWarnings: Array.Empty<string>(),
             FinancialLimitations: Array.Empty<string>(),
-            CnvEvidence: [CreateEvidence("CNV Art. 42")]
+            CnvEvidence: cnvEvidence ?? [CreateEvidence("CNV Art. 42")],
+            EvidenceAssessment: evidenceAssessment
+        );
+    }
+
+    private static RegulatoryEvidenceAssessment CreateAssessment(string severity)
+    {
+        return new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Strong",
+            Severity: severity,
+            RequiresHumanReview: true,
+            Reasons: ["Applicability was not established."]
         );
     }
 
@@ -588,6 +995,28 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
               "score": 0.9
             }
           ],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+    }
+
+    private static string CreateResponseWithSummary(string summary)
+    {
+        var serializedSummary = JsonSerializer.Serialize(summary);
+        return $$"""
+        {
+          "reviewSummary": {{serializedSummary}},
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "Requiere revisión humana.",
+              "severity": "Critical",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [],
           "warnings": [],
           "limitations": []
         }

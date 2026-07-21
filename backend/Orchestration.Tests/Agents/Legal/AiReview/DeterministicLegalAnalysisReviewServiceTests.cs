@@ -8,6 +8,7 @@ using Xunit;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Regulations;
 
 namespace Orchestration.Tests.Agents.Legal.AiReview;
 
@@ -149,6 +150,52 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
         area.Severity.Should().Be("High");
     }
 
+    [Theory]
+    [InlineData("Info")]
+    [InlineData("Warning")]
+    public async Task ReviewAsync_Should_use_evidence_assessment_severity_instead_of_legacy_signals(
+        string assessmentSeverity)
+    {
+        var input = CreateInput(
+            riskSignals: [CreateSignal(name: "LOW_CURRENT_RATIO", severity: "High")],
+            cnvEvidence: [CreateEvidence(citation: "CNV Art. 42")],
+            evidenceAssessment: CreateAssessment(assessmentSeverity)
+        );
+
+        var result = await _service.ReviewAsync(input, CancellationToken.None);
+
+        result.PossibleRegulatoryReviewAreas.Should().OnlyContain(
+            area => area.Severity == assessmentSeverity);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_preserve_legacy_severity_when_evidence_assessment_is_null()
+    {
+        var input = CreateInput(
+            riskSignals: [CreateSignal(name: "LOW_CURRENT_RATIO", severity: "High")],
+            cnvEvidence: [CreateEvidence(citation: "CNV Art. 42")],
+            evidenceAssessment: null
+        );
+
+        var result = await _service.ReviewAsync(input, CancellationToken.None);
+
+        result.PossibleRegulatoryReviewAreas.Should().OnlyContain(area => area.Severity == "High");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_fail_safe_to_warning_for_invalid_assessment_severity()
+    {
+        var input = CreateInput(
+            riskSignals: [CreateSignal(name: "LOW_CURRENT_RATIO", severity: "High")],
+            cnvEvidence: [CreateEvidence(citation: "CNV Art. 42")],
+            evidenceAssessment: CreateAssessment("Critical")
+        );
+
+        var result = await _service.ReviewAsync(input, CancellationToken.None);
+
+        result.PossibleRegulatoryReviewAreas.Should().OnlyContain(area => area.Severity == "Warning");
+    }
+
     [Fact]
     public async Task ReviewAsync_Should_include_standard_legal_limitations()
     {
@@ -214,7 +261,8 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
         IReadOnlyList<FinancialRiskSignal> riskSignals,
         IReadOnlyList<LegalEvidenceReference> cnvEvidence,
         IReadOnlyList<string>? financialWarnings = null,
-        IReadOnlyList<string>? financialLimitations = null)
+        IReadOnlyList<string>? financialLimitations = null,
+        RegulatoryEvidenceAssessment? evidenceAssessment = null)
     {
         return new LegalAnalysisReviewInput(
             SessionId: "33333333-3333-3333-3333-333333333333",
@@ -227,7 +275,21 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
             FinancialRiskEvidence: Array.Empty<RiskEvidenceItem>(),
             FinancialWarnings: financialWarnings ?? Array.Empty<string>(),
             FinancialLimitations: financialLimitations ?? Array.Empty<string>(),
-            CnvEvidence: cnvEvidence
+            CnvEvidence: cnvEvidence,
+            EvidenceAssessment: evidenceAssessment
+        );
+    }
+
+    private static RegulatoryEvidenceAssessment CreateAssessment(string severity)
+    {
+        return new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Strong",
+            Severity: severity,
+            RequiresHumanReview: true,
+            Reasons: ["Applicability was not established."]
         );
     }
 
