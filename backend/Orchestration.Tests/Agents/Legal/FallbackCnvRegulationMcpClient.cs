@@ -47,7 +47,7 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
                         Source: "Infoleg",
                         Url: "https://servicios.infoleg.gob.ar/infolegInternet/anexos/215000-219999/219405/norma.htm",
                         Snippet: "Texto encontrado...",
-                        Score: 0.075,
+                        Score: 0.91,
                         Citations:
                         [
                             new CnvRegulationCitation(
@@ -110,9 +110,11 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
         result.Findings.Should().NotBeEmpty();
         result.EvidenceAssessment.Should().NotBeNull();
         result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
-        result.EvidenceAssessment.Relevance.Should().Be("None");
-        result.EvidenceAssessment.RequiresHumanReview.Should().BeFalse();
-        result.Warnings.Should().NotContain(
+        result.EvidenceAssessment.Relevance.Should().Be("Strong");
+        result.EvidenceAssessment.EvidenceQuality.Should().Be("Strong");
+        result.EvidenceAssessment.Severity.Should().Be("Warning");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+        result.Warnings.Should().Contain(
             "Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana."
         );
 
