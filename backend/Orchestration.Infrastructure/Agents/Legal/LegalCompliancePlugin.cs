@@ -80,7 +80,8 @@ public sealed class LegalCompliancePlugin(
             Warnings: review.Warnings,
             QueryStrategy: review.QueryStrategy,
             LegalReview: review.LegalReview,
-            RequiresHumanReview: review.RequiresHumanReview
+            RequiresHumanReview: review.RequiresHumanReview,
+            EvidenceAssessment: review.EvidenceAssessment
         );
     }
 

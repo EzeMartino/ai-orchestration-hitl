@@ -5,6 +5,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
@@ -378,6 +379,51 @@ public class PlannerAgentTests
         result.RequiresHumanApproval.Should().BeTrue();
         result.DataResult.HasAnomaly.Should().BeFalse();
         result.LegalResult.HasComplianceRisk.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RunAsync_Should_require_human_approval_when_legal_evidence_requires_review()
+    {
+        var evidenceAssessment = new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Weak",
+            Severity: "Warning",
+            RequiresHumanReview: true,
+            Reasons: ["La evidencia legal requiere revisión humana."]
+        );
+        var legalResult = CreateLegalResult(hasComplianceRisk: false) with
+        {
+            RiskLevel = "NotEstablished",
+            EvidenceAssessment = evidenceAssessment
+        };
+        var plannerAgent = new PlannerAgent(
+            new FakeDataAgent(CreateDataResult(hasAnomaly: false)),
+            new FakeLegalAgent(legalResult),
+            new FakeActivityEventPublisher(),
+            new FakePlannerReasoningService(),
+            new FakeToolPlanProposalService(),
+            new ToolPlanNormalizer(),
+            new ToolPlanValidator(),
+            new ToolExecutionPolicy(),
+            new FakeControlledToolExecutor(),
+            new FakeToolExecutionResultMapper(),
+            new ToolCallingOptions()
+        );
+
+        var result = await plannerAgent.RunAsync(
+            TestFinancialReport.CreateContext(),
+            CancellationToken.None
+        );
+
+        result.RequiresHumanApproval.Should().BeTrue();
+        result.DataResult.HasAnomaly.Should().BeFalse();
+        result.DataResult.RequiresHumanReview.Should().BeFalse();
+        result.LegalResult.HasComplianceRisk.Should().BeFalse();
+        result.LegalResult.RiskLevel.Should().Be("NotEstablished");
+        result.LegalResult.EvidenceAssessment.Should().BeSameAs(evidenceAssessment);
+        result.LegalResult.EvidenceAssessment!.RequiresHumanReview.Should().BeTrue();
     }
 
     [Fact]

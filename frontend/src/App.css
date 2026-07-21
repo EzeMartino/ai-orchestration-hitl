@@ -2205,6 +2205,97 @@ code {
   border-color: #a7f3d0;
 }
 
+.risk-NotEstablished {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.legalEvidenceAssessment {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  background: linear-gradient(135deg, rgba(8, 47, 73, 0.58), rgba(15, 23, 42, 0.72));
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-left: 4px solid #38bdf8;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.legalEvidenceAssessmentEyebrow {
+  margin: 0 0 0.35rem;
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.legalEvidenceAssessment h3 {
+  margin: 0;
+  color: #f1f5f9;
+  font-size: 1.05rem;
+}
+
+.legalEvidenceAssessmentDisclaimer {
+  margin: 0.65rem 0 0;
+  max-width: 78ch;
+  color: #bae6fd;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.legalEvidenceAssessmentGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 1rem 0 0;
+}
+
+.legalEvidenceAssessmentGrid > div {
+  min-width: 0;
+  padding: 0.75rem 0.8rem;
+  background: rgba(2, 6, 23, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+}
+
+.legalEvidenceAssessmentGrid dt {
+  color: #94a3b8;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.legalEvidenceAssessmentGrid dd {
+  margin: 0.3rem 0 0;
+  color: #f8fafc;
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.legalEvidenceAssessmentReasons {
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(125, 211, 252, 0.2);
+  color: #cbd5e1;
+  font-size: 0.88rem;
+}
+
+.legalEvidenceAssessmentReasons strong {
+  color: #e0f2fe;
+}
+
+.legalEvidenceAssessmentReasons ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.legalEvidenceAssessmentReasons li + li {
+  margin-top: 0.3rem;
+}
+
 .complianceEvidenceList {
   display: grid;
   gap: 0.85rem;
@@ -2297,6 +2388,7 @@ code {
   .financialReviewNotes,
   .financialMetricsReviewSummary,
   .financialMetricsReviewDocumentGrid,
+  .legalEvidenceAssessmentGrid,
   .metricAdditionGrid,
   .csvMetaGrid,
   .ratioStrip {

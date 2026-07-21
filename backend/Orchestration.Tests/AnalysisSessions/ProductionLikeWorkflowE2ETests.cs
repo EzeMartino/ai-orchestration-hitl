@@ -100,13 +100,15 @@ public sealed class ProductionLikeWorkflowE2ETests
         var cnvClient = new FakeProductionCnvRegulationMcpClient();
         var dataInvocationCount = 0;
         var legalInvocationCount = 0;
+        PlannerAgentResult? plannerResult = null;
         var controller = CreateController(
             dbContext,
             activityPublisher,
             pythonService,
             cnvClient,
             dataReportObserver: _ => dataInvocationCount++,
-            legalReportObserver: _ => legalInvocationCount++
+            legalReportObserver: _ => legalInvocationCount++,
+            plannerResultObserver: result => plannerResult = result
         );
 
         var createResult = await controller.CreateSession(CancellationToken.None);
@@ -140,6 +142,8 @@ public sealed class ProductionLikeWorkflowE2ETests
             .SingleAsync(x => x.Id == session.Id);
         startedSession.Status.Should().Be(AnalysisSessionStatus.AwaitingHumanApproval);
         startedSession.CurrentAgent.Should().BeNull();
+        plannerResult.Should().NotBeNull();
+        plannerResult!.RequiresHumanApproval.Should().BeTrue();
 
         using var startedContext = JsonDocument.Parse(startedSession.ContextJson);
         AssertProductionLikeContext(startedContext.RootElement);
@@ -184,12 +188,14 @@ public sealed class ProductionLikeWorkflowE2ETests
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
         var activityPublisher = new PersistingActivityEventPublisher(dbContext);
         var cnvClient = new FakeProductionCnvRegulationMcpClient();
+        PlannerAgentResult? plannerResult = null;
         var controller = CreateController(
             dbContext,
             activityPublisher,
             new FakeProductionPythonFinancialAnalysisService(),
             cnvClient,
-            ToolCallingExecutionMode.PlanDriven
+            ToolCallingExecutionMode.PlanDriven,
+            plannerResultObserver: result => plannerResult = result
         );
 
         var createResult = await controller.CreateSession(CancellationToken.None);
@@ -212,6 +218,8 @@ public sealed class ProductionLikeWorkflowE2ETests
         var startedSession = await dbContext.AnalysisSessions
             .SingleAsync(x => x.Id == session.Id);
         startedSession.Status.Should().Be(AnalysisSessionStatus.AwaitingHumanApproval);
+        plannerResult.Should().NotBeNull();
+        plannerResult!.RequiresHumanApproval.Should().BeTrue();
 
         using var startedContext = JsonDocument.Parse(startedSession.ContextJson);
         AssertPlanDrivenContext(startedContext.RootElement);
@@ -692,7 +700,8 @@ public sealed class ProductionLikeWorkflowE2ETests
         IToolPlanProposalService? proposalService = null,
         Action<FinancialReportContext>? dataReportObserver = null,
         Action<FinancialReportContext>? legalReportObserver = null,
-        Action<AnalysisOrchestratorService>? orchestratorObserver = null)
+        Action<AnalysisOrchestratorService>? orchestratorObserver = null,
+        Action<PlannerAgentResult>? plannerResultObserver = null)
     {
         var dataAgentOptions = new DataAgentOptions
         {
@@ -752,7 +761,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         {
             legalAgent = new ObservingLegalAgent(legalAgent, legalReportObserver);
         }
-        var planner = new PlannerAgent(
+        IPlannerAgent planner = new PlannerAgent(
             dataAgent,
             legalAgent,
             activityPublisher,
@@ -771,6 +780,10 @@ public sealed class ProductionLikeWorkflowE2ETests
             new ToolExecutionResultMapper(),
             toolCallingOptions
         );
+        if (plannerResultObserver is not null)
+        {
+            planner = new ObservingPlannerAgent(planner, plannerResultObserver);
+        }
         var orchestrator = new AnalysisOrchestratorService(
             dbContext,
             new AnalysisSessionWorkflowService(new AnalysisSessionStateMachine()),
@@ -972,7 +985,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             .NotContain(["TransactionAmountZScore", "VelocityScore"]);
 
         var compliance = root.GetProperty("compliance");
-        compliance.GetProperty("riskDetected").GetBoolean().Should().BeTrue();
+        AssertRetrievedLegalEvidenceAssessment(compliance);
         GetProperty(compliance.GetProperty("queryStrategy"), "source", "Source")
             .GetString()
             .Should()
@@ -1041,7 +1054,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             .NotContain(["TransactionAmountZScore", "VelocityScore"]);
 
         var compliance = root.GetProperty("compliance");
-        compliance.GetProperty("riskDetected").GetBoolean().Should().BeTrue();
+        AssertRetrievedLegalEvidenceAssessment(compliance);
         compliance.GetProperty("evidence").GetArrayLength().Should().BeGreaterThan(0);
         AssertPersistedComplianceEvidence(compliance);
         GetProperty(compliance.GetProperty("queryStrategy"), "source", "Source")
@@ -1120,6 +1133,20 @@ public sealed class ProductionLikeWorkflowE2ETests
         evidence.Should().NotContain(item =>
             item.GetProperty("regulation").GetString() == UncitedCnvTitle ||
             item.GetProperty("finding").GetString() == UncitedCnvSnippet);
+    }
+
+    private static void AssertRetrievedLegalEvidenceAssessment(JsonElement compliance)
+    {
+        compliance.GetProperty("riskDetected").GetBoolean().Should().BeFalse();
+        compliance.GetProperty("riskLevel").GetString().Should().Be("NotEstablished");
+
+        var assessment = compliance.GetProperty("evidenceAssessment");
+        assessment.GetProperty("evidenceFound").GetBoolean().Should().BeTrue();
+        assessment.GetProperty("relevance").GetString().Should().Be("Strong");
+        assessment.GetProperty("applicability").GetString().Should().Be("NotEstablished");
+        assessment.GetProperty("evidenceQuality").GetString().Should().Be("Strong");
+        assessment.GetProperty("severity").GetString().Should().Be("Warning");
+        assessment.GetProperty("requiresHumanReview").GetBoolean().Should().BeTrue();
     }
 
     private static void AssertIsolatedFinalContext(
@@ -1710,6 +1737,30 @@ public sealed class ProductionLikeWorkflowE2ETests
             _observer(report);
 
             return _inner.ReviewAsync(report, cancellationToken);
+        }
+    }
+
+    private sealed class ObservingPlannerAgent : IPlannerAgent
+    {
+        private readonly IPlannerAgent _inner;
+        private readonly Action<PlannerAgentResult> _observer;
+
+        public ObservingPlannerAgent(
+            IPlannerAgent inner,
+            Action<PlannerAgentResult> observer)
+        {
+            _inner = inner;
+            _observer = observer;
+        }
+
+        public async Task<PlannerAgentResult> RunAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            var result = await _inner.RunAsync(report, cancellationToken);
+            _observer(result);
+
+            return result;
         }
     }
 

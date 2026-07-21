@@ -1,4 +1,8 @@
 import type { ComplianceContext } from "../types/domain.types";
+import {
+  formatLegalAssessmentValue,
+  formatLegalRiskLevel,
+} from "../utils/legalEvidenceAssessment";
 
 interface CompliancePanelProps {
   compliance?: ComplianceContext;
@@ -15,6 +19,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
   ];
 
   const legalReview = compliance.legalReview;
+  const evidenceAssessment = compliance.evidenceAssessment;
 
   return (
     <section className="compliancePanel">
@@ -32,9 +37,68 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
         </div>
 
         <span className={`riskBadge risk-${compliance.riskLevel}`}>
-          {compliance.riskLevel}
+          {formatLegalRiskLevel(compliance.riskLevel)}
         </span>
       </div>
+
+      {evidenceAssessment && (
+        <section
+          className="legalEvidenceAssessment"
+          aria-labelledby="legal-evidence-assessment-title"
+        >
+          <p className="legalEvidenceAssessmentEyebrow">
+            Estado de la evidencia recuperada
+          </p>
+          <h3 id="legal-evidence-assessment-title">
+            Recuperación distinta de evaluación de cumplimiento
+          </h3>
+          <p className="legalEvidenceAssessmentDisclaimer">
+            La evidencia encontrada puede indicar un área posible de revisión; no determina aplicabilidad, incumplimiento ni asesoramiento legal.
+          </p>
+
+          <dl className="legalEvidenceAssessmentGrid">
+            <div>
+              <dt>Evidencia encontrada</dt>
+              <dd>{evidenceAssessment.evidenceFound ? "Sí" : "No"}</dd>
+            </div>
+            <div>
+              <dt>Relevancia</dt>
+              <dd>{formatLegalAssessmentValue(evidenceAssessment.relevance)}</dd>
+            </div>
+            <div>
+              <dt>Aplicabilidad</dt>
+              <dd>{formatLegalAssessmentValue(evidenceAssessment.applicability)}</dd>
+            </div>
+            <div>
+              <dt>Calidad</dt>
+              <dd>{formatLegalAssessmentValue(evidenceAssessment.evidenceQuality)}</dd>
+            </div>
+            <div>
+              <dt>Severidad</dt>
+              <dd>{formatLegalAssessmentValue(evidenceAssessment.severity)}</dd>
+            </div>
+            <div>
+              <dt>Revisión humana</dt>
+              <dd>
+                {evidenceAssessment.requiresHumanReview
+                  ? "Requerida"
+                  : "No requerida por la recuperación"}
+              </dd>
+            </div>
+          </dl>
+
+          {evidenceAssessment.reasons.length > 0 && (
+            <div className="legalEvidenceAssessmentReasons">
+              <strong>Razones de la evaluación</strong>
+              <ul>
+                {evidenceAssessment.reasons.map((reason, index) => (
+                  <li key={`${index}-${reason}`}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="complianceEvidenceList">
         {compliance.evidence.map((item, index) => (

@@ -6,6 +6,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
@@ -219,6 +220,54 @@ public class AnalysisOrchestratorContextTests
         toolPlan.GetProperty("approvedCalls").GetArrayLength().Should().Be(0);
         toolPlan.GetProperty("rejectedCalls").GetArrayLength().Should().Be(0);
         toolPlan.GetProperty("executedCalls").GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_include_legal_evidence_assessment()
+    {
+        var assessment = new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Weak",
+            Severity: "Warning",
+            RequiresHumanReview: true,
+            Reasons: ["La evidencia requiere validación humana."]
+        );
+        var plannerResult = CreatePlannerResult(
+            ToolPlanAuditResult.Empty,
+            evidenceAssessment: assessment
+        );
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        var persistedAssessment = document.RootElement
+            .GetProperty("compliance")
+            .GetProperty("evidenceAssessment");
+        persistedAssessment.GetProperty("evidenceFound").GetBoolean().Should().BeTrue();
+        persistedAssessment.GetProperty("relevance").GetString().Should().Be("Strong");
+        persistedAssessment.GetProperty("applicability").GetString().Should().Be("NotEstablished");
+        persistedAssessment.GetProperty("evidenceQuality").GetString().Should().Be("Weak");
+        persistedAssessment.GetProperty("severity").GetString().Should().Be("Warning");
+        persistedAssessment.GetProperty("requiresHumanReview").GetBoolean().Should().BeTrue();
+        persistedAssessment.GetProperty("reasons")[0].GetString()
+            .Should().Be("La evidencia requiere validación humana.");
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_include_null_legal_evidence_assessment_for_legacy_results()
+    {
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(
+            CreatePlannerResult(ToolPlanAuditResult.Empty)
+        );
+
+        using var document = JsonDocument.Parse(contextJson);
+
+        document.RootElement
+            .GetProperty("compliance")
+            .GetProperty("evidenceAssessment")
+            .ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Fact]
@@ -776,7 +825,8 @@ public class AnalysisOrchestratorContextTests
         ToolPlanAuditResult toolPlan,
         FinancialAnalysisContext? financialAnalysisContext = null,
         bool hasAnomaly = true,
-        bool requiresHumanReview = false)
+        bool requiresHumanReview = false,
+        RegulatoryEvidenceAssessment? evidenceAssessment = null)
     {
         return new PlannerAgentResult(
             RequiresHumanApproval: true,
@@ -796,7 +846,8 @@ public class AnalysisOrchestratorContextTests
                 Summary: "Compliance review required.",
                 Engine: "TestLegalEngine",
                 Evidence: [],
-                Warnings: ["Human legal review required."]
+                Warnings: ["Human legal review required."],
+                EvidenceAssessment: evidenceAssessment
             ),
             ReasoningResult: new PlannerReasoningResult(
                 Engine: "Deterministic Planner Reasoning",

@@ -418,7 +418,8 @@ public sealed class PlannerAgent : IPlannerAgent
             dataResult.HasAnomaly ||
             dataResult.RequiresHumanReview ||
             legalResult.HasComplianceRisk ||
-            legalResult.RequiresHumanReview;
+            legalResult.RequiresHumanReview ||
+            legalResult.EvidenceAssessment?.RequiresHumanReview == true;
 
         var summary = requiresHumanApproval
             ? "PlannerAgent determinó que se requiere aprobación humana antes de completar el flujo de trabajo."

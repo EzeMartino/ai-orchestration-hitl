@@ -83,7 +83,8 @@ public sealed class SemanticKernelLegalAgent(LegalCompliancePlugin plugin) : ILe
             Warnings: pluginResult.Warnings,
             QueryStrategy: pluginResult.QueryStrategy,
             LegalReview: pluginResult.LegalReview,
-            RequiresHumanReview: pluginResult.RequiresHumanReview
+            RequiresHumanReview: pluginResult.RequiresHumanReview,
+            EvidenceAssessment: pluginResult.EvidenceAssessment
         );
     }
 }

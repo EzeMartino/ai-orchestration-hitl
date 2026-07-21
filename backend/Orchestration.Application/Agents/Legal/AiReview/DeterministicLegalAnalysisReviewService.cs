@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Legal.Regulations;
 
 namespace Orchestration.Application.Agents.Legal.AiReview;
 
@@ -34,7 +35,7 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
         var hasIgnoredEvidence = cnvEvidence.Any(e => string.IsNullOrWhiteSpace(e.Citation));
 
         // Tarea 4: PossibleRegulatoryReviewAreas determinísticas
-        var reviewAreas = BuildReviewAreas(riskSignals, citedEvidence);
+        var reviewAreas = BuildReviewAreas(riskSignals, citedEvidence, input.EvidenceAssessment);
 
         // Tarea 8: Warnings
         var warnings = BuildWarnings(input, riskSignals, cnvEvidence, citedEvidence, hasIgnoredEvidence, financialWarnings);
@@ -137,7 +138,8 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
     private static IReadOnlyList<PossibleRegulatoryReviewArea> BuildReviewAreas(
         IReadOnlyList<FinancialRiskSignal> riskSignals,
-        IReadOnlyList<LegalEvidenceReference> citedEvidence)
+        IReadOnlyList<LegalEvidenceReference> citedEvidence,
+        RegulatoryEvidenceAssessment? evidenceAssessment)
     {
         if (riskSignals.Count == 0 || citedEvidence.Count == 0)
         {
@@ -165,7 +167,9 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
                     .Distinct()
                     .ToList();
 
-                var severity = DetermineSeverity(signalsInGroup);
+                var severity = evidenceAssessment is null
+                    ? DetermineSeverity(signalsInGroup)
+                    : NormalizeAssessmentSeverity(evidenceAssessment);
 
                 return new PossibleRegulatoryReviewArea(
                     Title: title,
@@ -178,6 +182,13 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
             .ToArray();
 
         return groupedSignals;
+    }
+
+    private static string NormalizeAssessmentSeverity(RegulatoryEvidenceAssessment assessment)
+    {
+        return string.Equals(assessment.Severity, "Info", StringComparison.OrdinalIgnoreCase)
+            ? "Info"
+            : "Warning";
     }
 
     private static string BuildReviewSummary(
