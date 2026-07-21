@@ -505,6 +505,18 @@ namespace Orchestration.Application.AnalysisSessions
                     summary = plannerResult.LegalResult.Summary,
                     warnings = plannerResult.LegalResult.Warnings,
                     queryStrategy = ProjectLegalQueryStrategy(plannerResult.LegalResult.QueryStrategy),
+                    evidenceAssessment = plannerResult.LegalResult.EvidenceAssessment is null
+                        ? null
+                        : new
+                        {
+                            evidenceFound = plannerResult.LegalResult.EvidenceAssessment.EvidenceFound,
+                            relevance = plannerResult.LegalResult.EvidenceAssessment.Relevance,
+                            applicability = plannerResult.LegalResult.EvidenceAssessment.Applicability,
+                            evidenceQuality = plannerResult.LegalResult.EvidenceAssessment.EvidenceQuality,
+                            severity = plannerResult.LegalResult.EvidenceAssessment.Severity,
+                            requiresHumanReview = plannerResult.LegalResult.EvidenceAssessment.RequiresHumanReview,
+                            reasons = plannerResult.LegalResult.EvidenceAssessment.Reasons
+                        },
                     evidence = plannerResult.LegalResult.Evidence.Select(e => new
                     {
                         regulation = e.Regulation,

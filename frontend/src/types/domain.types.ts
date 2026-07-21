@@ -69,6 +69,16 @@ export type LegalAnalysisReviewResult = {
   failureReason?: string | null;
 };
 
+export type RegulatoryEvidenceAssessment = {
+  evidenceFound: boolean;
+  relevance: "None" | "Weak" | "Strong";
+  applicability: "NotEstablished";
+  evidenceQuality: "None" | "Weak" | "Strong";
+  severity: "Info" | "Warning";
+  requiresHumanReview: boolean;
+  reasons: string[];
+};
+
 export type ComplianceContext = {
   riskDetected: boolean;
   riskLevel: string;
@@ -79,6 +89,7 @@ export type ComplianceContext = {
   warnings?: string[];
   queryStrategy?: unknown;
   legalReview?: LegalAnalysisReviewResult | null;
+  evidenceAssessment?: RegulatoryEvidenceAssessment | null;
 };
 
 export type PlannerContext = {
