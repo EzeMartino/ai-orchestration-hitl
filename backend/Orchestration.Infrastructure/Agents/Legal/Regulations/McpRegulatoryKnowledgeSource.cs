@@ -422,11 +422,6 @@ public sealed class McpRegulatoryKnowledgeSource(
                         {
                             citedEvidenceCount += result.Citations.Count;
 
-                            if (!CnvRegulatoryEvidenceAssessor.IsRelevant(result))
-                            {
-                                continue;
-                            }
-
                             foreach (var finding in MapFindings(result))
                             {
                                 var findingKey = CreateFindingKey(finding);
@@ -434,6 +429,11 @@ public sealed class McpRegulatoryKnowledgeSource(
                                 {
                                     queryFindings.Add(finding);
                                 }
+                            }
+
+                            if (!CnvRegulatoryEvidenceAssessor.IsRelevant(result))
+                            {
+                                continue;
                             }
 
                             foreach (var citation in result.Citations)

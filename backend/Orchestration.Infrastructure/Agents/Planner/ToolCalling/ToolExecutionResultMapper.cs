@@ -520,19 +520,24 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             ? null
             : CombineEvidenceAssessments(assessments);
         var evidence = results
-            .Where(result => evidenceAssessment is null ||
-                result.EvidenceAssessment!.RequiresHumanReview)
             .SelectMany(result => result.Evidence)
             .Distinct()
+            .OrderBy(item => item.Regulation, StringComparer.Ordinal)
+            .ThenBy(item => item.Section, StringComparer.Ordinal)
+            .ThenBy(item => item.Finding, StringComparer.Ordinal)
+            .ThenBy(item => item.Source, StringComparer.Ordinal)
             .ToArray();
         var warnings = results
             .SelectMany(result => result.Warnings)
             .Distinct(StringComparer.Ordinal)
+            .OrderBy(warning => warning, StringComparer.Ordinal)
             .ToArray();
         var engines = results
             .Select(result => result.Engine)
             .Distinct(StringComparer.Ordinal)
+            .OrderBy(engine => engine, StringComparer.Ordinal)
             .ToArray();
+        var legalReview = MergeLegalReviews(results);
         var requiresHumanReview = results.Any(result => result.RequiresHumanReview) ||
             evidenceAssessment?.RequiresHumanReview == true;
 
@@ -550,8 +555,7 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
                 Evidence: Array.AsReadOnly(evidence),
                 Warnings: Array.AsReadOnly(warnings),
                 QueryStrategy: MergeQueryStrategies(results),
-                LegalReview: results.Select(result => result.LegalReview)
-                    .FirstOrDefault(review => review is not null),
+                LegalReview: legalReview,
                 RequiresHumanReview: requiresHumanReview,
                 EvidenceAssessment: evidenceAssessment);
         }
@@ -570,10 +574,99 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             Evidence: Array.AsReadOnly(evidence),
             Warnings: Array.AsReadOnly(warnings),
             QueryStrategy: MergeQueryStrategies(results),
-            LegalReview: results.Select(result => result.LegalReview)
-                .FirstOrDefault(review => review is not null),
+            LegalReview: legalReview,
             RequiresHumanReview: requiresHumanReview);
     }
+
+    private static LegalAnalysisReviewResult? MergeLegalReviews(
+        IReadOnlyList<LegalAgentResult> results)
+    {
+        var present = results
+            .Where(result => result.LegalReview is not null)
+            .ToArray();
+        if (present.Length == 0)
+        {
+            return null;
+        }
+
+        var reviews = present
+            .Select(result => result.LegalReview!)
+            .ToArray();
+        var relevantReviews = present
+            .Where(result => result.EvidenceAssessment is null ||
+                result.EvidenceAssessment.RequiresHumanReview)
+            .Select(result => result.LegalReview!);
+        var reviewAreas = relevantReviews
+            .SelectMany(review => review.PossibleRegulatoryReviewAreas)
+            .GroupBy(CreateReviewAreaKey, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        var evidenceReferences = relevantReviews
+            .SelectMany(review => review.EvidenceReferences)
+            .Distinct()
+            .OrderBy(CreateEvidenceReferenceKey, StringComparer.Ordinal)
+            .ToArray();
+
+        return new LegalAnalysisReviewResult(
+            ReviewSummary: JoinDistinct(
+                reviews.Select(review => review.ReviewSummary),
+                " "),
+            PossibleRegulatoryReviewAreas: Array.AsReadOnly(reviewAreas),
+            EvidenceReferences: Array.AsReadOnly(evidenceReferences),
+            Warnings: Array.AsReadOnly(reviews
+                .SelectMany(review => review.Warnings)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(warning => warning, StringComparer.Ordinal)
+                .ToArray()),
+            Limitations: Array.AsReadOnly(reviews
+                .SelectMany(review => review.Limitations)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(limitation => limitation, StringComparer.Ordinal)
+                .ToArray()),
+            UsedLlm: reviews.Any(review => review.UsedLlm),
+            UsedFallback: reviews.Any(review => review.UsedFallback),
+            Provider: JoinOptionalDistinct(
+                reviews.Select(review => review.Provider),
+                " + "),
+            Model: JoinOptionalDistinct(
+                reviews.Select(review => review.Model),
+                " + "),
+            FailureReason: JoinOptionalDistinct(
+                reviews.Select(review => review.FailureReason),
+                "; "));
+    }
+
+    private static string JoinDistinct(
+        IEnumerable<string> values,
+        string separator) =>
+        string.Join(separator, values
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal));
+
+    private static string? JoinOptionalDistinct(
+        IEnumerable<string?> values,
+        string separator)
+    {
+        var present = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+
+        return present.Length == 0
+            ? null
+            : string.Join(separator, present);
+    }
+
+    private static string CreateReviewAreaKey(
+        PossibleRegulatoryReviewArea area) =>
+        JsonSerializer.Serialize(area, JsonOptions);
+
+    private static string CreateEvidenceReferenceKey(
+        LegalEvidenceReference evidence) =>
+        JsonSerializer.Serialize(evidence, JsonOptions);
 
     private static RegulatoryEvidenceAssessment CombineEvidenceAssessments(
         IReadOnlyList<RegulatoryEvidenceAssessment> assessments)
@@ -594,6 +687,7 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             Reasons: Array.AsReadOnly(assessments
                 .SelectMany(assessment => assessment.Reasons)
                 .Distinct(StringComparer.Ordinal)
+                .OrderBy(reason => reason, StringComparer.Ordinal)
                 .ToArray()));
     }
 

@@ -47,7 +47,7 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
                         Source: "Infoleg",
                         Url: "https://servicios.infoleg.gob.ar/infolegInternet/anexos/215000-219999/219405/norma.htm",
                         Snippet: "Texto encontrado...",
-                        Score: 0.91,
+                        Score: 0.075,
                         Citations:
                         [
                             new CnvRegulationCitation(
@@ -110,13 +110,20 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
         result.Findings.Should().NotBeEmpty();
         result.EvidenceAssessment.Should().NotBeNull();
         result.EvidenceAssessment!.EvidenceFound.Should().BeTrue();
-        result.EvidenceAssessment.Relevance.Should().Be("Strong");
+        result.EvidenceAssessment.Relevance.Should().Be("None");
         result.EvidenceAssessment.EvidenceQuality.Should().Be("Strong");
-        result.EvidenceAssessment.Severity.Should().Be("Warning");
-        result.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+        result.EvidenceAssessment.Severity.Should().Be("Info");
+        result.EvidenceAssessment.RequiresHumanReview.Should().BeFalse();
+        result.RequiresHumanReview.Should().BeTrue(
+            "the fallback query strategy still requires human review");
+        result.Summary.Should().Be(
+            "Se recuperó evidencia regulatoria, pero no se estableció relevancia ni aplicabilidad para una evaluación de cumplimiento.");
         result.Warnings.Should().Contain(
-            "Se recuperó evidencia regulatoria potencialmente relevante. Su aplicabilidad no está determinada y requiere revisión legal humana."
+            "Se recuperó evidencia regulatoria, pero no alcanzó el umbral de relevancia para crear un área de revisión."
         );
+        result.LegalReview.Should().NotBeNull();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
+        result.LegalReview.EvidenceReferences.Should().BeEmpty();
 
         client.ReceivedQueries.Should().Contain("régimen informativo estados financieros emisoras");
 

@@ -25,7 +25,7 @@ namespace Orchestration.Tests.Agents.Legal;
 public class McpRegulatoryKnowledgeSourceTests
 {
     [Fact]
-    public async Task ReviewAsync_Should_retain_irrelevant_cited_results_without_establishing_risk()
+    public async Task ReviewAsync_Should_retain_irrelevant_citations_without_creating_review_area()
     {
         var source = CreateSource(new SingleResultCnvRegulationMcpClient(
             CreateResult(
@@ -46,7 +46,9 @@ public class McpRegulatoryKnowledgeSourceTests
         result.RequiresHumanReview.Should().BeTrue();
         result.Summary.Should().Be(
             "Se recuperó evidencia regulatoria, pero no se estableció relevancia ni aplicabilidad para una evaluación de cumplimiento.");
-        result.Findings.Should().BeEmpty();
+        result.Findings.Should().ContainSingle();
+        result.Findings[0].Finding.Should().Be("Texto normativo citado.");
+        result.Findings[0].Section.Should().Be("Articulo 1");
         result.Warnings.Should().Contain(
             "Se recuperó evidencia regulatoria, pero no alcanzó el umbral de relevancia para crear un área de revisión."
         );
@@ -59,7 +61,6 @@ public class McpRegulatoryKnowledgeSourceTests
         result.LegalReview.Should().NotBeNull();
         result.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
         result.LegalReview.EvidenceReferences.Should().BeEmpty();
-
     }
 
     [Fact]
