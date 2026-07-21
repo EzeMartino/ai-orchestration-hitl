@@ -14,9 +14,20 @@ public sealed class PlannerToolCatalogTests
             .Should()
             .OnlyHaveUniqueItems();
         PlannerToolCatalog.All.Should().OnlyContain(tool =>
-            tool.Arguments.Count > 0 &&
             !string.IsNullOrWhiteSpace(tool.PromptDescription) &&
             !string.IsNullOrWhiteSpace(tool.AuditActor));
+    }
+
+    [Fact]
+    public void Find_Should_define_legal_review_as_argument_free_composite_capability()
+    {
+        var definition = PlannerToolCatalog.Find(
+            PlannerToolCatalog.SearchCnvRegulationName);
+
+        definition.Should().NotBeNull();
+        definition!.Arguments.Should().BeEmpty();
+        definition.PromptDescription.Should().Be(
+            "Autoriza una revisión legal compuesta; la lógica determinista deriva consultas CNV del análisis financiero completado.");
     }
 
     [Theory]

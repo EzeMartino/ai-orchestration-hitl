@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Planner.ToolCalling;
-using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
@@ -46,109 +48,213 @@ public class ToolExecutionResultMapperTests
     }
 
     [Fact]
-    public void TryMapLegalResult_Should_map_cited_results_to_legal_evidence()
+    public void TryMapLegalResult_Should_round_trip_full_aggregate_result()
     {
         var mapper = new ToolExecutionResultMapper();
-        var response = new CnvRegulationSearchResponse(
-            Query: "agentes",
-            Results:
-            [
-                new CnvRegulationSearchResult(
-                    DocumentId: "doc-1",
-                    ChunkId: "chunk-1",
-                    Title: "Normas CNV",
-                    Chapter: null,
-                    Section: "Agentes",
-                    Article: null,
-                    Source: "CNV",
-                    Url: "https://example.test/cnv",
-                    Snippet: "Snippet text.",
-                    Score: 0.9,
-                    Citations:
-                    [
-                        new CnvRegulationCitation(
-                            Source: "CNV",
-                            DocumentType: "Resolucion",
-                            ResolutionNumber: "123",
-                            Title: "Normas CNV",
-                            Chapter: null,
-                            Section: "Agentes",
-                            Article: "Articulo 1",
-                            PublicationDate: null,
-                            Url: "https://example.test/cnv",
-                            QuotedText: "Texto citado."
-                        )
-                    ]
-                )
-            ],
-            Warnings: ["Candidate source."]
-        );
+        var legalResult = CreateLegalResult();
 
         var result = mapper.TryMapLegalResult(
             [
                 CreateExecutionResult(
                     "legal.search_cnv_regulation",
-                    JsonSerializer.Serialize(response, JsonOptions)
+                    JsonSerializer.Serialize(legalResult, JsonOptions)
                 )
             ]
         );
 
         result.Should().NotBeNull();
         result!.HasComplianceRisk.Should().BeTrue();
-        result.RiskLevel.Should().Be("Medium");
-        result.Engine.Should().Be("Semantic Kernel + MCP CNV Regulation Server");
-        result.Evidence.Should().ContainSingle().Which.Should().Be(
-            new LegalEvidence(
-                Regulation: "Normas CNV",
-                Section: "Articulo 1",
-                Finding: "Texto citado.",
-                Source: "CNV | Resolucion | 123 | https://example.test/cnv"
-            )
-        );
-        result.Warnings.Should().Contain("Candidate source.");
-        result.Warnings.Should().Contain(
-            "Recuperación regulatoria automatizada únicamente. Se requiere revisión legal humana antes de tomar decisiones operativas."
-        );
+        result.RiskLevel.Should().Be("High");
+        result.Summary.Should().Be("Full aggregate legal review.");
+        result.Engine.Should().Be("Aggregate LegalAgent");
+        result.Evidence.Should().BeEquivalentTo(legalResult.Evidence);
+        result.Warnings.Should().Equal(legalResult.Warnings);
+        result.RequiresHumanReview.Should().BeTrue();
+        result.LegalReview.Should().BeEquivalentTo(legalResult.LegalReview);
+        var queryStrategy = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        queryStrategy.StrategyVersion.Should().Be("mapper_strategy_v1");
+        queryStrategy.Queries.Should().HaveCount(2);
+        queryStrategy.Queries[0].CitedEvidenceCount.Should().Be(2);
+        queryStrategy.Queries[1].ExecutionStatus.Should().Be(
+            LegalCnvQueryExecutionStatuses.Failed);
+
+        result.Evidence.Should().BeAssignableTo<IList<LegalEvidence>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.Warnings.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.FailedStages.Should()
+            .BeAssignableTo<IList<LegalDataStageFailureAudit>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.Queries.Should().BeAssignableTo<IList<LegalCnvQueryAudit>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        queryStrategy.Queries[0].RelatedFinancialSignals.Should()
+            .BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview!.PossibleRegulatoryReviewAreas.Should()
+            .BeAssignableTo<IList<PossibleRegulatoryReviewArea>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.EvidenceReferences.Should()
+            .BeAssignableTo<IList<LegalEvidenceReference>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.Warnings.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.Limitations.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.PossibleRegulatoryReviewAreas[0]
+            .RelatedFinancialSignals.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.LegalReview.PossibleRegulatoryReviewAreas[0]
+            .EvidenceCitations.Should().BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+
+        Action mutate = () => ((IList<string>)queryStrategy.Queries[0]
+            .RelatedFinancialSignals).Add("mutated");
+        mutate.Should().Throw<NotSupportedException>();
     }
 
-    [Fact]
-    public void TryMapLegalResult_Should_ignore_uncited_results()
+    [Theory]
+    [InlineData("{ invalid-json")]
+    [InlineData("null")]
+    public void TryMapLegalResult_Should_return_null_for_malformed_or_null_json(
+        string outputJson)
     {
         var mapper = new ToolExecutionResultMapper();
-        var response = new CnvRegulationSearchResponse(
-            Query: "agentes",
-            Results:
-            [
-                new CnvRegulationSearchResult(
-                    DocumentId: "doc-1",
-                    ChunkId: "chunk-1",
-                    Title: "Normas CNV",
-                    Chapter: null,
-                    Section: "Agentes",
-                    Article: null,
-                    Source: "CNV",
-                    Url: "https://example.test/cnv",
-                    Snippet: "Snippet text.",
-                    Score: 0.9,
-                    Citations: []
-                )
-            ],
-            Warnings: []
-        );
 
         var result = mapper.TryMapLegalResult(
             [
                 CreateExecutionResult(
                     "legal.search_cnv_regulation",
-                    JsonSerializer.Serialize(response, JsonOptions)
+                    outputJson
                 )
             ]
         );
 
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_not_reconstruct_legacy_raw_cnv_response()
+    {
+        var mapper = new ToolExecutionResultMapper();
+        const string rawCnvResponse = """
+            {
+              "query": "legacy raw query",
+              "results": [
+                {
+                  "title": "Legacy citation",
+                  "snippet": "Legacy snippet",
+                  "citations": [
+                    {
+                      "source": "CNV",
+                      "title": "Legacy citation",
+                      "article": "Artículo 1"
+                    }
+                  ]
+                }
+              ],
+              "warnings": []
+            }
+            """;
+
+        var result = mapper.TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", rawCnvResponse)]);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_allow_null_optional_aggregate_sections()
+    {
+        var aggregate = CreateLegalResult() with
+        {
+            QueryStrategy = null,
+            LegalReview = null
+        };
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                JsonSerializer.Serialize(aggregate, JsonOptions))]);
+
         result.Should().NotBeNull();
-        result!.HasComplianceRisk.Should().BeFalse();
-        result.RiskLevel.Should().Be("Low");
-        result.Evidence.Should().BeEmpty();
+        result!.QueryStrategy.Should().BeNull();
+        result.LegalReview.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("\"tampered\"")]
+    [InlineData("42")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("true")]
+    public void TryMapLegalResult_Should_reject_invalid_raw_financial_analysis_status(
+        string rawStatusToken)
+    {
+        var outputJson = LegalAggregateWithRawFinancialAnalysisStatus(
+            rawStatusToken);
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(ValidRawFinancialAnalysisStatusCases))]
+    public void TryMapLegalResult_Should_accept_valid_raw_financial_analysis_status(
+        string rawStatusToken,
+        FinancialAnalysisExecutionStatus? expectedStatus)
+    {
+        var outputJson = LegalAggregateWithRawFinancialAnalysisStatus(
+            rawStatusToken);
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().NotBeNull();
+        var strategy = result!.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        strategy.FinancialAnalysisStatus.Should().Be(expectedStatus);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TryMapLegalResult_Should_reject_duplicate_case_insensitive_audit_properties(
+        bool duplicateTopLevelStrategy)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        if (duplicateTopLevelStrategy)
+        {
+            root["QueryStrategy"] = JsonNode.Parse(
+                root["queryStrategy"]!.ToJsonString());
+        }
+        else
+        {
+            root["queryStrategy"]!["FinancialAnalysisStatus"] = "failed";
+        }
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                root.ToJsonString(JsonOptions))]);
+
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidLegalAggregateJsonCases))]
+    public void TryMapLegalResult_Should_reject_semantically_invalid_aggregate(
+        string caseName,
+        string outputJson)
+    {
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().BeNull(caseName);
     }
 
     [Fact]
@@ -611,6 +717,131 @@ public class ToolExecutionResultMapperTests
             : $",\"failureCode\":\"{failureCode}\"";
 
         return $$"""{"operation":"{{operation}}","status":"{{status}}","durationMilliseconds":{{durationMilliseconds}}{{failureCodeProperty}}}""";
+    }
+
+    public static IEnumerable<object[]> InvalidLegalAggregateJsonCases()
+    {
+        yield return InvalidCase("risk level", root => root["riskLevel"] = "Critical");
+        yield return InvalidCase("blank summary", root => root["summary"] = " ");
+        yield return InvalidCase("null evidence item", root =>
+            root["evidence"] = JsonNode.Parse("[null]"));
+        yield return InvalidCase("null warning item", root =>
+            root["warnings"] = JsonNode.Parse("[null]"));
+        yield return InvalidCase("null audit query", root =>
+            root["queryStrategy"]!["queries"]![0] = null);
+        yield return InvalidCase("bad query status", root =>
+            root["queryStrategy"]!["queries"]![0]!["executionStatus"] = "partial");
+        yield return InvalidCase("negative query count", root =>
+            root["queryStrategy"]!["queries"]![0]!["resultCount"] = -1);
+        yield return InvalidCase("failed query nonzero counts", root =>
+            root["queryStrategy"]!["queries"]![1]!["citedEvidenceCount"] = 1);
+        yield return InvalidCase("bad query index", root =>
+            root["queryStrategy"]!["queries"]![0]!["index"] = 2);
+        yield return InvalidCase("bad query total", root =>
+            root["queryStrategy"]!["queries"]![0]!["total"] = 3);
+        yield return InvalidCase("null related signal", root =>
+            root["queryStrategy"]!["queries"]![0]!["relatedFinancialSignals"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidCase("contextual fallback reason", root =>
+            root["queryStrategy"]!["fallbackReason"] =
+                LegalCnvFallbackReasons.NoSpecificSignals);
+        yield return InvalidCase("unknown data status", root =>
+            root["queryStrategy"]!["dataToolStatus"] = "tampered");
+        yield return InvalidCase("unknown failed stage operation", root =>
+            root["queryStrategy"]!["failedStages"] = JsonNode.Parse(
+                "[{\"operation\":\"tampered\",\"failureCode\":\"PYTHON_RESPONSE_INVALID\"}]"));
+        yield return InvalidCase("null legal review warnings", root =>
+            root["legalReview"]!["warnings"] = null);
+        yield return InvalidCase("null legal review area", root =>
+            root["legalReview"]!["possibleRegulatoryReviewAreas"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidCase("null legal evidence reference", root =>
+            root["legalReview"]!["evidenceReferences"] = JsonNode.Parse("[null]"));
+    }
+
+    public static IEnumerable<object?[]> ValidRawFinancialAnalysisStatusCases()
+    {
+        yield return ["\"succeeded\"", FinancialAnalysisExecutionStatus.Succeeded];
+        yield return ["\"degraded\"", FinancialAnalysisExecutionStatus.Degraded];
+        yield return ["\"failed\"", FinancialAnalysisExecutionStatus.Failed];
+        yield return ["\"legacy_unknown\"", FinancialAnalysisExecutionStatus.LegacyUnknown];
+        yield return ["null", null];
+    }
+
+    private static string LegalAggregateWithRawFinancialAnalysisStatus(
+        string rawStatusToken)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        root["queryStrategy"]!["financialAnalysisStatus"] =
+            JsonNode.Parse(rawStatusToken);
+        return root.ToJsonString(JsonOptions);
+    }
+
+    private static object[] InvalidCase(
+        string caseName,
+        Action<JsonObject> mutate)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        mutate(root);
+        return [caseName, root.ToJsonString(JsonOptions)];
+    }
+
+    private static LegalAgentResult CreateLegalResult()
+    {
+        var evidenceReference = new LegalEvidenceReference(
+            "CNV", "Mapper citation", "https://example.test/cnv",
+            "Artículo 1", "Texto citado.", "Emisoras", 0.9);
+        var queryStrategy = new LegalQueryStrategyAudit(
+            "mapper_strategy_v1",
+            LegalCnvQuerySources.Contextual,
+            null,
+            LegalDataToolStatuses.Executed,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            [],
+            [
+                new LegalCnvQueryAudit(
+                    1, 2, "mapper query", "Emisoras", "Mapper reason.",
+                    ["signal"], LegalCnvQueryExecutionStatuses.Succeeded, 2, 2),
+                new LegalCnvQueryAudit(
+                    2, 2, "fallback query", null, "Fallback reason.",
+                    [], LegalCnvQueryExecutionStatuses.Failed, 0, 0)
+            ]
+        );
+        var legalReview = new LegalAnalysisReviewResult(
+            "Mapper AI review.",
+            [
+                new PossibleRegulatoryReviewArea(
+                    "Disclosure review",
+                    "Review disclosure obligations.",
+                    "Medium",
+                    ["signal"],
+                    ["Artículo 1"])
+            ],
+            [evidenceReference],
+            ["AI warning"],
+            ["AI limitation"],
+            true,
+            false,
+            "provider",
+            "model",
+            null
+        );
+
+        return new LegalAgentResult(
+            true,
+            "High",
+            "Full aggregate legal review.",
+            "Aggregate LegalAgent",
+            [new LegalEvidence("Mapper citation", "Artículo 1", "Texto citado.", "CNV")],
+            ["Aggregate warning"],
+            queryStrategy,
+            legalReview,
+            true
+        );
     }
 
     private static ToolExecutionResult CreateExecutionResult(

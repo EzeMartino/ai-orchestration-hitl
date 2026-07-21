@@ -46,6 +46,9 @@ namespace Orchestration.Tests.AnalysisSessions;
 public sealed class ProductionLikeWorkflowE2ETests
 {
     private const string AllowedCnvCitation = "TEST-CNV-E2E-001";
+    private const string UncitedCnvTitle = "Uncited test result";
+    private const string UncitedCnvSnippet =
+        "Uncited result should not become strong legal support.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
@@ -95,11 +98,15 @@ public sealed class ProductionLikeWorkflowE2ETests
         var activityPublisher = new PersistingActivityEventPublisher(dbContext);
         var pythonService = new FakeProductionPythonFinancialAnalysisService();
         var cnvClient = new FakeProductionCnvRegulationMcpClient();
+        var dataInvocationCount = 0;
+        var legalInvocationCount = 0;
         var controller = CreateController(
             dbContext,
             activityPublisher,
             pythonService,
-            cnvClient
+            cnvClient,
+            dataReportObserver: _ => dataInvocationCount++,
+            legalReportObserver: _ => legalInvocationCount++
         );
 
         var createResult = await controller.CreateSession(CancellationToken.None);
@@ -137,6 +144,10 @@ public sealed class ProductionLikeWorkflowE2ETests
         using var startedContext = JsonDocument.Parse(startedSession.ContextJson);
         AssertProductionLikeContext(startedContext.RootElement);
         AssertActivityFeed(activityPublisher.PublishedEvents, beforeApproval: true);
+        dataInvocationCount.Should().Be(1);
+        legalInvocationCount.Should().Be(1);
+        cnvClient.ReceivedRequests.Should().HaveCountGreaterThanOrEqualTo(1);
+        cnvClient.ReceivedRequests.Should().HaveCountLessThanOrEqualTo(4);
         cnvClient.ReceivedRequests.Should().NotBeEmpty();
         cnvClient.ReceivedRequests.Should().Contain(request =>
             request.Query.Contains("liquidez", StringComparison.OrdinalIgnoreCase) ||
@@ -205,8 +216,34 @@ public sealed class ProductionLikeWorkflowE2ETests
         using var startedContext = JsonDocument.Parse(startedSession.ContextJson);
         AssertPlanDrivenContext(startedContext.RootElement);
         AssertPlanDrivenActivityFeed(activityPublisher.PublishedEvents);
-        cnvClient.ReceivedRequests.Should().ContainSingle()
-            .Which.Query.Should().Be("agentes");
+        cnvClient.ReceivedRequests.Should().HaveCountGreaterThanOrEqualTo(1);
+        cnvClient.ReceivedRequests.Should().HaveCountLessThanOrEqualTo(4);
+        cnvClient.ReceivedRequests.Should().Contain(request =>
+            request.Query.Contains("liquidez", StringComparison.OrdinalIgnoreCase));
+        cnvClient.ReceivedRequests.Should().NotContain(request =>
+            request.Query == "agentes");
+        startedSession.ContextJson.Should().Contain("\"source\":\"contextual\"");
+        startedSession.ContextJson.Should().NotContain("outputJson");
+        startedSession.ContextJson.Should().NotContain("rawPrompt");
+        startedSession.ContextJson.Should().NotContain("modelResponse");
+        AssertPersistedContextualLegalQueryAudit(
+            startedContext.RootElement,
+            cnvClient.ReceivedRequests);
+
+        var preApprovalActivityTypes = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(evt => evt.SessionId == session.Id)
+            .OrderBy(evt => evt.Timestamp)
+            .Select(evt => evt.Type)
+            .ToListAsync();
+        preApprovalActivityTypes.Should().ContainInOrder(
+            "tool_plan_proposed",
+            "tool_plan_validated",
+            "tool_call_executed",
+            "legal_cnv_queries_derived",
+            "tool_call_executed",
+            "planner_reasoning_completed",
+            "agent_completed");
 
         var approveResult = await controller.ApproveSession(
             session.Id,
@@ -222,12 +259,163 @@ public sealed class ProductionLikeWorkflowE2ETests
 
         using var reloadedContext = JsonDocument.Parse(reloadedSession.ContextJson);
         AssertPlanDrivenContext(reloadedContext.RootElement);
+        AssertPersistedContextualLegalQueryAudit(
+            reloadedContext.RootElement,
+            cnvClient.ReceivedRequests);
         var persistedEvents = await dbContext.ActivityEvents
             .AsNoTracking()
             .Where(evt => evt.SessionId == session.Id)
             .ToListAsync();
         persistedEvents.Select(evt => evt.Type).Should().Contain("analysis_completed");
         persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_PlanDrivenWithoutUsableSignals_ShouldUseOneDurableGenericLegalFallback()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var cnvClient = new FakeProductionCnvRegulationMcpClient();
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(noUsableSignals: true),
+            cnvClient,
+            ToolCallingExecutionMode.PlanDriven);
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        var startResult = await controller.StartSession(session.Id, CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        cnvClient.ReceivedRequests.Should().ContainSingle()
+            .Which.Query.Should().Be("régimen informativo estados financieros emisoras");
+
+        var persistedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == session.Id);
+        using var context = JsonDocument.Parse(persistedSession.ContextJson);
+        var queryStrategy = context.RootElement
+            .GetProperty("compliance")
+            .GetProperty("queryStrategy");
+        GetProperty(queryStrategy, "source", "Source").GetString()
+            .Should().Be("fallback");
+        GetProperty(queryStrategy, "fallbackReason", "FallbackReason").GetString()
+            .Should().Be(LegalCnvFallbackReasons.NoSpecificSignals);
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_PlanDrivenHostileLegalFirstProposal_ShouldExecuteDataBeforeLegal()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var options = new ToolCallingOptions
+        {
+            Enabled = true,
+            ExecutionMode = ToolCallingExecutionMode.PlanDriven
+        };
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            new FakeProductionCnvRegulationMcpClient(),
+            ToolCallingExecutionMode.PlanDriven,
+            new LegalFirstDeterministicToolPlanProposalService(options));
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        var startResult = await controller.StartSession(session.Id, CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        var persistedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == session.Id);
+        using var context = JsonDocument.Parse(persistedSession.ContextJson);
+        var toolPlan = context.RootElement.GetProperty("toolPlan");
+        toolPlan.GetProperty("proposedCalls").EnumerateArray().First()
+            .GetProperty("toolName").GetString()
+            .Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
+        var executedCallNames = toolPlan.GetProperty("executedCalls").EnumerateArray()
+            .Select(call => call.GetProperty("toolName").GetString())
+            .ToArray();
+        executedCallNames.Should().Equal(
+            PlannerToolCatalog.AnalyzeTransactionsName,
+            PlannerToolCatalog.SearchCnvRegulationName);
+        var persistedToolExecutionAgents = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(activityEvent =>
+                activityEvent.SessionId == session.Id &&
+                activityEvent.Type == "tool_call_executed")
+            .OrderBy(activityEvent => activityEvent.Timestamp)
+            .Select(activityEvent => activityEvent.Agent)
+            .ToArrayAsync();
+        persistedToolExecutionAgents.Should().Equal("DataAgent", "LegalAgent");
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_PlanDrivenCancellationBetweenStages_ShouldNotMutateWorkflowOrRunLegal()
+    {
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        using var cancellation = new CancellationTokenSource();
+        var activityPublisher = new PersistingActivityEventPublisher(
+            dbContext,
+            activityEvent =>
+            {
+                if (activityEvent.Type == "tool_call_executed")
+                {
+                    cancellation.Cancel();
+                }
+            });
+        var cnvClient = new FakeProductionCnvRegulationMcpClient();
+        AnalysisOrchestratorService? orchestrator = null;
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            cnvClient,
+            ToolCallingExecutionMode.PlanDriven,
+            orchestratorObserver: service => orchestrator = service);
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        await FluentActions.Invoking(() =>
+                orchestrator!.StartAnalysisAsync(session.Id, cancellation.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
+
+        dbContext.ChangeTracker.Clear();
+        var persistedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == session.Id);
+        persistedSession.Status.Should().Be(AnalysisSessionStatus.DataGathering);
+        persistedSession.CurrentAgent.Should().Be("PlannerAgent");
+        persistedSession.ContextJson.Should().NotContain("\"toolPlan\"");
+        cnvClient.ReceivedRequests.Should().BeEmpty();
+
+        var activityTypes = await dbContext.ActivityEvents
+            .AsNoTracking()
+            .Where(activityEvent => activityEvent.SessionId == session.Id)
+            .Select(activityEvent => activityEvent.Type)
+            .ToListAsync();
+        activityTypes.Should().NotContain("legal_cnv_queries_derived");
+        activityTypes.Should().NotContain("planner_reasoning_completed");
+        activityTypes.Should().NotContain("agent_completed");
+        activityTypes.Should().NotContain("human_approval_required");
+        activityTypes.Should().NotContain("analysis_completed");
     }
 
     [Fact]
@@ -265,12 +453,7 @@ public sealed class ProductionLikeWorkflowE2ETests
                 },
                 {
                   "toolName": "legal.search_cnv_regulation",
-                  "arguments": {
-                    "query": "agentes",
-                    "area": "Agentes",
-                    "limit": "5",
-                    "requiresReview": "true"
-                  },
+                  "arguments": {},
                   "reason": "Recuperar evidencia regulatoria CNV para revisión."
                 }
               ]
@@ -507,7 +690,9 @@ public sealed class ProductionLikeWorkflowE2ETests
         ICnvRegulationMcpClient cnvClient,
         ToolCallingExecutionMode executionMode = ToolCallingExecutionMode.Shadow,
         IToolPlanProposalService? proposalService = null,
-        Action<FinancialReportContext>? dataReportObserver = null)
+        Action<FinancialReportContext>? dataReportObserver = null,
+        Action<FinancialReportContext>? legalReportObserver = null,
+        Action<AnalysisOrchestratorService>? orchestratorObserver = null)
     {
         var dataAgentOptions = new DataAgentOptions
         {
@@ -560,9 +745,13 @@ public sealed class ProductionLikeWorkflowE2ETests
             new FinancialAnalysisLegalCnvQueryStrategy(),
             activityPublisher
         );
-        var legalAgent = new SemanticKernelLegalAgent(
+        ILegalAgent legalAgent = new SemanticKernelLegalAgent(
             new LegalCompliancePlugin(legalSource)
         );
+        if (legalReportObserver is not null)
+        {
+            legalAgent = new ObservingLegalAgent(legalAgent, legalReportObserver);
+        }
         var planner = new PlannerAgent(
             dataAgent,
             legalAgent,
@@ -575,7 +764,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             executionMode == ToolCallingExecutionMode.PlanDriven
                 ? new ControlledToolExecutor(
                     dataAgent,
-                    cnvClient,
+                    legalAgent,
                     NullLogger<ControlledToolExecutor>.Instance
                 )
                 : new ThrowingControlledToolExecutor(),
@@ -589,6 +778,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             planner,
             new FinancialReportContextResolver()
         );
+        orchestratorObserver?.Invoke(orchestrator);
 
         var controller = new AnalysisSessionsController(
             dbContext,
@@ -786,7 +976,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         GetProperty(compliance.GetProperty("queryStrategy"), "source", "Source")
             .GetString()
             .Should()
-            .Be("financial_analysis");
+            .Be("contextual");
         compliance.GetProperty("evidence").GetArrayLength().Should().BeGreaterThan(0);
         var legalReview = compliance.GetProperty("legalReview");
         legalReview.ValueKind.Should().NotBe(JsonValueKind.Null);
@@ -853,6 +1043,12 @@ public sealed class ProductionLikeWorkflowE2ETests
         var compliance = root.GetProperty("compliance");
         compliance.GetProperty("riskDetected").GetBoolean().Should().BeTrue();
         compliance.GetProperty("evidence").GetArrayLength().Should().BeGreaterThan(0);
+        AssertPersistedComplianceEvidence(compliance);
+        GetProperty(compliance.GetProperty("queryStrategy"), "source", "Source")
+            .GetString().Should().Be("contextual");
+        var legalReview = compliance.GetProperty("legalReview");
+        AssertLegalReviewUsesOnlyProvidedCitations(legalReview);
+        AssertNoForbiddenLegalLanguage(legalReview);
 
         var toolPlan = root.GetProperty("toolPlan");
         toolPlan.GetProperty("proposedCalls").GetArrayLength().Should().Be(2);
@@ -864,7 +1060,66 @@ public sealed class ProductionLikeWorkflowE2ETests
             call.GetProperty("status").GetString() == "Executed" &&
             call.GetProperty("succeeded").GetBoolean()
         );
+        executedCalls.Select(call => call.GetProperty("toolName").GetString())
+            .Should().Equal(
+                PlannerToolCatalog.AnalyzeTransactionsName,
+                PlannerToolCatalog.SearchCnvRegulationName);
         executedCalls.All(DoesNotHaveOutputJson).Should().BeTrue();
+        toolPlan.GetProperty("approvedCalls").EnumerateArray()
+            .Count(call => call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.SearchCnvRegulationName)
+            .Should().Be(1);
+    }
+
+    private static void AssertPersistedContextualLegalQueryAudit(
+        JsonElement root,
+        IReadOnlyList<CnvRegulationSearchRequest> receivedRequests)
+    {
+        var toolPlan = root.GetProperty("toolPlan");
+        toolPlan.GetProperty("approvedCalls").EnumerateArray()
+            .Count(call => call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.SearchCnvRegulationName)
+            .Should().Be(1);
+
+        var queries = root.GetProperty("compliance")
+            .GetProperty("queryStrategy")
+            .GetProperty("queries")
+            .EnumerateArray()
+            .ToArray();
+        queries.Should().HaveCountGreaterThanOrEqualTo(1);
+        queries.Should().HaveCountLessThanOrEqualTo(4);
+        receivedRequests.Should().HaveSameCount(queries);
+
+        for (var index = 0; index < queries.Length; index++)
+        {
+            var queryAudit = queries[index];
+            queryAudit.GetProperty("index").GetInt32().Should().Be(index + 1);
+            queryAudit.GetProperty("total").GetInt32().Should().Be(queries.Length);
+            queryAudit.GetProperty("query").GetString().Should()
+                .Be(receivedRequests[index].Query);
+            queryAudit.GetProperty("regulationArea").GetString().Should()
+                .Be(receivedRequests[index].Area);
+            queryAudit.GetProperty("reason").GetString().Should().NotBeNullOrWhiteSpace();
+            queryAudit.GetProperty("relatedFinancialSignals").GetArrayLength()
+                .Should().BeGreaterThan(0);
+            queryAudit.GetProperty("executionStatus").GetString()
+                .Should().Be(LegalCnvQueryExecutionStatuses.Succeeded);
+            queryAudit.GetProperty("resultCount").GetInt32().Should().Be(2);
+            queryAudit.GetProperty("citedEvidenceCount").GetInt32().Should().Be(1);
+        }
+    }
+
+    private static void AssertPersistedComplianceEvidence(JsonElement compliance)
+    {
+        var evidence = compliance.GetProperty("evidence").EnumerateArray().ToArray();
+        evidence.Should().NotBeEmpty();
+        evidence.Should().Contain(item =>
+            item.GetProperty("regulation").GetString() == AllowedCnvCitation &&
+            item.GetProperty("finding").GetString() ==
+                "Cited test fixture evidence for financial disclosure review.");
+        evidence.Should().NotContain(item =>
+            item.GetProperty("regulation").GetString() == UncitedCnvTitle ||
+            item.GetProperty("finding").GetString() == UncitedCnvSnippet);
     }
 
     private static void AssertIsolatedFinalContext(
@@ -1054,10 +1309,14 @@ public sealed class ProductionLikeWorkflowE2ETests
     private sealed class PersistingActivityEventPublisher : IActivityEventPublisher
     {
         private readonly OrchestrationDbContext _dbContext;
+        private readonly Action<ActivityEvent>? _onPublished;
 
-        public PersistingActivityEventPublisher(OrchestrationDbContext dbContext)
+        public PersistingActivityEventPublisher(
+            OrchestrationDbContext dbContext,
+            Action<ActivityEvent>? onPublished = null)
         {
             _dbContext = dbContext;
+            _onPublished = onPublished;
         }
 
         public List<ActivityEvent> PublishedEvents { get; } = [];
@@ -1076,6 +1335,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             ));
 
             await _dbContext.SaveChangesAsync(cancellationToken);
+            _onPublished?.Invoke(activityEvent);
         }
     }
 
@@ -1083,10 +1343,14 @@ public sealed class ProductionLikeWorkflowE2ETests
         : IPythonFinancialAnalysisService
     {
         private readonly bool _degradedRatios;
+        private readonly bool _noUsableSignals;
 
-        public FakeProductionPythonFinancialAnalysisService(bool degradedRatios = false)
+        public FakeProductionPythonFinancialAnalysisService(
+            bool degradedRatios = false,
+            bool noUsableSignals = false)
         {
             _degradedRatios = degradedRatios;
+            _noUsableSignals = noUsableSignals;
         }
 
         public Task<ComputeFinancialRatiosResponse> ComputeFinancialRatiosAsync(
@@ -1163,7 +1427,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             var currentRatioThreshold = FindThreshold(request, "LOW_CURRENT_RATIO");
             var leverageThreshold = FindThreshold(request, "HIGH_NET_DEBT_TO_EBITDA");
 
-            if (_degradedRatios)
+            if (_degradedRatios || _noUsableSignals)
             {
                 return Task.FromResult(new DetectFinancialRiskSignalsResponse(
                     Engine: "Fake Python/Pandas",
@@ -1175,9 +1439,9 @@ public sealed class ProductionLikeWorkflowE2ETests
                         Engine: "Fake Python/Pandas",
                         Evidence: [],
                         Warnings: []))
-                {
-                    Execution = SucceededExecution(FinancialAnalysisOperations.Signals)
-                });
+                    {
+                        Execution = SucceededExecution(FinancialAnalysisOperations.Signals)
+                    });
             }
 
             return Task.FromResult(new DetectFinancialRiskSignalsResponse(
@@ -1186,7 +1450,7 @@ public sealed class ProductionLikeWorkflowE2ETests
                 [
                     new FinancialRiskSignal(
                         Name: currentRatioThreshold.Code,
-                        Severity: currentRatioThreshold.Severity,
+                        Severity: "High",
                         Period: "2025E",
                         Summary: "Current ratio crossed a liquidity review threshold.",
                         Evidence:
@@ -1377,13 +1641,13 @@ public sealed class ProductionLikeWorkflowE2ETests
                     new CnvRegulationSearchResult(
                         DocumentId: "cnv-e2e-uncited",
                         ChunkId: "chunk-2",
-                        Title: "Uncited test result",
+                        Title: UncitedCnvTitle,
                         Chapter: null,
                         Section: null,
                         Article: null,
                         Source: "CNV test fixture",
                         Url: null,
-                        Snippet: "Uncited result should not become strong legal support.",
+                        Snippet: UncitedCnvSnippet,
                         Score: 0.5,
                         Citations: []
                     )
@@ -1423,6 +1687,29 @@ public sealed class ProductionLikeWorkflowE2ETests
             _observer(report);
 
             return _inner.AnalyzeAsync(report, cancellationToken);
+        }
+    }
+
+    private sealed class ObservingLegalAgent : ILegalAgent
+    {
+        private readonly ILegalAgent _inner;
+        private readonly Action<FinancialReportContext> _observer;
+
+        public ObservingLegalAgent(
+            ILegalAgent inner,
+            Action<FinancialReportContext> observer)
+        {
+            _inner = inner;
+            _observer = observer;
+        }
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            _observer(report);
+
+            return _inner.ReviewAsync(report, cancellationToken);
         }
     }
 
@@ -1471,11 +1758,31 @@ public sealed class ProductionLikeWorkflowE2ETests
         }
     }
 
+    private sealed class LegalFirstDeterministicToolPlanProposalService
+        : IToolPlanProposalService
+    {
+        private readonly DeterministicToolPlanProposalService _inner;
+
+        public LegalFirstDeterministicToolPlanProposalService(ToolCallingOptions options)
+        {
+            _inner = new DeterministicToolPlanProposalService(options);
+        }
+
+        public async Task<ToolPlan> ProposeAsync(
+            ToolPlanProposalInput input,
+            CancellationToken cancellationToken)
+        {
+            var plan = await _inner.ProposeAsync(input, cancellationToken);
+            return plan with { ProposedCalls = plan.ProposedCalls.Reverse().ToArray() };
+        }
+    }
+
     private sealed class ThrowingControlledToolExecutor : IControlledToolExecutor
     {
         public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
             IReadOnlyList<ApprovedToolCall> calls,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PlannerToolExecutionContext? runtimeContext = null)
         {
             throw new InvalidOperationException("Shadow mode should not execute controlled tool calls.");
         }

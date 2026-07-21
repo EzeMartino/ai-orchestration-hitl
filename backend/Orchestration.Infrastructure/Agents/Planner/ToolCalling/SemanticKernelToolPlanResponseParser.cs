@@ -46,7 +46,7 @@ public sealed class SemanticKernelToolPlanResponseParser
             }
 
             plan = new ToolPlan(
-                parsed.ProposedCalls
+                ProposedCalls: parsed.ProposedCalls
                     .Where(call => !string.IsNullOrWhiteSpace(call.ToolName))
                     .Select(call => new ProposedToolCall(
                         ToolName: call.ToolName,
@@ -55,7 +55,9 @@ public sealed class SemanticKernelToolPlanResponseParser
                             ? FallbackReason
                             : call.Reason
                     ))
-                    .ToList()
+                    .ToList(),
+                ProposalSource: ToolPlanProposalSource.Llm,
+                ProposalFallbackReason: null
             );
 
             return true;

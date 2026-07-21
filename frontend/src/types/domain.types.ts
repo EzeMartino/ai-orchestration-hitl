@@ -72,10 +72,12 @@ export type LegalAnalysisReviewResult = {
 export type ComplianceContext = {
   riskDetected: boolean;
   riskLevel: string;
+  requiresHumanReview?: boolean;
   engine?: string;
   summary: string;
   evidence: ComplianceEvidenceItem[];
   warnings?: string[];
+  queryStrategy?: unknown;
   legalReview?: LegalAnalysisReviewResult | null;
 };
 
@@ -121,6 +123,12 @@ export type ExecutedToolCallContext = {
 };
 
 export type ToolPlanContext = {
+  proposalSource?: "llm" | "deterministic" | "deterministic_fallback" | null;
+  proposalFallbackReason?:
+    | "llm_response_invalid"
+    | "llm_request_failed"
+    | "llm_configuration_failed"
+    | null;
   proposedCalls: ProposedToolCallContext[];
   approvedCalls: ApprovedToolCallContext[];
   rejectedCalls: RejectedToolCallContext[];

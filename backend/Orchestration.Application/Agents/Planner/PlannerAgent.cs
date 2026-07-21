@@ -1,6 +1,7 @@
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Planner.ToolCalling.Mapping;
@@ -11,6 +12,17 @@ namespace Orchestration.Application.Agents.Planner;
 
 public sealed class PlannerAgent : IPlannerAgent
 {
+    private const string UnsupportedSatisfactionKindReason =
+        "Unsupported planner satisfaction kind.";
+    private const string PolicyDecisionMismatchReason =
+        "Tool execution policy returned decisions inconsistent with validation.";
+    private const string MissingExecutionResultReason =
+        "Controlled tool executor returned no matching result.";
+    private const string UnexpectedExecutionResultsReason =
+        "Controlled tool executor returned unexpected results.";
+    private const string InconsistentExecutionResultReason =
+        "Controlled tool executor returned inconsistent result.";
+
     private readonly IDataAgent _dataAgent;
     private readonly ILegalAgent _legalAgent;
     private readonly IActivityEventPublisher _activityPublisher;
@@ -60,6 +72,7 @@ public sealed class PlannerAgent : IPlannerAgent
             "PlannerAgent (Agente Planificador) inicializado. Construyendo plan de ejecución.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (IsPlanDrivenMode())
         {
@@ -93,6 +106,7 @@ public sealed class PlannerAgent : IPlannerAgent
             report,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var reasoningResult = await GenerateReasoningAsync(
             sessionId,
@@ -101,11 +115,13 @@ public sealed class PlannerAgent : IPlannerAgent
             legalResult,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var proposedPlan = await _toolPlanProposalService.ProposeAsync(
             BuildToolPlanProposalInput(report, reasoningResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var toolPlan = await BuildToolPlanAuditAsync(
             proposedPlan,
@@ -116,12 +132,14 @@ public sealed class PlannerAgent : IPlannerAgent
             ),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishToolPlanAuditEventsAsync(
             sessionId,
             toolPlan,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return await CompletePlannerAsync(
             sessionId,
@@ -142,43 +160,101 @@ public sealed class PlannerAgent : IPlannerAgent
             BuildInitialToolPlanProposalInput(report),
             cancellationToken
         );
-
-        var toolPlan = await BuildToolPlanAuditAsync(
-            proposedPlan,
+        cancellationToken.ThrowIfCancellationRequested();
+        var normalizedPlan = _toolPlanNormalizer.Normalize(proposedPlan);
+        var validationResult = _toolPlanValidator.Validate(normalizedPlan);
+        var returnedPolicyDecisions = _toolExecutionPolicy.Decide(
+            validationResult.ApprovedCalls,
             new ToolExecutionPolicyContext(
                 DataAnalysisAlreadyCompleted: false,
                 LegalReviewAlreadyCompleted: false,
                 DynamicExecutionEnabled: true
-            ),
-            cancellationToken
+            )
+        );
+        var policyDecisions = ReconcilePolicyDecisions(
+            validationResult.ApprovedCalls,
+            returnedPolicyDecisions);
+        var planBeforeExecution = new ToolPlanAuditResult(
+            ProposedCalls: normalizedPlan.ProposedCalls,
+            ApprovedCalls: validationResult.ApprovedCalls,
+            RejectedCalls: validationResult.RejectedCalls,
+            ExecutedCalls: [],
+            ProposalSource: normalizedPlan.ProposalSource,
+            ProposalFallbackReason: normalizedPlan.ProposalFallbackReason
         );
 
-        await PublishToolPlanAuditEventsAsync(
+        await PublishToolPlanValidationEventsAsync(
             sessionId,
-            toolPlan,
+            planBeforeExecution,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var dataResult = _executionResultMapper.TryMapDataResult(toolPlan.ExecutedCalls);
-        var legalResult = _executionResultMapper.TryMapLegalResult(toolPlan.ExecutedCalls);
+        var decisionPartitions = PartitionPolicyDecisions(policyDecisions);
+        var dataDecisions = decisionPartitions.Data;
+        var legalDecisions = decisionPartitions.Legal;
 
-        if (dataResult is null || legalResult is null)
+        var dataAudit = await BuildExecutionAuditAsync(
+            dataDecisions,
+            cancellationToken,
+            runtimeContext: null
+        );
+        await PublishToolExecutionAuditEventsAsync(
+            sessionId,
+            dataAudit,
+            cancellationToken
+        );
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var dataResult = TryMapExecutionResult(
+                () => _executionResultMapper.TryMapDataResult(dataAudit),
+                cancellationToken) ??
+            PlannerStageSafeResults.DataUnavailable();
+        var dataToolStatus = GetDataToolStatus(dataDecisions, dataAudit);
+        var dataEvidence = LegalDataEvidenceClassifier.Classify(
+            dataToolStatus,
+            dataResult.FinancialAnalysis);
+        var runtimeContext = new PlannerToolExecutionContext(
+            report,
+            dataResult,
+            dataEvidence);
+
+        var legalAudit = await BuildExecutionAuditAsync(
+            legalDecisions,
+            cancellationToken,
+            runtimeContext
+        );
+        await PublishToolExecutionAuditEventsAsync(
+            sessionId,
+            legalAudit,
+            cancellationToken
+        );
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Unsupported decisions are never executable stages. Record them only
+        // after the actual Data -> Legal execution order has been audited.
+        var unsupportedAudit = CreateUnsupportedExecutionAudit(
+            decisionPartitions.Unsupported);
+        await PublishToolExecutionAuditEventsAsync(
+            sessionId,
+            unsupportedAudit,
+            cancellationToken
+        );
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var legalResult = TryMapExecutionResult(
+                () => _executionResultMapper.TryMapLegalResult(legalAudit),
+                cancellationToken) ??
+            PlannerStageSafeResults.LegalUnavailable();
+        var toolPlan = planBeforeExecution with
         {
-            await PublishAsync(
-                sessionId,
-                "tool_execution_fallback_used",
-                "PlannerAgent",
-                "La ejecución basada en plan falló; se utilizó la ruta determinista del agente.",
-                cancellationToken
-            );
+            ExecutedCalls = dataAudit
+                .Concat(legalAudit)
+                .Concat(unsupportedAudit)
+                .ToArray()
+        };
 
-            (dataResult, legalResult) = await RunDeterministicAgentsAsync(
-                sessionId,
-                report,
-                cancellationToken
-            );
-        }
-
+        cancellationToken.ThrowIfCancellationRequested();
         var reasoningResult = await GenerateReasoningAsync(
             sessionId,
             report,
@@ -187,6 +263,7 @@ public sealed class PlannerAgent : IPlannerAgent
             cancellationToken
         );
 
+        cancellationToken.ThrowIfCancellationRequested();
         return await CompletePlannerAsync(
             sessionId,
             dataResult,
@@ -209,11 +286,13 @@ public sealed class PlannerAgent : IPlannerAgent
             "Delegando detección de anomalías a DataAgent (Agente de Datos).",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var dataResult = await _dataAgent.AnalyzeAsync(
             report,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -222,6 +301,7 @@ public sealed class PlannerAgent : IPlannerAgent
             $"Detección de anomalías completada usando {dataResult.Engine}.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -230,6 +310,7 @@ public sealed class PlannerAgent : IPlannerAgent
             dataResult.Summary,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -238,6 +319,7 @@ public sealed class PlannerAgent : IPlannerAgent
             "Delegando revisión de cumplimiento normativo a LegalAgent (Agente Legal).",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         var legalReport = dataResult.FinancialAnalysis is null
             ? report
@@ -247,6 +329,7 @@ public sealed class PlannerAgent : IPlannerAgent
             legalReport,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -255,6 +338,7 @@ public sealed class PlannerAgent : IPlannerAgent
             $"Revisión de cumplimiento completada usando {legalResult.Engine}.",
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -263,6 +347,7 @@ public sealed class PlannerAgent : IPlannerAgent
             legalResult.Summary,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return (dataResult, legalResult);
     }
@@ -278,6 +363,7 @@ public sealed class PlannerAgent : IPlannerAgent
             BuildReasoningInput(report, dataResult, legalResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         await PublishAsync(
             sessionId,
@@ -286,6 +372,7 @@ public sealed class PlannerAgent : IPlannerAgent
             GetReasoningEventMessage(reasoningResult),
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return reasoningResult;
     }
@@ -297,10 +384,13 @@ public sealed class PlannerAgent : IPlannerAgent
     {
         var normalizedPlan = _toolPlanNormalizer.Normalize(proposedPlan);
         var validationResult = _toolPlanValidator.Validate(normalizedPlan);
-        var policyDecisions = _toolExecutionPolicy.Decide(
+        var returnedPolicyDecisions = _toolExecutionPolicy.Decide(
             validationResult.ApprovedCalls,
             policyContext
         );
+        var policyDecisions = ReconcilePolicyDecisions(
+            validationResult.ApprovedCalls,
+            returnedPolicyDecisions);
         var executionAudit = await BuildExecutionAuditAsync(
             policyDecisions,
             cancellationToken
@@ -310,7 +400,9 @@ public sealed class PlannerAgent : IPlannerAgent
             ProposedCalls: normalizedPlan.ProposedCalls,
             ApprovedCalls: validationResult.ApprovedCalls,
             RejectedCalls: validationResult.RejectedCalls,
-            ExecutedCalls: executionAudit
+            ExecutedCalls: executionAudit,
+            ProposalSource: normalizedPlan.ProposalSource,
+            ProposalFallbackReason: normalizedPlan.ProposalFallbackReason
         );
     }
 
@@ -325,12 +417,14 @@ public sealed class PlannerAgent : IPlannerAgent
         var requiresHumanApproval =
             dataResult.HasAnomaly ||
             dataResult.RequiresHumanReview ||
-            legalResult.HasComplianceRisk;
+            legalResult.HasComplianceRisk ||
+            legalResult.RequiresHumanReview;
 
         var summary = requiresHumanApproval
             ? "PlannerAgent determinó que se requiere aprobación humana antes de completar el flujo de trabajo."
             : "PlannerAgent determinó que el flujo de trabajo puede completarse sin intervención humana.";
 
+        cancellationToken.ThrowIfCancellationRequested();
         await PublishAsync(
             sessionId,
             "agent_completed",
@@ -338,6 +432,7 @@ public sealed class PlannerAgent : IPlannerAgent
             summary,
             cancellationToken
         );
+        cancellationToken.ThrowIfCancellationRequested();
 
         return new PlannerAgentResult(
             RequiresHumanApproval: requiresHumanApproval,
@@ -351,7 +446,8 @@ public sealed class PlannerAgent : IPlannerAgent
 
     private async Task<IReadOnlyList<ToolExecutionResult>> BuildExecutionAuditAsync(
         IReadOnlyList<ToolExecutionPolicyDecision> policyDecisions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PlannerToolExecutionContext? runtimeContext = null)
     {
         var callsToExecute = policyDecisions
             .Where(decision => decision.Status == ToolExecutionStatus.Executed)
@@ -363,7 +459,11 @@ public sealed class PlannerAgent : IPlannerAgent
         {
             executionResults = callsToExecute.Count == 0
                 ? []
-                : await _controlledToolExecutor.ExecuteAsync(callsToExecute, cancellationToken);
+                : await _controlledToolExecutor.ExecuteAsync(
+                    callsToExecute,
+                    cancellationToken,
+                    runtimeContext);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException)
         {
@@ -382,8 +482,13 @@ public sealed class PlannerAgent : IPlannerAgent
                     Error: "La ejecución de la herramienta falló."
                 ))
                 .ToList();
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        var reconciledExecutionResults = ReconcileExecutionResults(
+            callsToExecute,
+            executionResults);
         var executionIndex = 0;
         var executedCalls = new List<ToolExecutionResult>();
 
@@ -392,9 +497,7 @@ public sealed class PlannerAgent : IPlannerAgent
             if (decision.Status == ToolExecutionStatus.Executed)
             {
                 executedCalls.Add(
-                    executionIndex < executionResults.Count
-                        ? executionResults[executionIndex]
-                        : CreateMissingExecutionResult(decision.Call)
+                    reconciledExecutionResults[executionIndex]
                 );
                 executionIndex++;
                 continue;
@@ -406,17 +509,232 @@ public sealed class PlannerAgent : IPlannerAgent
         return executedCalls;
     }
 
+    internal static IReadOnlyList<ToolExecutionPolicyDecision> ReconcilePolicyDecisions(
+        IReadOnlyList<ApprovedToolCall> approvedCalls,
+        IReadOnlyList<ToolExecutionPolicyDecision>? policyDecisions)
+    {
+        if (policyDecisions is not null &&
+            policyDecisions.Count == approvedCalls.Count)
+        {
+            var unmatchedApprovedCalls = approvedCalls.ToList();
+            var isExactMatch = true;
+
+            foreach (var decision in policyDecisions)
+            {
+                if (decision is null ||
+                    decision.Call is null ||
+                    !IsAllowedPolicyStatus(decision.Status))
+                {
+                    isExactMatch = false;
+                    break;
+                }
+
+                var matchedIndex = unmatchedApprovedCalls.FindIndex(call =>
+                    ReferenceEquals(call, decision.Call));
+                if (matchedIndex < 0)
+                {
+                    isExactMatch = false;
+                    break;
+                }
+
+                unmatchedApprovedCalls.RemoveAt(matchedIndex);
+            }
+
+            if (isExactMatch && unmatchedApprovedCalls.Count == 0)
+            {
+                return policyDecisions;
+            }
+        }
+
+        return approvedCalls
+            .Select(call => new ToolExecutionPolicyDecision(
+                call,
+                ToolExecutionStatus.Failed,
+                PolicyDecisionMismatchReason))
+            .ToArray();
+    }
+
+    private static bool IsAllowedPolicyStatus(ToolExecutionStatus status)
+    {
+        return status is
+            ToolExecutionStatus.Executed or
+            ToolExecutionStatus.SkippedAlreadySatisfied or
+            ToolExecutionStatus.SkippedDisabled or
+            ToolExecutionStatus.Failed;
+    }
+
+    private static TResult? TryMapExecutionResult<TResult>(
+        Func<TResult?> map,
+        CancellationToken cancellationToken)
+        where TResult : class
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            var result = map();
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return null;
+        }
+    }
+
+    internal static IReadOnlyList<ToolExecutionResult> ReconcileExecutionResults(
+        IReadOnlyList<ApprovedToolCall> requestedCalls,
+        IReadOnlyList<ToolExecutionResult>? returnedResults)
+    {
+        var matchedResults = new ToolExecutionResult?[requestedCalls.Count];
+        var hasUnexpectedResult = false;
+
+        foreach (var result in returnedResults ?? [])
+        {
+            if (result is null || result.ToolName is null)
+            {
+                hasUnexpectedResult = true;
+                continue;
+            }
+
+            var matchedIndex = -1;
+            for (var index = 0; index < requestedCalls.Count; index++)
+            {
+                if (matchedResults[index] is null &&
+                    string.Equals(
+                        requestedCalls[index].ToolName,
+                        result.ToolName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    matchedIndex = index;
+                    break;
+                }
+            }
+
+            if (matchedIndex < 0)
+            {
+                hasUnexpectedResult = true;
+                continue;
+            }
+
+            matchedResults[matchedIndex] = IsConsistentExecutionResult(result)
+                ? result
+                : CreateFailedExecutionResult(
+                    requestedCalls[matchedIndex],
+                    InconsistentExecutionResultReason);
+        }
+
+        if (hasUnexpectedResult)
+        {
+            return requestedCalls
+                .Select(call => CreateFailedExecutionResult(
+                    call,
+                    UnexpectedExecutionResultsReason))
+                .ToArray();
+        }
+
+        return requestedCalls
+            .Select((call, index) =>
+                matchedResults[index] ?? CreateMissingExecutionResult(call))
+            .ToArray();
+    }
+
+    private static bool IsConsistentExecutionResult(ToolExecutionResult result)
+    {
+        return (result.Status == ToolExecutionStatus.Executed && result.Succeeded) ||
+            (result.Status == ToolExecutionStatus.Failed && !result.Succeeded);
+    }
+
+    internal static (
+        IReadOnlyList<ToolExecutionPolicyDecision> Data,
+        IReadOnlyList<ToolExecutionPolicyDecision> Legal,
+        IReadOnlyList<ToolExecutionPolicyDecision> Unsupported)
+        PartitionPolicyDecisions(
+            IReadOnlyList<ToolExecutionPolicyDecision> policyDecisions)
+    {
+        var data = new List<ToolExecutionPolicyDecision>();
+        var legal = new List<ToolExecutionPolicyDecision>();
+        var unsupported = new List<ToolExecutionPolicyDecision>();
+
+        foreach (var decision in policyDecisions)
+        {
+            switch (PlannerToolCatalog.Find(decision.Call.ToolName)?.SatisfactionKind)
+            {
+                case PlannerToolSatisfactionKind.DataAnalysis:
+                    data.Add(decision);
+                    break;
+                case PlannerToolSatisfactionKind.LegalReview:
+                    legal.Add(decision);
+                    break;
+                default:
+                    unsupported.Add(decision);
+                    break;
+            }
+        }
+
+        if (data.Count + legal.Count + unsupported.Count != policyDecisions.Count)
+        {
+            throw new InvalidOperationException(
+                "Planner policy decision partition was not exhaustive.");
+        }
+
+        return (data, legal, unsupported);
+    }
+
+    private static IReadOnlyList<ToolExecutionResult> CreateUnsupportedExecutionAudit(
+        IReadOnlyList<ToolExecutionPolicyDecision> unsupportedDecisions)
+    {
+        return unsupportedDecisions
+            .Select(decision => decision.Status == ToolExecutionStatus.Executed
+                ? new ToolExecutionResult(
+                    ToolName: decision.Call.ToolName,
+                    Status: ToolExecutionStatus.Failed,
+                    Succeeded: false,
+                    Summary: UnsupportedSatisfactionKindReason,
+                    Engine: "Tool Execution Policy",
+                    OutputJson: "{}",
+                    Error: UnsupportedSatisfactionKindReason)
+                : CreatePolicyAuditResult(decision))
+            .ToArray();
+    }
+
+    private static string GetDataToolStatus(
+        IReadOnlyList<ToolExecutionPolicyDecision> dataDecisions,
+        IReadOnlyList<ToolExecutionResult> dataAudit)
+    {
+        if (dataDecisions.Count == 0)
+        {
+            return LegalDataToolStatuses.Absent;
+        }
+
+        return dataAudit.Any(result => result.Succeeded)
+            ? LegalDataToolStatuses.Executed
+            : LegalDataToolStatuses.Failed;
+    }
+
     private static ToolExecutionResult CreateMissingExecutionResult(
         ApprovedToolCall call)
+    {
+        return CreateFailedExecutionResult(call, MissingExecutionResultReason);
+    }
+
+    private static ToolExecutionResult CreateFailedExecutionResult(
+        ApprovedToolCall call,
+        string reason)
     {
         return new ToolExecutionResult(
             ToolName: call.ToolName,
             Status: ToolExecutionStatus.Failed,
             Succeeded: false,
-            Summary: "No se devolvió el resultado de ejecución de la herramienta.",
+            Summary: reason,
             Engine: "Controlled Tool Executor",
             OutputJson: "{}",
-            Error: "No se devolvió el resultado de ejecución de la herramienta."
+            Error: reason
         );
     }
 
@@ -425,14 +743,21 @@ public sealed class PlannerAgent : IPlannerAgent
         ToolPlanAuditResult toolPlan,
         CancellationToken cancellationToken)
     {
-        if (toolPlan.ProposedCalls.Count == 0 &&
-            toolPlan.ApprovedCalls.Count == 0 &&
-            toolPlan.RejectedCalls.Count == 0 &&
-            toolPlan.ExecutedCalls.Count == 0)
-        {
-            return;
-        }
+        await PublishToolPlanValidationEventsAsync(
+            sessionId,
+            toolPlan,
+            cancellationToken);
+        await PublishToolExecutionAuditEventsAsync(
+            sessionId,
+            toolPlan.ExecutedCalls,
+            cancellationToken);
+    }
 
+    private async Task PublishToolPlanValidationEventsAsync(
+        Guid sessionId,
+        ToolPlanAuditResult toolPlan,
+        CancellationToken cancellationToken)
+    {
         if (toolPlan.ProposedCalls.Count > 0)
         {
             await PublishAsync(
@@ -442,6 +767,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 $"PlannerAgent propuso {toolPlan.ProposedCalls.Count} llamadas a herramientas.",
                 cancellationToken
             );
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         if (toolPlan.ApprovedCalls.Count > 0 || toolPlan.RejectedCalls.Count > 0)
@@ -453,6 +779,7 @@ public sealed class PlannerAgent : IPlannerAgent
                 $"Plan de herramientas validado: {toolPlan.ApprovedCalls.Count} aprobadas, {toolPlan.RejectedCalls.Count} rechazadas.",
                 cancellationToken
             );
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         foreach (var rejectedCall in toolPlan.RejectedCalls)
@@ -464,9 +791,16 @@ public sealed class PlannerAgent : IPlannerAgent
                 $"Llamada a herramienta '{rejectedCall.ToolName}' rechazada: {rejectedCall.Reason}",
                 cancellationToken
             );
+            cancellationToken.ThrowIfCancellationRequested();
         }
+    }
 
-        foreach (var executionAudit in toolPlan.ExecutedCalls)
+    private async Task PublishToolExecutionAuditEventsAsync(
+        Guid sessionId,
+        IReadOnlyList<ToolExecutionResult> executionAudits,
+        CancellationToken cancellationToken)
+    {
+        foreach (var executionAudit in executionAudits)
         {
             var auditActor = PlannerToolCatalog.Find(executionAudit.ToolName)?.AuditActor
                 ?? "PlannerAgent";
@@ -503,6 +837,8 @@ public sealed class PlannerAgent : IPlannerAgent
                     cancellationToken
                 );
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
         }
     }
 

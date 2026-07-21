@@ -10,5 +10,6 @@ public sealed record RegulatoryReviewResult(
     IReadOnlyList<RegulatoryFinding> Findings,
     IReadOnlyList<string> Warnings,
     object? QueryStrategy = null,
-    LegalAnalysisReviewResult? LegalReview = null
+    LegalAnalysisReviewResult? LegalReview = null,
+    bool RequiresHumanReview = false
 );

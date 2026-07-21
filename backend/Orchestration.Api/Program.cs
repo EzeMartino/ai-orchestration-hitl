@@ -51,11 +51,13 @@ builder.Services.AddPlannerReasoning(builder.Configuration);
 builder.Services.AddToolPlanProposal(builder.Configuration);
 builder.Services.AddScoped<IToolPlanValidator>(provider =>
     new ToolPlanValidator(
-        provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
+        provider.GetRequiredService<
+            Microsoft.Extensions.Options.IOptionsSnapshot<ToolCallingOptions>>().Value
     )
 );
 builder.Services.AddScoped(provider =>
-    provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ToolCallingOptions>>().Value
+    provider.GetRequiredService<
+        Microsoft.Extensions.Options.IOptionsSnapshot<ToolCallingOptions>>().Value
 );
 builder.Services.AddScoped<IToolPlanNormalizer, ToolPlanNormalizer>();
 builder.Services.AddScoped<IToolExecutionPolicy, ToolExecutionPolicy>();

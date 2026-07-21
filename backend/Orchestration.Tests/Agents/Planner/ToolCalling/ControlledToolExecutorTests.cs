@@ -2,9 +2,12 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
-using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
@@ -12,6 +15,23 @@ namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 public class ControlledToolExecutorTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Fact]
+    public void Constructor_DependsOnLegalAgentInsteadOfDirectMcpClient()
+    {
+        var constructor = typeof(ControlledToolExecutor).GetConstructors()
+            .Should().ContainSingle().Subject;
+        var parameterTypes = constructor.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+
+        parameterTypes.Should().Contain(typeof(ILegalAgent));
+        var dependsOnDirectMcpClient = parameterTypes.Any(parameterType =>
+            parameterType.FullName?.Contains(
+                "ICnvRegulationMcpClient",
+                StringComparison.Ordinal) == true);
+        dependsOnDirectMcpClient.Should().BeFalse();
+    }
 
     [Fact]
     public async Task ExecuteAsync_Should_execute_data_analyze_transactions_with_valid_args()
@@ -134,43 +154,65 @@ public class ControlledToolExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_Should_execute_legal_search_cnv_regulation_with_valid_query()
+    public async Task ExecuteAsync_LegalWithRuntimeContext_UsesTrustedAggregateAgentContext()
     {
-        var mcpClient = new FakeCnvRegulationMcpClient();
-        var executor = CreateExecutor(mcpClient: mcpClient);
+        var dataFinancialAnalysis = CreateFinancialAnalysis("data-document");
+        var staleReportFinancialAnalysis = CreateFinancialAnalysis("stale-document");
+        var dataResult = CreateDataResult(dataFinancialAnalysis);
+        var dataEvidence = CreateDataEvidence();
+        var report = CreateReport() with
+        {
+            FinancialAnalysis = staleReportFinancialAnalysis
+        };
+        var runtimeContext = new PlannerToolExecutionContext(
+            report,
+            dataResult,
+            dataEvidence
+        );
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
 
         var results = await executor.ExecuteAsync(
-            [
-                CreateCall(
-                    "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agente liquidacion compensacion",
-                        ["area"] = "Agentes",
-                        ["limit"] = "3",
-                        ["requiresReview"] = "true"
-                    }
-                )
-            ],
-            CancellationToken.None
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            runtimeContext
         );
 
         var result = results.Should().ContainSingle().Subject;
-
-        result.ToolName.Should().Be("legal.search_cnv_regulation");
         result.Status.Should().Be(ToolExecutionStatus.Executed);
         result.Succeeded.Should().BeTrue();
-        result.Summary.Should().Be("CNV search returned 1 results.");
-        result.Engine.Should().Be("MCP CNV Regulation Server");
+        result.Summary.Should().Be("Aggregate legal review completed.");
+        result.Engine.Should().Be("Aggregate LegalAgent");
         result.Error.Should().BeNull();
-        result.OutputJson.Should().NotBe("{}");
+        legalAgent.CallCount.Should().Be(1);
+        legalAgent.ReceivedReport.Should().NotBeNull();
+        legalAgent.ReceivedReport!.FinancialAnalysis.Should()
+            .BeSameAs(dataFinancialAnalysis);
+        legalAgent.ReceivedReport.FinancialAnalysis.Should()
+            .NotBeSameAs(staleReportFinancialAnalysis);
+        legalAgent.ReceivedContext.Should().NotBeNull();
+        legalAgent.ReceivedContext!.ResolutionMode.Should().Be(
+            FinancialAnalysisResolutionMode.ProvidedOnly);
+        legalAgent.ReceivedContext.DataEvidence.Should().BeSameAs(dataEvidence);
+    }
 
-        mcpClient.WasCalled.Should().BeTrue();
-        mcpClient.ReceivedRequest.Should().NotBeNull();
-        mcpClient.ReceivedRequest!.Query.Should().Be("agente liquidacion compensacion");
-        mcpClient.ReceivedRequest.Area.Should().Be("Agentes");
-        mcpClient.ReceivedRequest.Limit.Should().Be(3);
-        mcpClient.ReceivedRequest.RequiresReview.Should().BeTrue();
+    [Fact]
+    public async Task ExecuteAsync_LegalWithRuntimeContext_LegacyAgentFailsSafely()
+    {
+        var legalAgent = new LegacyLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            CreateRuntimeContext());
+
+        var result = results.Should().ContainSingle().Subject;
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Tool execution failed.");
+        result.OutputJson.Should().Be("{}");
+        legalAgent.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -198,21 +240,13 @@ public class ControlledToolExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_Should_return_failure_when_legal_query_is_missing()
+    public async Task ExecuteAsync_LegalWithoutRuntimeContext_FailsWithoutCallingAgent()
     {
-        var mcpClient = new FakeCnvRegulationMcpClient();
-        var executor = CreateExecutor(mcpClient: mcpClient);
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
 
         var results = await executor.ExecuteAsync(
-            [
-                CreateCall(
-                    "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["area"] = "Agentes"
-                    }
-                )
-            ],
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
             CancellationToken.None
         );
 
@@ -220,17 +254,63 @@ public class ControlledToolExecutorTests
 
         result.Succeeded.Should().BeFalse();
         result.Status.Should().Be(ToolExecutionStatus.Failed);
-        result.Error.Should().Be("Falta el argumento obligatorio: query.");
+        result.Error.Should().Be("Trusted planner runtime context is required.");
         result.OutputJson.Should().Be("{}");
-        mcpClient.WasCalled.Should().BeFalse();
+        legalAgent.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(InvalidTrustedContextPart.Report)]
+    [InlineData(InvalidTrustedContextPart.DataResult)]
+    [InlineData(InvalidTrustedContextPart.DataEvidence)]
+    [InlineData(InvalidTrustedContextPart.FailedStages)]
+    [InlineData(InvalidTrustedContextPart.FailedStageItem)]
+    public async Task ExecuteAsync_LegalWithStructurallyInvalidRuntimeContext_FailsSafely(
+        InvalidTrustedContextPart invalidPart)
+    {
+        var runtimeContext = CreateInvalidRuntimeContext(invalidPart);
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            runtimeContext);
+
+        var result = results.Should().ContainSingle().Subject;
+        result.Status.Should().Be(ToolExecutionStatus.Failed);
+        result.Succeeded.Should().BeFalse();
+        result.Error.Should().Be("Trusted planner runtime context is required.");
+        result.OutputJson.Should().Be("{}");
+        legalAgent.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LegalAllowsDataResultWithoutFinancialAnalysis()
+    {
+        var context = CreateRuntimeContext() with
+        {
+            DataResult = CreateDataResult(financialAnalysis: null)
+        };
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        var results = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            context);
+
+        results.Should().ContainSingle().Which.Succeeded.Should().BeTrue();
+        legalAgent.CallCount.Should().Be(1);
+        legalAgent.ReceivedReport!.FinancialAnalysis.Should().BeNull();
     }
 
     [Fact]
     public async Task ExecuteAsync_Should_reject_unknown_tool_defensively()
     {
         var dataAgent = new FakeDataAgent();
-        var mcpClient = new FakeCnvRegulationMcpClient();
-        var executor = CreateExecutor(dataAgent, mcpClient);
+        var legalAgent = new FakeLegalAgent(CreateAggregateLegalResult());
+        var executor = CreateExecutor(dataAgent, legalAgent);
 
         var results = await executor.ExecuteAsync(
             [
@@ -249,7 +329,7 @@ public class ControlledToolExecutorTests
         result.Error.Should().Be("Tool is not executable.");
         result.OutputJson.Should().Be("{}");
         dataAgent.WasCalled.Should().BeFalse();
-        mcpClient.WasCalled.Should().BeFalse();
+        legalAgent.CallCount.Should().Be(0);
     }
 
     [Fact]
@@ -287,14 +367,265 @@ public class ControlledToolExecutorTests
         exception.Should().BeNull();
     }
 
+    [Fact]
+    public async Task ExecuteAsync_LegalAggregate_RoundTripsThroughRealMapper()
+    {
+        var legalResult = CreateAggregateLegalResult();
+        var executor = CreateExecutor(
+            legalAgent: new FakeLegalAgent(legalResult));
+
+        var executed = await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            CreateRuntimeContext()
+        );
+        var mapped = new ToolExecutionResultMapper().TryMapLegalResult(executed);
+
+        mapped.Should().NotBeNull();
+        mapped!.HasComplianceRisk.Should().Be(legalResult.HasComplianceRisk);
+        mapped.RiskLevel.Should().Be(legalResult.RiskLevel);
+        mapped.Summary.Should().Be(legalResult.Summary);
+        mapped.Engine.Should().Be(legalResult.Engine);
+        mapped.Evidence.Should().BeEquivalentTo(legalResult.Evidence);
+        mapped.Warnings.Should().Equal(legalResult.Warnings);
+        mapped.RequiresHumanReview.Should().BeTrue();
+        mapped.LegalReview.Should().BeEquivalentTo(legalResult.LegalReview);
+
+        var queryStrategy = mapped.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        queryStrategy.StrategyVersion.Should().Be("aggregate_strategy_v1");
+        queryStrategy.Queries.Should().HaveCount(2);
+        queryStrategy.Queries[0].ExecutionStatus.Should()
+            .Be(LegalCnvQueryExecutionStatuses.Succeeded);
+        queryStrategy.Queries[1].ExecutionStatus.Should()
+            .Be(LegalCnvQueryExecutionStatuses.Failed);
+        queryStrategy.Queries[1].ResultCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LegalAgentCancellationWithoutCanceledToken_Propagates()
+    {
+        var legalAgent = new FakeLegalAgent(
+            CreateAggregateLegalResult(),
+            cancel: true);
+        var executor = CreateExecutor(legalAgent: legalAgent);
+
+        Func<Task> act = async () => await executor.ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None,
+            CreateRuntimeContext()
+        );
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        legalAgent.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DataWithRuntimeContext_RemainsArgumentDriven()
+    {
+        var dataAgent = new FakeDataAgent();
+        var executor = CreateExecutor(dataAgent: dataAgent);
+        var call = CreateValidDataCall();
+
+        var results = await executor.ExecuteAsync(
+            [call],
+            CancellationToken.None,
+            CreateRuntimeContext()
+        );
+
+        results.Should().ContainSingle().Which.Succeeded.Should().BeTrue();
+        dataAgent.WasCalled.Should().BeTrue();
+        dataAgent.ReceivedReport.Should().NotBeNull();
+        dataAgent.ReceivedReport!.SessionId.Should().Be(
+            Guid.Parse(call.Arguments["sessionId"]));
+        dataAgent.ReceivedReport.ReportName.Should().Be(
+            call.Arguments["reportName"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DataIgnoresStructurallyInvalidRuntimeContext()
+    {
+        var dataAgent = new FakeDataAgent();
+        var executor = CreateExecutor(dataAgent: dataAgent);
+        var invalidContext = CreateRuntimeContext() with { Report = null! };
+
+        var results = await executor.ExecuteAsync(
+            [CreateValidDataCall()],
+            CancellationToken.None,
+            invalidContext);
+
+        results.Should().ContainSingle().Which.Succeeded.Should().BeTrue();
+        dataAgent.WasCalled.Should().BeTrue();
+    }
+
     private static ControlledToolExecutor CreateExecutor(
         FakeDataAgent? dataAgent = null,
-        FakeCnvRegulationMcpClient? mcpClient = null)
+        ILegalAgent? legalAgent = null)
     {
         return new ControlledToolExecutor(
             dataAgent ?? new FakeDataAgent(),
-            mcpClient ?? new FakeCnvRegulationMcpClient(),
+            legalAgent ?? new FakeLegalAgent(CreateAggregateLegalResult()),
             NullLogger<ControlledToolExecutor>.Instance
+        );
+    }
+
+    private static PlannerToolExecutionContext CreateRuntimeContext()
+    {
+        var financialAnalysis = CreateFinancialAnalysis("data-document");
+        return new PlannerToolExecutionContext(
+            CreateReport(),
+            CreateDataResult(financialAnalysis),
+            CreateDataEvidence()
+        );
+    }
+
+    private static FinancialReportContext CreateReport()
+    {
+        return new FinancialReportContext(
+            Guid.NewGuid(),
+            "trusted-runtime-report",
+            125000m,
+            42,
+            DateTimeOffset.UtcNow
+        );
+    }
+
+    private static DataAgentResult CreateDataResult(
+        FinancialAnalysisContext? financialAnalysis)
+    {
+        return new DataAgentResult(
+            true,
+            "High",
+            "Data analysis completed.",
+            "Fake DataAgent",
+            [],
+            financialAnalysis
+        );
+    }
+
+    private static PlannerToolExecutionContext CreateInvalidRuntimeContext(
+        InvalidTrustedContextPart invalidPart)
+    {
+        var context = CreateRuntimeContext();
+        return invalidPart switch
+        {
+            InvalidTrustedContextPart.Report => context with { Report = null! },
+            InvalidTrustedContextPart.DataResult => context with { DataResult = null! },
+            InvalidTrustedContextPart.DataEvidence => context with { DataEvidence = null! },
+            InvalidTrustedContextPart.FailedStages => context with
+            {
+                DataEvidence = context.DataEvidence with { FailedStages = null! }
+            },
+            InvalidTrustedContextPart.FailedStageItem => context with
+            {
+                DataEvidence = context.DataEvidence with
+                {
+                    FailedStages = [null!]
+                }
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(invalidPart))
+        };
+    }
+
+    public enum InvalidTrustedContextPart
+    {
+        Report,
+        DataResult,
+        DataEvidence,
+        FailedStages,
+        FailedStageItem
+    }
+
+    private static FinancialAnalysisContext CreateFinancialAnalysis(
+        string documentId)
+    {
+        return new FinancialAnalysisContext(
+            "Financial engine",
+            documentId,
+            "ACME",
+            [],
+            [],
+            [],
+            [],
+            [],
+            []
+        );
+    }
+
+    private static LegalDataEvidenceContext CreateDataEvidence()
+    {
+        return new LegalDataEvidenceContext(
+            true,
+            null,
+            LegalDataToolStatuses.Executed,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            []
+        );
+    }
+
+    private static LegalAgentResult CreateAggregateLegalResult()
+    {
+        var evidenceReference = new LegalEvidenceReference(
+            "CNV",
+            "Resolución General 123",
+            "https://example.test/cnv",
+            "Artículo 1",
+            "Texto citado.",
+            "Emisoras",
+            0.95
+        );
+        var queryStrategy = new LegalQueryStrategyAudit(
+            "aggregate_strategy_v1",
+            LegalCnvQuerySources.Contextual,
+            null,
+            LegalDataToolStatuses.Executed,
+            FinancialAnalysisExecutionStatus.Succeeded,
+            [],
+            [
+                new LegalCnvQueryAudit(
+                    1, 2, "query one", "Emisoras", "Reason one.", ["signal_one"],
+                    LegalCnvQueryExecutionStatuses.Succeeded, 1, 1),
+                new LegalCnvQueryAudit(
+                    2, 2, "query two", "Emisoras", "Reason two.", ["signal_two"],
+                    LegalCnvQueryExecutionStatuses.Failed, 0, 0)
+            ]
+        );
+        var legalReview = new LegalAnalysisReviewResult(
+            "Aggregate AI legal review.",
+            [
+                new PossibleRegulatoryReviewArea(
+                    "Disclosure review",
+                    "Review disclosure obligations.",
+                    "Medium",
+                    ["signal_one"],
+                    ["Artículo 1"])
+            ],
+            [evidenceReference],
+            ["AI warning"],
+            ["AI limitation"],
+            true,
+            false,
+            "provider",
+            "model",
+            null
+        );
+
+        return new LegalAgentResult(
+            true,
+            "Medium",
+            "Aggregate legal review completed.",
+            "Aggregate LegalAgent",
+            [
+                new LegalEvidence(
+                    "Resolución General 123",
+                    "Artículo 1",
+                    "Texto citado.",
+                    "CNV")
+            ],
+            ["Legal warning"],
+            queryStrategy,
+            legalReview,
+            true
         );
     }
 
@@ -357,59 +688,50 @@ public class ControlledToolExecutorTests
         }
     }
 
-    private sealed class FakeCnvRegulationMcpClient : ICnvRegulationMcpClient
+    private sealed class FakeLegalAgent(
+        LegalAgentResult result,
+        bool cancel = false) : ILegalAgent
     {
-        public bool IsConnected => true;
-        public int ColdStartCount => 0;
-        public int ResetCount => 0;
-        public string? LastError => null;
+        public int CallCount { get; private set; }
+        public FinancialReportContext? ReceivedReport { get; private set; }
+        public LegalReviewContext? ReceivedContext { get; private set; }
 
-        public bool WasCalled { get; private set; }
-
-        public CnvRegulationSearchRequest? ReceivedRequest { get; private set; }
-
-        public Task<CnvRegulationSearchResponse> SearchAsync(
-            CnvRegulationSearchRequest request,
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
             CancellationToken cancellationToken)
         {
-            WasCalled = true;
-            ReceivedRequest = request;
+            return ReviewAsync(report, LegalReviewContext.Default, cancellationToken);
+        }
 
-            return Task.FromResult(
-                new CnvRegulationSearchResponse(
-                    request.Query,
-                    [
-                        new CnvRegulationSearchResult(
-                            DocumentId: "cnv-result",
-                            ChunkId: "cnv-result-chunk",
-                            Title: "CNV cited result",
-                            Chapter: "Capitulo I",
-                            Section: null,
-                            Article: "Articulo 1",
-                            Source: "Infoleg",
-                            Url: "https://servicios.infoleg.gob.ar/",
-                            Snippet: "Texto encontrado.",
-                            Score: 0.95,
-                            Citations:
-                            [
-                                new CnvRegulationCitation(
-                                    Source: "Infoleg",
-                                    DocumentType: "Resolucion General",
-                                    ResolutionNumber: "622/2013",
-                                    Title: "Resolucion General 622/2013",
-                                    Chapter: "Capitulo I",
-                                    Section: null,
-                                    Article: "Articulo 1",
-                                    PublicationDate: "2013-09-09",
-                                    Url: "https://servicios.infoleg.gob.ar/",
-                                    QuotedText: "Texto normativo citado."
-                                )
-                            ]
-                        )
-                    ],
-                    Warnings: ["requires review"]
-                )
-            );
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            LegalReviewContext context,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            ReceivedReport = report;
+            ReceivedContext = context;
+            if (cancel)
+            {
+                throw new OperationCanceledException(
+                    "LegalAgent canceled without token state.");
+            }
+
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class LegacyLegalAgent(
+        LegalAgentResult result) : ILegalAgent
+    {
+        public int CallCount { get; private set; }
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(result);
         }
     }
 

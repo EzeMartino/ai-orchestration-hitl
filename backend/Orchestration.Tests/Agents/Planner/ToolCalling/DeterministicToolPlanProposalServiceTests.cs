@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using System.Globalization;
+using System.Text.Json;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
@@ -25,6 +26,8 @@ public class DeterministicToolPlanProposalServiceTests
         );
 
         result.ProposedCalls.Should().BeEmpty();
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.Deterministic);
+        result.ProposalFallbackReason.Should().BeNull();
     }
 
     [Fact]
@@ -44,6 +47,8 @@ public class DeterministicToolPlanProposalServiceTests
         );
 
         result.ProposedCalls.Should().HaveCount(2);
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.Deterministic);
+        result.ProposalFallbackReason.Should().BeNull();
 
         var dataCall = result.ProposedCalls[0];
         dataCall.ToolName.Should().Be("data.analyze_transactions");
@@ -57,11 +62,9 @@ public class DeterministicToolPlanProposalServiceTests
 
         var legalCall = result.ProposedCalls[1];
         legalCall.ToolName.Should().Be("legal.search_cnv_regulation");
-        legalCall.Arguments["query"].Should().Be("agentes");
-        legalCall.Arguments["area"].Should().Be("Agentes");
-        legalCall.Arguments["limit"].Should().Be("5");
-        legalCall.Arguments["requiresReview"].Should().Be("true");
-        legalCall.Reason.Should().Be("Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados.");
+        legalCall.Arguments.Should().BeEmpty();
+        legalCall.Reason.Should().Be(
+            "Autorizar una revisión regulatoria CNV derivada del análisis financiero completado.");
     }
 
     [Fact]
@@ -82,6 +85,28 @@ public class DeterministicToolPlanProposalServiceTests
 
         result.ProposedCalls.Should().ContainSingle()
             .Which.ToolName.Should().Be(PlannerToolCatalog.SearchCnvRegulationName);
+    }
+
+    [Theory]
+    [InlineData(ToolPlanProposalSource.Llm, "\"llm\"")]
+    [InlineData(ToolPlanProposalSource.Deterministic, "\"deterministic\"")]
+    [InlineData(ToolPlanProposalSource.DeterministicFallback, "\"deterministic_fallback\"")]
+    public void ToolPlanProposalSource_Should_serialize_with_stable_json_name(
+        ToolPlanProposalSource source,
+        string expectedJson)
+    {
+        JsonSerializer.Serialize(source).Should().Be(expectedJson);
+    }
+
+    [Theory]
+    [InlineData(ToolPlanProposalFallbackReason.LlmResponseInvalid, "\"llm_response_invalid\"")]
+    [InlineData(ToolPlanProposalFallbackReason.LlmRequestFailed, "\"llm_request_failed\"")]
+    [InlineData(ToolPlanProposalFallbackReason.LlmConfigurationFailed, "\"llm_configuration_failed\"")]
+    public void ToolPlanProposalFallbackReason_Should_serialize_with_stable_json_name(
+        ToolPlanProposalFallbackReason reason,
+        string expectedJson)
+    {
+        JsonSerializer.Serialize(reason).Should().Be(expectedJson);
     }
 
     private static ToolPlanProposalInput CreateInput(

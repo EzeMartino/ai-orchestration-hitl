@@ -10,6 +10,7 @@ public sealed class ToolPlanValidator : IToolPlanValidator
     private const string OperationalReason = "No se permiten herramientas financieras operativas.";
     private const string LegalConclusionReason = "No se permiten herramientas de conclusión legal.";
     private const string MaxToolCallsReason = "Se excedió la cantidad máxima de llamadas a herramientas.";
+    private const string DuplicateSatisfactionStageReason = "Solo se permite una llamada aprobada por etapa de satisfacción.";
     private readonly HashSet<string> _allowedTools;
     private readonly int _maxToolCalls;
 
@@ -34,6 +35,7 @@ public sealed class ToolPlanValidator : IToolPlanValidator
 
         var approvedCalls = new List<ApprovedToolCall>();
         var rejectedCalls = new List<RejectedToolCall>();
+        var approvedSatisfactionStages = new HashSet<PlannerToolSatisfactionKind>();
 
         for (var index = 0; index < plan.ProposedCalls.Count; index++)
         {
@@ -51,6 +53,14 @@ public sealed class ToolPlanValidator : IToolPlanValidator
             if (rejectionReason is not null)
             {
                 rejectedCalls.Add(new RejectedToolCall(toolName, rejectionReason));
+                continue;
+            }
+
+            var definition = PlannerToolCatalog.Find(toolName)!;
+
+            if (!approvedSatisfactionStages.Add(definition.SatisfactionKind))
+            {
+                rejectedCalls.Add(new RejectedToolCall(toolName, DuplicateSatisfactionStageReason));
                 continue;
             }
 

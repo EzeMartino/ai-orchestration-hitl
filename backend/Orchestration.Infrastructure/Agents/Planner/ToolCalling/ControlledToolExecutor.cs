@@ -2,9 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
-using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
@@ -18,22 +18,23 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     };
 
     private readonly IDataAgent _dataAgent;
-    private readonly ICnvRegulationMcpClient _mcpClient;
+    private readonly ILegalAgent _legalAgent;
     private readonly ILogger<ControlledToolExecutor> _logger;
 
     public ControlledToolExecutor(
         IDataAgent dataAgent,
-        ICnvRegulationMcpClient mcpClient,
+        ILegalAgent legalAgent,
         ILogger<ControlledToolExecutor> logger)
     {
         _dataAgent = dataAgent;
-        _mcpClient = mcpClient;
+        _legalAgent = legalAgent;
         _logger = logger;
     }
 
     public async Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
         IReadOnlyList<ApprovedToolCall> calls,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PlannerToolExecutionContext? runtimeContext = null)
     {
         ArgumentNullException.ThrowIfNull(calls);
 
@@ -41,7 +42,10 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
 
         foreach (var call in calls)
         {
-            var result = await ExecuteAsync(call, cancellationToken);
+            var result = await ExecuteAsync(
+                call,
+                cancellationToken,
+                runtimeContext);
 
             results.Add(result);
         }
@@ -51,7 +55,8 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
 
     private async Task<ToolExecutionResult> ExecuteAsync(
         ApprovedToolCall call,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PlannerToolExecutionContext? runtimeContext)
     {
         try
         {
@@ -60,7 +65,10 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
                 PlannerToolHandler.AnalyzeTransactions =>
                     await ExecuteDataAnalysisAsync(call, cancellationToken),
                 PlannerToolHandler.SearchCnvRegulation =>
-                    await ExecuteLegalSearchAsync(call, cancellationToken),
+                    await ExecuteLegalSearchAsync(
+                        call,
+                        cancellationToken,
+                        runtimeContext),
                 _ => Failed(call.ToolName, "Tool is not executable.")
             };
         }
@@ -113,52 +121,49 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
 
     private async Task<ToolExecutionResult> ExecuteLegalSearchAsync(
         ApprovedToolCall call,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PlannerToolExecutionContext? runtimeContext)
     {
-        if (!TryGetString(call.Arguments, "query", out var query, out var error))
+        if (!IsTrustedRuntimeContextValid(runtimeContext))
         {
-            return Failed(call.ToolName, error);
+            return Failed(
+                call.ToolName,
+                "Trusted planner runtime context is required.");
         }
 
-        var limit = 5;
-
-        if (TryFindValue(call.Arguments, "limit", out var rawLimit) &&
-            !TryParseInt("limit", rawLimit, out limit, out error))
+        var trustedContext = runtimeContext!;
+        var legalReport = trustedContext.Report with
         {
-            return Failed(call.ToolName, error);
-        }
-
-        bool? requiresReview = null;
-
-        if (TryFindValue(call.Arguments, "requiresReview", out _))
-        {
-            if (!TryGetBool(call.Arguments, "requiresReview", out var parsedRequiresReview, out error))
-            {
-                return Failed(call.ToolName, error);
-            }
-
-            requiresReview = parsedRequiresReview;
-        }
-
-        var request = new CnvRegulationSearchRequest(
-            Query: query,
-            Area: GetOptionalString(call.Arguments, "area"),
-            Limit: limit,
-            Source: GetOptionalString(call.Arguments, "source"),
-            DocumentType: GetOptionalString(call.Arguments, "documentType"),
-            ResolutionNumber: GetOptionalString(call.Arguments, "resolutionNumber"),
-            Status: GetOptionalString(call.Arguments, "status"),
-            RequiresReview: requiresReview
+            FinancialAnalysis = trustedContext.DataResult.FinancialAnalysis
+        };
+        var legalReviewContext = new LegalReviewContext(
+            FinancialAnalysisResolutionMode.ProvidedOnly,
+            trustedContext.DataEvidence
         );
-
-        var response = await _mcpClient.SearchAsync(request, cancellationToken);
+        var result = await _legalAgent.ReviewAsync(
+            legalReport,
+            legalReviewContext,
+            cancellationToken
+        );
 
         return Succeeded(
             call.ToolName,
-            $"CNV search returned {response.Results.Count} results.",
-            "MCP CNV Regulation Server",
-            response
+            result.Summary,
+            result.Engine,
+            result
         );
+    }
+
+    private static bool IsTrustedRuntimeContextValid(
+        PlannerToolExecutionContext? runtimeContext)
+    {
+        return runtimeContext is
+            {
+                Report: not null,
+                DataResult: not null,
+                DataEvidence.FailedStages: not null
+            } &&
+            runtimeContext.DataEvidence.FailedStages.All(stage => stage is not null);
     }
 
     private static ToolExecutionResult Succeeded(
@@ -276,22 +281,6 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         return true;
     }
 
-    private static bool TryGetBool(
-        IReadOnlyDictionary<string, string> arguments,
-        string key,
-        out bool value,
-        out string error)
-    {
-        if (!TryGetString(arguments, key, out var rawValue, out error))
-        {
-            value = default;
-
-            return false;
-        }
-
-        return TryParseBool(key, rawValue, out value, out error);
-    }
-
     private static bool TryGetDateTimeOffset(
         IReadOnlyDictionary<string, string> arguments,
         string key,
@@ -335,33 +324,6 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         error = "";
 
         return true;
-    }
-
-    private static bool TryParseBool(
-        string key,
-        string rawValue,
-        out bool value,
-        out string error)
-    {
-        if (!bool.TryParse(rawValue, out value))
-        {
-            error = $"Argumento bool no válido: {key}.";
-
-            return false;
-        }
-
-        error = "";
-
-        return true;
-    }
-
-    private static string? GetOptionalString(
-        IReadOnlyDictionary<string, string> arguments,
-        string key)
-    {
-        return TryFindValue(arguments, key, out var value) && !string.IsNullOrWhiteSpace(value)
-            ? value
-            : null;
     }
 
     private static bool TryFindValue(

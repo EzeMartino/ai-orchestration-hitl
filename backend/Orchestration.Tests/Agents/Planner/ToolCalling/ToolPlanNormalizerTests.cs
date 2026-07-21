@@ -138,28 +138,18 @@ public class ToolPlanNormalizerTests
     }
 
     [Fact]
-    public void Normalize_Should_remove_duplicate_legal_search_calls_with_same_query_and_area()
+    public void Normalize_Should_remove_duplicate_argument_free_legal_calls()
     {
         var plan = new ToolPlan(
             [
                 CreateCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes",
-                        ["area"] = "Agentes",
-                        ["limit"] = "5"
-                    },
+                    new Dictionary<string, string>(),
                     "First legal reason."
                 ),
                 CreateCall(
                     "legal.search_cnv_regulation",
-                    new Dictionary<string, string>
-                    {
-                        ["query"] = " agentes ",
-                        ["area"] = " Agentes ",
-                        ["limit"] = "10"
-                    },
+                    new Dictionary<string, string>(),
                     "Duplicate legal reason."
                 )
             ]
@@ -169,7 +159,33 @@ public class ToolPlanNormalizerTests
 
         result.ProposedCalls.Should().ContainSingle();
         result.ProposedCalls[0].Reason.Should().Be("First legal reason.");
-        result.ProposedCalls[0].Arguments["limit"].Should().Be("5");
+        result.ProposedCalls[0].Arguments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Normalize_Should_preserve_proposal_provenance()
+    {
+        var plan = new ToolPlan(
+            ProposedCalls: [CreateCall("legal.search_cnv_regulation")],
+            ProposalSource: ToolPlanProposalSource.DeterministicFallback,
+            ProposalFallbackReason: ToolPlanProposalFallbackReason.LlmResponseInvalid
+        );
+
+        var result = new ToolPlanNormalizer().Normalize(plan);
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(ToolPlanProposalFallbackReason.LlmResponseInvalid);
+    }
+
+    [Fact]
+    public void Normalize_Should_leave_legacy_plan_provenance_null()
+    {
+        var plan = new ToolPlan([CreateCall("legal.search_cnv_regulation")]);
+
+        var result = new ToolPlanNormalizer().Normalize(plan);
+
+        result.ProposalSource.Should().BeNull();
+        result.ProposalFallbackReason.Should().BeNull();
     }
 
     private static ProposedToolCall CreateCall(

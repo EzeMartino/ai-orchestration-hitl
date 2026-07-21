@@ -18,7 +18,11 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
     {
         if (!_options.Enabled)
         {
-            return Task.FromResult(new ToolPlan([]));
+            return Task.FromResult(new ToolPlan(
+                ProposedCalls: [],
+                ProposalSource: ToolPlanProposalSource.Deterministic,
+                ProposalFallbackReason: null
+            ));
         }
 
         var allowedHandlers = PlannerToolCatalog.GetAllowed(_options)
@@ -48,17 +52,15 @@ public sealed class DeterministicToolPlanProposalService : IToolPlanProposalServ
             calls.Add(
                 new ProposedToolCall(
                     ToolName: PlannerToolCatalog.SearchCnvRegulationName,
-                    Arguments: new Dictionary<string, string>
-                    {
-                        ["query"] = "agentes",
-                        ["area"] = "Agentes",
-                        ["limit"] = "5",
-                        ["requiresReview"] = "true"
-                    },
-                    Reason: "Recuperar evidencia regulatoria CNV citada relacionada con agentes regulados."
+                    Arguments: new Dictionary<string, string>(),
+                    Reason: "Autorizar una revisión regulatoria CNV derivada del análisis financiero completado."
                 ));
         }
 
-        return Task.FromResult(new ToolPlan(calls));
+        return Task.FromResult(new ToolPlan(
+            ProposedCalls: calls,
+            ProposalSource: ToolPlanProposalSource.Deterministic,
+            ProposalFallbackReason: null
+        ));
     }
 }

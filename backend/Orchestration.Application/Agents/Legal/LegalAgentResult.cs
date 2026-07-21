@@ -10,5 +10,6 @@ public sealed record LegalAgentResult(
     IReadOnlyList<LegalEvidence> Evidence,
     IReadOnlyList<string> Warnings,
     object? QueryStrategy = null,
-    LegalAnalysisReviewResult? LegalReview = null
+    LegalAnalysisReviewResult? LegalReview = null,
+    bool RequiresHumanReview = false
 );

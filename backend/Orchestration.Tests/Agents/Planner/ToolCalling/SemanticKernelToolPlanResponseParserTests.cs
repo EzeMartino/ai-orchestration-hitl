@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
@@ -32,6 +33,8 @@ public class SemanticKernelToolPlanResponseParserTests
         result.ProposedCalls[0].Arguments["sessionId"].Should().Be("test-session");
         result.ProposedCalls[0].Arguments["reportName"].Should().Be("financial-report");
         result.ProposedCalls[0].Reason.Should().Be("Analizar senales del reporte financiero.");
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.Llm);
+        result.ProposalFallbackReason.Should().BeNull();
     }
 
     [Fact]
@@ -42,6 +45,8 @@ public class SemanticKernelToolPlanResponseParserTests
         var result = parser.ParseOrFallback("not-json");
 
         result.ProposedCalls.Should().BeEmpty();
+        result.ProposalSource.Should().BeNull();
+        result.ProposalFallbackReason.Should().BeNull();
     }
 
     [Fact]

@@ -1,6 +1,11 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using Orchestration.Application.Agents.Data;
+using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Planner.ToolCalling;
+using Orchestration.Application.Agents.Shared;
+using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
 namespace Orchestration.Tests.Agents.Planner.ToolCalling;
 
@@ -93,15 +98,74 @@ public class ToolCallingDiagnosticServiceTests
         executor.WasCalled.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task ExecuteAsync_Should_copy_normalized_proposal_provenance_to_audit()
+    {
+        var executor = new FakeControlledToolExecutor();
+        var service = CreateService(
+            executor,
+            new ProvenanceToolPlanNormalizer()
+        );
+
+        var result = await service.ExecuteAsync(
+            new ToolCallingDiagnosticRequest
+            {
+                ProposedCalls = [CreateProposedCall("legal.search_cnv_regulation")]
+            },
+            CancellationToken.None
+        );
+
+        result.ProposalSource.Should().Be(ToolPlanProposalSource.DeterministicFallback);
+        result.ProposalFallbackReason.Should().Be(ToolPlanProposalFallbackReason.LlmResponseInvalid);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LegalWithoutRuntimeContext_FailsSafelyWithoutCallingAgent()
+    {
+        var legalAgent = new FakeLegalAgent();
+        var executor = new ControlledToolExecutor(
+            new FakeDataAgent(),
+            legalAgent,
+            NullLogger<ControlledToolExecutor>.Instance);
+        var service = CreateService(executor);
+
+        var result = await service.ExecuteAsync(
+            new ToolCallingDiagnosticRequest
+            {
+                ProposedCalls = [CreateProposedCall("legal.search_cnv_regulation")]
+            },
+            CancellationToken.None);
+
+        var execution = result.ExecutedCalls.Should().ContainSingle().Subject;
+        execution.Status.Should().Be(ToolExecutionStatus.Failed);
+        execution.Succeeded.Should().BeFalse();
+        execution.Error.Should().Be("Trusted planner runtime context is required.");
+        legalAgent.CallCount.Should().Be(0);
+    }
+
     private static ToolCallingDiagnosticService CreateService(
-        FakeControlledToolExecutor executor)
+        IControlledToolExecutor executor,
+        IToolPlanNormalizer? normalizer = null)
     {
         return new ToolCallingDiagnosticService(
-            new ToolPlanNormalizer(),
+            normalizer ?? new ToolPlanNormalizer(),
             new ToolPlanValidator(),
             new ToolExecutionPolicy(),
             executor
         );
+    }
+
+    private sealed class ProvenanceToolPlanNormalizer : IToolPlanNormalizer
+    {
+        public ToolPlan Normalize(
+            ToolPlan plan)
+        {
+            return plan with
+            {
+                ProposalSource = ToolPlanProposalSource.DeterministicFallback,
+                ProposalFallbackReason = ToolPlanProposalFallbackReason.LlmResponseInvalid
+            };
+        }
     }
 
     private static ProposedToolCall CreateProposedCall(
@@ -119,15 +183,7 @@ public class ToolCallingDiagnosticServiceTests
                 ["transactionCount"] = "42",
                 ["submittedAt"] = DateTimeOffset.UnixEpoch.ToString("O")
             }
-            : string.Equals(
-                toolName,
-                PlannerToolCatalog.SearchCnvRegulationName,
-                StringComparison.OrdinalIgnoreCase)
-                ? new Dictionary<string, string>
-                {
-                    ["query"] = "agentes"
-                }
-                : new Dictionary<string, string>();
+            : new Dictionary<string, string>();
 
         return new ProposedToolCall(
             ToolName: toolName,
@@ -144,7 +200,8 @@ public class ToolCallingDiagnosticServiceTests
 
         public Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
             IReadOnlyList<ApprovedToolCall> calls,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            PlannerToolExecutionContext? runtimeContext = null)
         {
             WasCalled = true;
             ReceivedCalls = calls;
@@ -160,6 +217,30 @@ public class ToolCallingDiagnosticServiceTests
                     Error: null
                 )).ToList()
             );
+        }
+    }
+
+    private sealed class FakeDataAgent : IDataAgent
+    {
+        public Task<DataAgentResult> AnalyzeAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("DataAgent should not be called.");
+        }
+    }
+
+    private sealed class FakeLegalAgent : ILegalAgent
+    {
+        public int CallCount { get; private set; }
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(new LegalAgentResult(
+                false, "Low", "Not used.", "Fake LegalAgent", [], []));
         }
     }
 }

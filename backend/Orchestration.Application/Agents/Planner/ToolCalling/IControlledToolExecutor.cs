@@ -4,5 +4,6 @@ public interface IControlledToolExecutor
 {
     Task<IReadOnlyList<ToolExecutionResult>> ExecuteAsync(
         IReadOnlyList<ApprovedToolCall> calls,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        PlannerToolExecutionContext? runtimeContext = null);
 }

@@ -67,11 +67,12 @@ If no tool is appropriate, return:
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ToolCallingOptions _toolCallingOptions;
-    private readonly DeterministicToolPlanProposalService _fallback;
+    private readonly Func<ToolPlanProposalInput, CancellationToken, Task<ToolPlan>> _fallbackProposal;
     private readonly SemanticKernelToolPlanResponseParser _parser;
     private readonly ILogger<SemanticKernelToolPlanProposalService> _logger;
     private readonly Kernel? _kernel;
-    private readonly IChatCompletionService _chatCompletionService;
+    private readonly IChatCompletionService? _chatCompletionService;
+    private readonly ToolPlanProposalFallbackReason? _configurationFailure;
 
     public SemanticKernelToolPlanProposalService(
         IOptions<LlmOptions> llmOptions,
@@ -81,36 +82,36 @@ If no tool is appropriate, return:
         ILogger<SemanticKernelToolPlanProposalService>? logger = null)
     {
         _toolCallingOptions = toolCallingOptions.Value;
-        _fallback = fallback;
+        _fallbackProposal = fallback.ProposeAsync;
         _parser = parser;
         _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
 
-        var options = llmOptions.Value;
-        var kernelBuilder = Kernel.CreateBuilder();
-        kernelBuilder.AddOpenAIChatCompletion(
-            modelId: options.Model,
-            apiKey: options.ApiKey,
-            serviceId: options.ServiceId
-        );
-
-        _kernel = kernelBuilder.Build();
-        _chatCompletionService = _kernel.GetRequiredService<IChatCompletionService>(
-            options.ServiceId
-        );
+        var initialization = InitializeClient(llmOptions.Value);
+        _kernel = initialization.Kernel;
+        _chatCompletionService = initialization.ChatCompletionService;
+        _configurationFailure = initialization.Failure;
     }
 
     internal SemanticKernelToolPlanProposalService(
         ToolCallingOptions toolCallingOptions,
         DeterministicToolPlanProposalService fallback,
         SemanticKernelToolPlanResponseParser parser,
-        IChatCompletionService chatCompletionService,
-        ILogger<SemanticKernelToolPlanProposalService>? logger = null)
+        IChatCompletionService? chatCompletionService,
+        ILogger<SemanticKernelToolPlanProposalService>? logger = null,
+        Kernel? kernel = null,
+        ToolPlanProposalFallbackReason? configurationFailure = null,
+        Func<ToolPlanProposalInput, CancellationToken, Task<ToolPlan>>? fallbackProposal = null)
     {
         _toolCallingOptions = toolCallingOptions;
-        _fallback = fallback;
+        _fallbackProposal = fallbackProposal ?? fallback.ProposeAsync;
         _parser = parser;
         _chatCompletionService = chatCompletionService;
         _logger = logger ?? NullLogger<SemanticKernelToolPlanProposalService>.Instance;
+        _kernel = kernel;
+        _configurationFailure = configurationFailure ??
+            (chatCompletionService is null
+                ? ToolPlanProposalFallbackReason.LlmConfigurationFailed
+                : null);
     }
 
     public async Task<ToolPlan> ProposeAsync(
@@ -122,40 +123,101 @@ If no tool is appropriate, return:
             return new ToolPlan([]);
         }
 
+        var configurationFailure = _configurationFailure;
+
+        if (configurationFailure is not null ||
+            _chatCompletionService is null)
+        {
+            return await CreateFallbackPlanAsync(
+                input,
+                configurationFailure ?? ToolPlanProposalFallbackReason.LlmConfigurationFailed,
+                cancellationToken
+            );
+        }
+
+        var history = new ChatHistory();
+        history.AddSystemMessage(SystemPrompt);
+        history.AddUserMessage(BuildUserPrompt(input, _toolCallingOptions));
+
+        ChatMessageContent response;
         try
         {
-            var history = new ChatHistory();
-            history.AddSystemMessage(SystemPrompt);
-            history.AddUserMessage(BuildUserPrompt(input, _toolCallingOptions));
-
-            var response = await _chatCompletionService.GetChatMessageContentAsync(
+            response = await _chatCompletionService.GetChatMessageContentAsync(
                 history,
                 kernel: _kernel,
                 cancellationToken: cancellationToken
             );
-
-            return _parser.TryParse(response.Content, out var plan)
-                ? CanonicalizeSubmittedAt(plan, input)
-                : await CreateFallbackPlanAsync(input, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
         catch
         {
-            return await CreateFallbackPlanAsync(input, cancellationToken);
+            return await CreateFallbackPlanAsync(
+                input,
+                ToolPlanProposalFallbackReason.LlmRequestFailed,
+                cancellationToken
+            );
         }
+
+        return _parser.TryParse(response.Content, out var plan)
+            ? CanonicalizeSubmittedAt(plan, input)
+            : await CreateFallbackPlanAsync(
+                input,
+                ToolPlanProposalFallbackReason.LlmResponseInvalid,
+                cancellationToken
+            );
     }
 
-    private Task<ToolPlan> CreateFallbackPlanAsync(
+    private async Task<ToolPlan> CreateFallbackPlanAsync(
         ToolPlanProposalInput input,
+        ToolPlanProposalFallbackReason reason,
         CancellationToken cancellationToken)
     {
-        return _fallback.ProposeAsync(
+        var fallbackPlan = await _fallbackProposal(
             input,
             cancellationToken
         );
+
+        return fallbackPlan with
+        {
+            ProposalSource = ToolPlanProposalSource.DeterministicFallback,
+            ProposalFallbackReason = reason
+        };
+    }
+
+    private static ClientInitialization InitializeClient(
+        LlmOptions options)
+    {
+        try
+        {
+            var kernelBuilder = Kernel.CreateBuilder();
+            kernelBuilder.AddOpenAIChatCompletion(
+                modelId: options.Model,
+                apiKey: options.ApiKey,
+                serviceId: options.ServiceId
+            );
+
+            var kernel = kernelBuilder.Build();
+            var chatCompletionService = kernel.GetRequiredService<IChatCompletionService>(
+                options.ServiceId
+            );
+
+            return new ClientInitialization(
+                kernel,
+                chatCompletionService,
+                Failure: null
+            );
+        }
+        catch
+        {
+            return new ClientInitialization(
+                Kernel: null,
+                ChatCompletionService: null,
+                ToolPlanProposalFallbackReason.LlmConfigurationFailed
+            );
+        }
     }
 
     private ToolPlan CanonicalizeSubmittedAt(
@@ -296,4 +358,9 @@ If no tool is appropriate, return:
 
         return JsonSerializer.Serialize(payload, JsonOptions);
     }
+
+    private sealed record ClientInitialization(
+        Kernel? Kernel,
+        IChatCompletionService? ChatCompletionService,
+        ToolPlanProposalFallbackReason? Failure);
 }

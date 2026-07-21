@@ -10,7 +10,8 @@ public sealed record LegalCompliancePluginResult(
     IReadOnlyList<LegalComplianceEvidenceResult> Evidence,
     IReadOnlyList<string> Warnings,
     object? QueryStrategy = null,
-    LegalAnalysisReviewResult? LegalReview = null
+    LegalAnalysisReviewResult? LegalReview = null,
+    bool RequiresHumanReview = false
 );
 
 public sealed record LegalComplianceEvidenceResult(

@@ -7,6 +7,7 @@ using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Shared;
 using System.Text.Json.Nodes;
 
@@ -310,6 +311,8 @@ namespace Orchestration.Application.AnalysisSessions
                 },
                 toolPlan = new
                 {
+                    proposalSource = plannerResult.ToolPlan.ProposalSource,
+                    proposalFallbackReason = plannerResult.ToolPlan.ProposalFallbackReason,
                     proposedCalls = plannerResult.ToolPlan.ProposedCalls.Select(call => new
                     {
                         toolName = call.ToolName,
@@ -497,10 +500,11 @@ namespace Orchestration.Application.AnalysisSessions
                 {
                     riskDetected = plannerResult.LegalResult.HasComplianceRisk,
                     riskLevel = plannerResult.LegalResult.RiskLevel,
+                    requiresHumanReview = plannerResult.LegalResult.RequiresHumanReview,
                     engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
                     warnings = plannerResult.LegalResult.Warnings,
-                    queryStrategy = plannerResult.LegalResult.QueryStrategy,
+                    queryStrategy = ProjectLegalQueryStrategy(plannerResult.LegalResult.QueryStrategy),
                     evidence = plannerResult.LegalResult.Evidence.Select(e => new
                     {
                         regulation = e.Regulation,
@@ -559,6 +563,41 @@ namespace Orchestration.Application.AnalysisSessions
                         item.Period == evidence.Period
                     )
                 )?.Severity ?? "Info";
+        }
+
+        private static object? ProjectLegalQueryStrategy(
+            object? queryStrategy)
+        {
+            if (queryStrategy is not LegalQueryStrategyAudit audit)
+            {
+                return queryStrategy;
+            }
+
+            return new
+            {
+                strategyVersion = audit.StrategyVersion,
+                source = audit.Source,
+                fallbackReason = audit.FallbackReason,
+                dataToolStatus = audit.DataToolStatus,
+                financialAnalysisStatus = audit.FinancialAnalysisStatus,
+                failedStages = audit.FailedStages.Select(stage => new
+                {
+                    operation = stage.Operation,
+                    failureCode = stage.FailureCode
+                }),
+                queries = audit.Queries.Select(query => new
+                {
+                    index = query.Index,
+                    total = query.Total,
+                    query = query.Query,
+                    regulationArea = query.RegulationArea,
+                    reason = query.Reason,
+                    relatedFinancialSignals = query.RelatedFinancialSignals,
+                    executionStatus = query.ExecutionStatus,
+                    resultCount = query.ResultCount,
+                    citedEvidenceCount = query.CitedEvidenceCount
+                })
+            };
         }
 
         private static string PreserveStructuredFinancialMetrics(

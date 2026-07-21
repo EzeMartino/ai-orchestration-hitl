@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.SemanticKernel;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
+using Orchestration.Application.Agents.Legal;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 
@@ -30,6 +32,10 @@ public sealed class LegalCompliancePlugin(
         string? sessionId = null,
         [Description("Optional serialized financial analysis context produced by DataAgent in the current run.")]
         string? financialAnalysisJson = null,
+        [Description("Whether persisted financial analysis may be used when the current report does not provide one.")]
+        bool allowPersistedFinancialAnalysisFallback = true,
+        [Description("Optional serialized legal data evidence context for the current run.")]
+        string? dataEvidenceJson = null,
         CancellationToken cancellationToken = default)
     {
         var parsedSessionId = Guid.Empty;
@@ -47,8 +53,14 @@ public sealed class LegalCompliancePlugin(
             FinancialAnalysis: DeserializeFinancialAnalysis(financialAnalysisJson)
         );
 
+        var context = new LegalReviewContext(
+            allowPersistedFinancialAnalysisFallback
+                ? FinancialAnalysisResolutionMode.ProvidedOrPersisted
+                : FinancialAnalysisResolutionMode.ProvidedOnly,
+            DeserializeDataEvidence(dataEvidenceJson)
+        );
         var review = await _regulatoryKnowledgeSource.ReviewAsync(
-            report,
+            new RegulatoryReviewRequest(report, context),
             cancellationToken
         );
 
@@ -67,7 +79,8 @@ public sealed class LegalCompliancePlugin(
                 .ToList(),
             Warnings: review.Warnings,
             QueryStrategy: review.QueryStrategy,
-            LegalReview: review.LegalReview
+            LegalReview: review.LegalReview,
+            RequiresHumanReview: review.RequiresHumanReview
         );
     }
 
@@ -81,14 +94,105 @@ public sealed class LegalCompliancePlugin(
 
         try
         {
-            return JsonSerializer.Deserialize<FinancialAnalysisContext>(
+            var financialAnalysis = JsonSerializer.Deserialize<FinancialAnalysisContext>(
                 financialAnalysisJson,
                 JsonOptions
             );
+            return IsValidFinancialAnalysis(financialAnalysis)
+                ? financialAnalysis
+                : null;
         }
         catch (JsonException)
         {
             return null;
         }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static LegalDataEvidenceContext? DeserializeDataEvidence(
+        string? dataEvidenceJson)
+    {
+        if (string.IsNullOrWhiteSpace(dataEvidenceJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            var dataEvidence = JsonSerializer.Deserialize<LegalDataEvidenceContext>(
+                dataEvidenceJson,
+                JsonOptions
+            );
+            return IsValidDataEvidence(dataEvidence)
+                ? dataEvidence
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsValidFinancialAnalysis(
+        FinancialAnalysisContext? financialAnalysis)
+    {
+        if (financialAnalysis?.Execution is null ||
+            financialAnalysis.Execution.Stages is null ||
+            financialAnalysis.RiskSignals is null)
+        {
+            return false;
+        }
+
+        foreach (var stage in financialAnalysis.Execution.Stages)
+        {
+            if (stage is null)
+            {
+                return false;
+            }
+        }
+
+        foreach (var signal in financialAnalysis.RiskSignals)
+        {
+            if (signal is null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsValidDataEvidence(
+        LegalDataEvidenceContext? dataEvidence)
+    {
+        if (dataEvidence?.FailedStages is null)
+        {
+            return false;
+        }
+
+        foreach (var failedStage in dataEvidence.FailedStages)
+        {
+            if (failedStage is null)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
