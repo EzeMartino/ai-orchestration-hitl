@@ -10,7 +10,8 @@ public sealed record LegalQueryStrategyAudit(
     string DataToolStatus,
     FinancialAnalysisExecutionStatus? FinancialAnalysisStatus,
     IReadOnlyList<LegalDataStageFailureAudit> FailedStages,
-    IReadOnlyList<LegalCnvQueryAudit> Queries
+    IReadOnlyList<LegalCnvQueryAudit> Queries,
+    IReadOnlyList<LegalCnvEnrichmentAudit>? Enrichments = null
 );
 
 public sealed record LegalCnvQueryAudit(
@@ -29,4 +30,35 @@ public static class LegalCnvQueryExecutionStatuses
 {
     public const string Succeeded = "succeeded";
     public const string Failed = "failed";
+}
+
+public sealed record LegalCnvEnrichmentAudit(
+    string EnrichmentId,
+    int Rank,
+    string CandidateKey,
+    double Score,
+    IReadOnlyList<int> ContributingQueryIndices,
+    LegalCnvEnrichmentStageAudit Document,
+    LegalCnvEnrichmentStageAudit Article,
+    string Status,
+    IReadOnlyList<string> LimitationCodes);
+
+public sealed record LegalCnvEnrichmentStageAudit(
+    bool Selected,
+    bool Attempted,
+    bool FromCache,
+    string Status,
+    int? OriginalTextLength,
+    bool IsTruncated);
+
+public static class LegalCnvEnrichmentStageStatuses
+{
+    public const string NotApplicable = "NotApplicable";
+    public const string NotAttempted = "NotAttempted";
+    public const string Succeeded = "Succeeded";
+    public const string Missing = "Missing";
+    public const string TimedOut = "TimedOut";
+    public const string Malformed = "Malformed";
+    public const string Failed = "Failed";
+    public const string Conflict = "Conflict";
 }
