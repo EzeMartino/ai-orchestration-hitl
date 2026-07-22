@@ -72,4 +72,50 @@ public sealed class InMemoryRegulationDocumentServiceTests
         response.Document.Should().BeSameAs(document);
         response.Warnings.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task GetDocumentAsync_ShouldWarnWhenRepositoryDocumentIsExplicitMock()
+    {
+        var repository = new InMemoryRegulationRepository();
+        var document = CreateDocument("mock-document", "mock", requiresReview: false);
+        await repository.SaveAsync(document, CancellationToken.None);
+        var service = new InMemoryRegulationDocumentService(repository);
+
+        var response = await service.GetDocumentAsync(
+            new GetRegulationDocumentRequest { DocumentId = document.Id },
+            CancellationToken.None);
+
+        response.Found.Should().BeTrue();
+        response.Warnings.Should().Contain("Mock data only. Do not use for real regulatory decisions.");
+    }
+
+    [Fact]
+    public async Task GetDocumentAsync_ShouldWarnWhenRepositoryDocumentIsCandidateAndRequiresReview()
+    {
+        var repository = new InMemoryRegulationRepository();
+        var document = CreateDocument("candidate-document", "candidate", requiresReview: true);
+        await repository.SaveAsync(document, CancellationToken.None);
+        var service = new InMemoryRegulationDocumentService(repository);
+
+        var response = await service.GetDocumentAsync(
+            new GetRegulationDocumentRequest { DocumentId = document.Id },
+            CancellationToken.None);
+
+        response.Found.Should().BeTrue();
+        response.Warnings.Should().Contain(["candidate source", "requires review"]);
+        response.Warnings.Should().NotContain("Mock data only. Do not use for real regulatory decisions.");
+    }
+
+    private static RegulationDocument CreateDocument(string id, string status, bool requiresReview) =>
+        new()
+        {
+            Id = id,
+            Source = "CNV",
+            DocumentType = "Resolución General",
+            Title = id,
+            Url = $"https://www.cnv.gov.ar/{id}",
+            Status = status,
+            RequiresReview = requiresReview,
+            Text = "Contenido regulatorio de prueba."
+        };
 }
