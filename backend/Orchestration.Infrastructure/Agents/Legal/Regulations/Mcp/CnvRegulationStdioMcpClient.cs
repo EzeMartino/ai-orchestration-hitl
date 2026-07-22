@@ -73,7 +73,11 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
         return CallToolAsync<CnvRegulationSearchResponse>(
             "search_cnv_regulation",
             arguments,
-            cancellationToken);
+            cancellationToken,
+            () => new CnvRegulationSearchResponse(
+                request.Query,
+                [],
+                ["La herramienta MCP devolvió una respuesta vacía o no válida."]));
     }
 
     public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
@@ -113,7 +117,8 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
     private async Task<TResponse> CallToolAsync<TResponse>(
         string toolName,
         IReadOnlyDictionary<string, object?> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<TResponse>? nullResponseFactory = null)
     {
         if (_isDisposed)
         {
@@ -163,7 +168,7 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
                 && !cancellationToken.IsCancellationRequested)
             {
                 LogToolCallFailure(ex, toolCallStart);
-                await ResetConnectionAsync("Tool call timed out");
+                await ResetConnectionAsync("Tool call timed out", ex);
 
                 var timeoutException = new TimeoutException(
                     $"La herramienta MCP '{toolName}' excedió el tiempo de espera configurado.",
@@ -203,8 +208,13 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
                 var response = DeserializeResponse<TResponse>(result);
                 if (response == null)
                 {
-                    throw new InvalidOperationException(
-                        "La herramienta MCP devolvió una respuesta vacía o no válida.");
+                    if (nullResponseFactory == null)
+                    {
+                        throw new InvalidOperationException(
+                            "La herramienta MCP devolvió una respuesta vacía o no válida.");
+                    }
+
+                    response = nullResponseFactory();
                 }
 
                 _lastError = null;

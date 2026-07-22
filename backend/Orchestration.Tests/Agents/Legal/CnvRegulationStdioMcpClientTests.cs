@@ -193,6 +193,53 @@ public class CnvRegulationStdioMcpClientTests
     }
 
     [Fact]
+    public async Task SearchAsync_Should_return_legacy_empty_response_when_structured_content_is_null()
+    {
+        using var nullResponse = JsonDocument.Parse("null");
+        await using var client = CreateClient((_, _, _) =>
+            Task.FromResult(StructuredResult(nullResponse.RootElement)));
+        var request = new CnvRegulationSearchRequest("fondos", Limit: 5);
+
+        var response = await client.SearchAsync(request, CancellationToken.None);
+
+        response.Query.Should().Be(request.Query);
+        response.Results.Should().BeEmpty();
+        response.Warnings.Should().Equal(
+            "La herramienta MCP devolvió una respuesta vacía o no válida.");
+        client.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetDocumentAsync_Should_throw_when_structured_content_is_null()
+    {
+        using var nullResponse = JsonDocument.Parse("null");
+        await using var client = CreateClient((_, _, _) =>
+            Task.FromResult(StructuredResult(nullResponse.RootElement)));
+
+        var act = () => client.GetDocumentAsync(
+            new CnvRegulationDocumentRequest("doc-1"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("La herramienta MCP devolvió una respuesta vacía o no válida.");
+    }
+
+    [Fact]
+    public async Task GetArticleAsync_Should_throw_when_structured_content_is_null()
+    {
+        using var nullResponse = JsonDocument.Parse("null");
+        await using var client = CreateClient((_, _, _) =>
+            Task.FromResult(StructuredResult(nullResponse.RootElement)));
+
+        var act = () => client.GetArticleAsync(
+            new CnvRegulationArticleRequest("Artículo 4"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("La herramienta MCP devolvió una respuesta vacía o no válida.");
+    }
+
+    [Fact]
     public async Task GetArticleAsync_Should_extract_tool_error_and_set_last_error()
     {
         await using var client = CreateClient((_, _, _) => Task.FromResult(new CallToolResult
@@ -223,11 +270,11 @@ public class CnvRegulationStdioMcpClientTests
             new CnvRegulationDocumentRequest("doc-1"),
             CancellationToken.None);
 
-        await act.Should().ThrowAsync<TimeoutException>()
-            .WithMessage("*get_cnv_document*excedió el tiempo de espera configurado*");
+        var exception = await act.Should().ThrowAsync<TimeoutException>();
+        exception.Which.Message.Should().Match("*get_cnv_document*excedió el tiempo de espera configurado*");
         client.ResetCount.Should().Be(1);
         client.IsConnected.Should().BeFalse();
-        client.LastError.Should().NotBeNullOrWhiteSpace();
+        client.LastError.Should().Be(exception.Which.Message);
     }
 
     [Fact]
