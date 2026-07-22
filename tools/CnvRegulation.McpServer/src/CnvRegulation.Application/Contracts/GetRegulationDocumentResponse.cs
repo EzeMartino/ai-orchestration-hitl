@@ -8,9 +8,14 @@ namespace CnvRegulation.Application.Contracts;
 public sealed class GetRegulationDocumentResponse
 {
     /// <summary>
-    /// Gets the document metadata and content.
+    /// Gets whether the requested document was found in the configured repository.
     /// </summary>
-    public required RegulationDocument Document { get; init; }
+    public required bool Found { get; init; }
+
+    /// <summary>
+    /// Gets the document metadata and content when found.
+    /// </summary>
+    public RegulationDocument? Document { get; init; }
 
     /// <summary>
     /// Gets citations for the returned document.

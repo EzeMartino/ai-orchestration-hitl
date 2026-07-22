@@ -9,28 +9,6 @@ namespace CnvRegulation.Application.Tests;
 public sealed class InMemoryRegulationArticleServiceTests
 {
     [Fact]
-    public async Task GetArticleAsync_ShouldReturnStructuredArticleResponse()
-    {
-        var repository = new InMemoryRegulationRepository();
-        var service = new InMemoryRegulationArticleService(repository, repository);
-        var request = new GetRegulationArticleRequest
-        {
-            Title = "Titulo VII",
-            Chapter = "Capitulo II",
-            Article = "Articulo 4"
-        };
-
-        var response = await service.GetArticleAsync(request, CancellationToken.None);
-
-        response.Text.Should().Contain("Mock regulatory text");
-        response.Citation.Article.Should().Be("Articulo 4");
-        response.Citation.Title.Should().Be("Titulo VII");
-        response.Citation.Url.Should().NotBeNullOrWhiteSpace();
-        response.Confidence.Should().BeGreaterThan(0);
-        response.Warnings.Should().Contain(warning => warning.Contains("Mock data", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
     public async Task GetArticleAsync_ShouldReturnIngestedChunk_WhenArticleExists()
     {
         var repository = new InMemoryRegulationRepository();
@@ -48,7 +26,10 @@ public sealed class InMemoryRegulationArticleServiceTests
             },
             CancellationToken.None);
 
+        response.Found.Should().BeTrue();
+        response.Text.Should().NotBeNull();
         response.Text.Should().Contain("primer artículo de prueba");
+        response.Citation.Should().NotBeNull();
         response.Citation.Title.Should().Be("Normas CNV N.T. 2013 - Sample");
         response.Citation.Chapter.Should().Be("Capítulo I");
         response.Citation.Article.Should().Be("Artículo 1");
@@ -56,7 +37,7 @@ public sealed class InMemoryRegulationArticleServiceTests
     }
 
     [Fact]
-    public async Task GetArticleAsync_ShouldFallbackToMock_WhenArticleDoesNotExist()
+    public async Task GetArticleAsync_ShouldReturnExplicitMissingResponse_WhenArticleDoesNotExist()
     {
         var repository = new InMemoryRegulationRepository();
         var document = LegalStructureRegulationChunkerTests.CreateDocument();
@@ -73,8 +54,12 @@ public sealed class InMemoryRegulationArticleServiceTests
             },
             CancellationToken.None);
 
-        response.Text.Should().Contain("Mock regulatory text for Artículo 99");
-        response.Citation.Article.Should().Be("Artículo 99");
-        response.Confidence.Should().Be(0.56);
+        response.Found.Should().BeFalse();
+        response.Text.Should().BeNull();
+        response.Citation.Should().BeNull();
+        response.Confidence.Should().Be(0);
+        response.Warnings.Should().ContainSingle()
+            .Which.Should().Contain("No se encontró");
+        response.Text.Should().NotContain("Mock regulatory text");
     }
 }

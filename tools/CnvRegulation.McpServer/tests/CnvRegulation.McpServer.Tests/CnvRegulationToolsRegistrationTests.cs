@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using CnvRegulation.Application.Abstractions;
 using CnvRegulation.Application.Analysis;
@@ -33,6 +34,25 @@ public sealed class CnvRegulationToolsRegistrationTests
             "get_recent_cnv_resolutions",
             "analyze_text_against_cnv"
         ]);
+    }
+
+    [Theory]
+    [InlineData(nameof(CnvRegulationTools.GetCnvDocumentAsync))]
+    [InlineData(nameof(CnvRegulationTools.GetCnvArticleAsync))]
+    public void CnvRegulationTools_RetrievalTools_ShouldBeSafeAndDescribeRepositoryBackedContent(string methodName)
+    {
+        var method = typeof(CnvRegulationTools).GetMethod(methodName, BindingFlags.Public | BindingFlags.Static)!;
+        var tool = method.GetCustomAttribute<McpServerToolAttribute>();
+        var description = method.GetCustomAttribute<DescriptionAttribute>();
+
+        tool.Should().NotBeNull();
+        tool!.ReadOnly.Should().BeTrue();
+        tool.Destructive.Should().BeFalse();
+        tool.Idempotent.Should().BeTrue();
+        tool.UseStructuredContent.Should().BeTrue();
+        description.Should().NotBeNull();
+        description!.Description.ToLowerInvariant().Should().NotContain("mock");
+        description.Description.ToLowerInvariant().Should().NotContain("placeholder");
     }
 
     [Fact]
