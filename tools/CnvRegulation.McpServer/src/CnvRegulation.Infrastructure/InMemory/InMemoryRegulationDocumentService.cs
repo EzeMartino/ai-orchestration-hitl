@@ -37,7 +37,29 @@ public sealed class InMemoryRegulationDocumentService(IRegulationRepository repo
             Found = true,
             Document = document,
             Citations = [MockRegulationData.CreateDocumentCitation(document)],
-            Warnings = [MockRegulationData.MockWarning]
+            Warnings = CreateSourceWarnings(document)
         };
+    }
+
+    private static IReadOnlyList<string> CreateSourceWarnings(CnvRegulation.Domain.RegulationDocument document)
+    {
+        var warnings = new List<string>();
+
+        if (string.Equals(document.Status, "mock", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add(MockRegulationData.MockWarning);
+        }
+
+        if (string.Equals(document.Status, "candidate", StringComparison.OrdinalIgnoreCase))
+        {
+            warnings.Add("candidate source");
+        }
+
+        if (document.RequiresReview)
+        {
+            warnings.Add("requires review");
+        }
+
+        return warnings.Count == 0 ? [] : warnings;
     }
 }
