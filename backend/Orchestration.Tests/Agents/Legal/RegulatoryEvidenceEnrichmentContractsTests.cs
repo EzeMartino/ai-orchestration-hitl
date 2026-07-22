@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text.Json;
 using FluentAssertions;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
 
 namespace Orchestration.Tests.Agents.Legal;
@@ -78,5 +79,73 @@ public sealed class RegulatoryEvidenceEnrichmentContractsTests
             .Should().Be("CNV");
         document.RootElement.GetProperty("article").GetProperty("citation").GetProperty("title").GetString()
             .Should().Be("Canonical CNV rules");
+    }
+
+    [Fact]
+    public void LegalQueryStrategyAudit_Should_deserialize_prior_payload_without_enrichments()
+    {
+        const string json = """
+        {
+          "strategyVersion": "v1",
+          "source": "cnv_mcp",
+          "fallbackReason": null,
+          "dataToolStatus": "Unavailable",
+          "financialAnalysisStatus": null,
+          "failedStages": [],
+          "queries": []
+        }
+        """;
+
+        var audit = JsonSerializer.Deserialize<LegalQueryStrategyAudit>(json, JsonOptions);
+
+        audit.Should().NotBeNull();
+        audit!.Enrichments.Should().BeNull();
+    }
+
+    [Fact]
+    public void LegalQueryStrategyAudit_Should_round_trip_populated_enrichments()
+    {
+        var enrichment = new LegalCnvEnrichmentAudit(
+            EnrichmentId: "enrichment-1",
+            Rank: 1,
+            CandidateKey: "document-1:chunk-1",
+            Score: 0.98,
+            ContributingQueryIndices: [0, 2],
+            Document: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: true,
+                FromCache: false,
+                Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+                OriginalTextLength: 12001,
+                IsTruncated: true),
+            Article: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: false,
+                FromCache: true,
+                Status: LegalCnvEnrichmentStageStatuses.NotAttempted,
+                OriginalTextLength: 6001,
+                IsTruncated: true),
+            Status: RegulatoryEvidenceEnrichmentStatuses.Partial,
+            LimitationCodes: ["document_truncated"]);
+        var audit = new LegalQueryStrategyAudit(
+            StrategyVersion: "v1",
+            Source: "cnv_mcp",
+            FallbackReason: null,
+            DataToolStatus: "Unavailable",
+            FinancialAnalysisStatus: null,
+            FailedStages: [],
+            Queries: [],
+            Enrichments: [enrichment]);
+
+        var json = JsonSerializer.Serialize(audit, JsonOptions);
+        var roundTripped = JsonSerializer.Deserialize<LegalQueryStrategyAudit>(json, JsonOptions);
+
+        roundTripped.Should().BeEquivalentTo(audit);
+        roundTripped!.Enrichments.Should().ContainSingle().Which.Document.Status
+            .Should().Be(LegalCnvEnrichmentStageStatuses.Succeeded);
+        roundTripped.Enrichments.Should().ContainSingle().Which.Article.Status
+            .Should().Be(LegalCnvEnrichmentStageStatuses.NotAttempted);
+        roundTripped.Enrichments.Should().ContainSingle().Which.LimitationCodes
+            .Should().BeEquivalentTo(["document_truncated"]);
     }
 }

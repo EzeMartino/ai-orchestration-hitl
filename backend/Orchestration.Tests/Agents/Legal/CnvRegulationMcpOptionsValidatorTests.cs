@@ -11,7 +11,13 @@ public sealed class CnvRegulationMcpOptionsValidatorTests
     [Fact]
     public void Validate_Should_accept_defaults_and_a_null_name()
     {
-        var result = _validator.Validate(null, new CnvRegulationMcpOptions());
+        var options = new CnvRegulationMcpOptions();
+
+        options.MaxEnrichedHits.Should().Be(2);
+        options.MaxDocumentContextCharacters.Should().Be(12_000);
+        options.MaxArticleContextCharacters.Should().Be(6_000);
+
+        var result = _validator.Validate(null, options);
 
         result.Failed.Should().BeFalse();
     }
