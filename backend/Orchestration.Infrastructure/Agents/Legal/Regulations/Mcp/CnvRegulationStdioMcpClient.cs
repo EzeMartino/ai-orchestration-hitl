@@ -7,12 +7,11 @@ using System.Text.Json;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
-public sealed class CnvRegulationStdioMcpClient(
-    IOptions<CnvRegulationMcpOptions> options,
-    ILogger<CnvRegulationStdioMcpClient> logger) : ICnvRegulationMcpClient, IAsyncDisposable
+public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyncDisposable
 {
-    private readonly CnvRegulationMcpOptions _options = options.Value;
-    private readonly ILogger<CnvRegulationStdioMcpClient> _logger = logger;
+    private readonly CnvRegulationMcpOptions _options;
+    private readonly ILogger<CnvRegulationStdioMcpClient> _logger;
+    private readonly Func<string, IReadOnlyDictionary<string, object?>, CancellationToken, Task<CallToolResult>>? _toolCallOverride;
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -33,9 +32,87 @@ public sealed class CnvRegulationStdioMcpClient(
     public int ResetCount => _resetCount;
     public string? LastError => _lastError;
 
+    public CnvRegulationStdioMcpClient(
+        IOptions<CnvRegulationMcpOptions> options,
+        ILogger<CnvRegulationStdioMcpClient> logger)
+    {
+        _options = options.Value;
+        _logger = logger;
+    }
 
-    public async Task<CnvRegulationSearchResponse> SearchAsync(
+    internal CnvRegulationStdioMcpClient(
+        IOptions<CnvRegulationMcpOptions> options,
+        ILogger<CnvRegulationStdioMcpClient> logger,
+        Func<string, IReadOnlyDictionary<string, object?>, CancellationToken, Task<CallToolResult>> toolCallOverride)
+        : this(options, logger)
+    {
+        _toolCallOverride = toolCallOverride;
+    }
+
+    public Task<CnvRegulationSearchResponse> SearchAsync(
         CnvRegulationSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["query"] = request.Query,
+            ["limit"] = request.Limit
+        };
+
+        AddOptional(arguments, "area", request.Area);
+        AddOptional(arguments, "source", request.Source);
+        AddOptional(arguments, "documentType", request.DocumentType);
+        AddOptional(arguments, "resolutionNumber", request.ResolutionNumber);
+        AddOptional(arguments, "status", request.Status);
+
+        if (request.RequiresReview.HasValue)
+        {
+            arguments["requiresReview"] = request.RequiresReview.Value;
+        }
+
+        return CallToolAsync<CnvRegulationSearchResponse>(
+            "search_cnv_regulation",
+            arguments,
+            cancellationToken);
+    }
+
+    public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+        CnvRegulationDocumentRequest request,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyDictionary<string, object?> arguments = new Dictionary<string, object?>
+        {
+            ["documentId"] = request.DocumentId
+        };
+
+        return CallToolAsync<CnvRegulationDocumentResponse>(
+            "get_cnv_document",
+            arguments,
+            cancellationToken);
+    }
+
+    public Task<CnvRegulationArticleResponse> GetArticleAsync(
+        CnvRegulationArticleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["article"] = request.Article
+        };
+
+        AddOptional(arguments, "title", request.Title);
+        AddOptional(arguments, "chapter", request.Chapter);
+        AddOptional(arguments, "section", request.Section);
+
+        return CallToolAsync<CnvRegulationArticleResponse>(
+            "get_cnv_article",
+            arguments,
+            cancellationToken);
+    }
+
+    private async Task<TResponse> CallToolAsync<TResponse>(
+        string toolName,
+        IReadOnlyDictionary<string, object?> arguments,
         CancellationToken cancellationToken)
     {
         if (_isDisposed)
@@ -49,59 +126,58 @@ public sealed class CnvRegulationStdioMcpClient(
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            await EnsureConnectedAsync(cancellationToken);
-
-            var arguments = new Dictionary<string, object?>
+            if (_toolCallOverride == null)
             {
-                ["query"] = request.Query,
-                ["limit"] = request.Limit
-            };
-
-            AddOptional(arguments, "area", request.Area);
-            AddOptional(arguments, "source", request.Source);
-            AddOptional(arguments, "documentType", request.DocumentType);
-            AddOptional(arguments, "resolutionNumber", request.ResolutionNumber);
-            AddOptional(arguments, "status", request.Status);
-
-            if (request.RequiresReview.HasValue)
-            {
-                arguments["requiresReview"] = request.RequiresReview.Value;
+                await EnsureConnectedAsync(cancellationToken);
             }
 
-            CallToolResult result;
             var toolCallStart = Stopwatch.GetTimestamp();
+            using var timeoutCts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(_options.ToolCallTimeoutSeconds));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                timeoutCts.Token);
 
-            // We wrap tool call logic in a cancellation token that respects our ToolCallTimeoutSeconds
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(_options.ToolCallTimeoutSeconds));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
+            CallToolResult result;
             try
             {
-                if (_client == null)
+                if (_toolCallOverride != null)
                 {
-                    throw new InvalidOperationException("MCP client is not connected.");
+                    result = await _toolCallOverride(toolName, arguments, linkedCts.Token);
                 }
+                else
+                {
+                    if (_client == null)
+                    {
+                        throw new InvalidOperationException("MCP client is not connected.");
+                    }
 
-                result = await _client.CallToolAsync(
-                    "search_cnv_regulation",
-                    arguments,
-                    cancellationToken: linkedCts.Token
-                );
+                    result = await _client.CallToolAsync(
+                        toolName,
+                        arguments,
+                        cancellationToken: linkedCts.Token);
+                }
+            }
+            catch (OperationCanceledException ex) when (
+                timeoutCts.IsCancellationRequested
+                && !cancellationToken.IsCancellationRequested)
+            {
+                LogToolCallFailure(ex, toolCallStart);
+                await ResetConnectionAsync("Tool call timed out");
+
+                var timeoutException = new TimeoutException(
+                    $"La herramienta MCP '{toolName}' excedió el tiempo de espera configurado.",
+                    ex);
+                _lastError = timeoutException.Message;
+                throw timeoutException;
             }
             catch (Exception ex)
             {
-                var toolCallDuration = Stopwatch.GetElapsedTime(toolCallStart);
-                _lastError = ex.Message;
-                _logger.LogError(ex, "MCP tool call failed after {ToolCallMs} ms.", toolCallDuration.TotalMilliseconds);
+                LogToolCallFailure(ex, toolCallStart);
 
-                // Check if it is a transport or protocol error to trigger a connection reset
-                if (IsTransportOrProtocolError(ex) || (ex is OperationCanceledException && timeoutCts.IsCancellationRequested))
+                if (IsTransportOrProtocolError(ex))
                 {
-                    var resetReason = (ex is OperationCanceledException && timeoutCts.IsCancellationRequested)
-                        ? "Tool call timed out"
-                        : "Transport or protocol error";
-
-                    await ResetConnectionAsync(resetReason, ex);
+                    await ResetConnectionAsync("Transport or protocol error", ex);
                 }
 
                 throw;
@@ -109,48 +185,51 @@ public sealed class CnvRegulationStdioMcpClient(
 
             var toolCallElapsed = Stopwatch.GetElapsedTime(toolCallStart);
             var totalElapsed = Stopwatch.GetElapsedTime(startTimestamp);
-
-            // Log structured telemetry fields
             _logger.LogInformation(
                 "MCP tool call succeeded. query_count={QueryCount}, mcp_tool_call_ms={McpToolCallMs:F2}, total_duration_ms={TotalDurationMs:F2}",
                 _queryCount,
                 toolCallElapsed.TotalMilliseconds,
-                totalElapsed.TotalMilliseconds
-            );
+                totalElapsed.TotalMilliseconds);
 
             if (result.IsError == true)
             {
                 var errorMessage = GetToolErrorMessage(result);
                 _lastError = errorMessage;
-
                 throw new InvalidOperationException(errorMessage);
             }
 
-            CnvRegulationSearchResponse? response;
-
             try
             {
-                response = DeserializeResponse(result);
+                var response = DeserializeResponse<TResponse>(result);
+                if (response == null)
+                {
+                    throw new InvalidOperationException(
+                        "La herramienta MCP devolvió una respuesta vacía o no válida.");
+                }
+
+                _lastError = null;
+                return response;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _lastError = ex.Message;
                 throw;
             }
-
-            _lastError = null;
-
-            return response
-                ?? new CnvRegulationSearchResponse(
-                    request.Query,
-                    [],
-                    ["La herramienta MCP devolvió una respuesta vacía o no válida."]
-                );
         }
         finally
         {
             _lock.Release();
         }
+    }
+
+    private void LogToolCallFailure(Exception ex, long toolCallStart)
+    {
+        var toolCallDuration = Stopwatch.GetElapsedTime(toolCallStart);
+        _lastError = ex.Message;
+        _logger.LogError(
+            ex,
+            "MCP tool call failed after {ToolCallMs} ms.",
+            toolCallDuration.TotalMilliseconds);
     }
 
     private async Task EnsureConnectedAsync(CancellationToken cancellationToken)
@@ -289,11 +368,11 @@ public sealed class CnvRegulationStdioMcpClient(
         }
     }
 
-    private CnvRegulationSearchResponse? DeserializeResponse(CallToolResult result)
+    private TResponse? DeserializeResponse<TResponse>(CallToolResult result)
     {
         if (result.StructuredContent is JsonElement structuredContent)
         {
-            return structuredContent.Deserialize<CnvRegulationSearchResponse>(
+            return structuredContent.Deserialize<TResponse>(
                 _jsonOptions
             );
         }
@@ -307,7 +386,7 @@ public sealed class CnvRegulationStdioMcpClient(
             );
         }
 
-        return JsonSerializer.Deserialize<CnvRegulationSearchResponse>(
+        return JsonSerializer.Deserialize<TResponse>(
             text,
             _jsonOptions
         );

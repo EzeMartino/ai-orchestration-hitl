@@ -398,6 +398,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -435,6 +445,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -471,6 +491,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -498,6 +528,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ColdStartCount => 0;
         public int ResetCount => 0;
         public string? LastError => null;
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -602,6 +642,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public string? LastError => null;
 
         public List<CnvRegulationSearchRequest> ReceivedRequests { get; } = [];
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -726,6 +776,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public string? LastError => null;
         public int CallCount { get; private set; }
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -758,6 +818,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
@@ -772,6 +842,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ColdStartCount => 0;
         public int ResetCount => 0;
         public string? LastError => null;
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -789,6 +869,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
         public int CallCount { get; private set; }
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -842,6 +932,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ResetCount => 0;
         public string? LastError => null;
         public int CallCount { get; private set; }
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -906,6 +1006,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ColdStartCount => 0;
         public int ResetCount => 0;
         public string? LastError => null;
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
@@ -989,6 +1099,16 @@ public class McpRegulatoryKnowledgeSourceTests
         public int ColdStartCount => 0;
         public int ResetCount => 0;
         public string? LastError => null;
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
 
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
