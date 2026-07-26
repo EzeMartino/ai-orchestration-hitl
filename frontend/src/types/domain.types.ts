@@ -79,6 +79,71 @@ export type RegulatoryEvidenceAssessment = {
   reasons: string[];
 };
 
+export type RegulatoryEvidenceCitationContext = {
+  source: string;
+  documentType: string | null;
+  resolutionNumber: string | null;
+  title: string;
+  chapter: string | null;
+  section: string | null;
+  article: string | null;
+  publicationDate: string | null;
+  url: string | null;
+  quotedText: string | null;
+};
+
+export type RegulatoryOriginalEvidenceContext = {
+  snippet: string;
+  citation: RegulatoryEvidenceCitationContext;
+};
+
+export type RegulatoryCanonicalDocumentContext = {
+  id: string;
+  source: string;
+  documentType: string;
+  resolutionNumber: string | null;
+  title: string;
+  publicationDate: string | null;
+  effectiveDate: string | null;
+  url: string;
+  status: string;
+  requiresReview: boolean;
+  retrievedAt: string | null;
+  text: string;
+  originalTextLength: number;
+  isTruncated: boolean;
+  metadata: Record<string, string>;
+  citations: RegulatoryEvidenceCitationContext[];
+};
+
+export type RegulatoryCanonicalArticleContext = {
+  citation: RegulatoryEvidenceCitationContext;
+  text: string;
+  confidence: number;
+  originalTextLength: number;
+  isTruncated: boolean;
+};
+
+export type RegulatoryEvidenceEnrichmentStatus =
+  | "Verified"
+  | "Partial"
+  | "Conflict"
+  | "Unavailable"
+  | (string & {});
+
+export type RegulatoryEvidenceEnrichmentContext = {
+  enrichmentId: string;
+  documentId: string;
+  chunkId: string | null;
+  rank: number;
+  score: number;
+  original: RegulatoryOriginalEvidenceContext;
+  document: RegulatoryCanonicalDocumentContext | null;
+  article: RegulatoryCanonicalArticleContext | null;
+  status: RegulatoryEvidenceEnrichmentStatus;
+  limitations: string[];
+};
+
 export type ComplianceContext = {
   riskDetected: boolean;
   riskLevel: string;
@@ -90,6 +155,7 @@ export type ComplianceContext = {
   queryStrategy?: unknown;
   legalReview?: LegalAnalysisReviewResult | null;
   evidenceAssessment?: RegulatoryEvidenceAssessment | null;
+  evidenceEnrichments?: RegulatoryEvidenceEnrichmentContext[] | null;
 };
 
 export type PlannerContext = {
