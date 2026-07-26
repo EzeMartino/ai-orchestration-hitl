@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,6 +33,15 @@ public sealed class CnvRegulatoryHitEnricher(
 {
     private const double MinimumScore = 0.40;
     private const int AbsoluteMaximumHits = 2;
+    private const int MaximumCanonicalDocumentCitations = 16;
+    private const int MaximumCanonicalMetadataEntries = 32;
+    private const int MaximumMetadataKeyCharacters = 128;
+    private const int MaximumMetadataValueCharacters = 512;
+    private const int MaximumCanonicalIdentityFieldCharacters = 256;
+    private const int MaximumCanonicalTitleCharacters = 512;
+    private const int MaximumCanonicalUrlCharacters = 2_048;
+    private const string EmptySha256Hex =
+        "0000000000000000000000000000000000000000000000000000000000000000";
 
     private readonly ICnvRegulationMcpClient _client =
         client ?? throw new ArgumentNullException(nameof(client));
@@ -62,7 +72,7 @@ public sealed class CnvRegulatoryHitEnricher(
         var enrichments = new List<RegulatoryEvidenceEnrichment>(candidates.Count);
         var audits = new List<LegalCnvEnrichmentAudit>(candidates.Count);
         var warningSet = new SortedSet<string>(StringComparer.Ordinal);
-        var documentCache = new Dictionary<string, DocumentRawOutcome>(StringComparer.Ordinal);
+        var documentCache = new Dictionary<string, DocumentLookupOutcome>(StringComparer.Ordinal);
 
         for (var index = 0; index < candidates.Count; index++)
         {
@@ -70,7 +80,7 @@ public sealed class CnvRegulatoryHitEnricher(
 
             var candidate = candidates[index];
             var rank = index + 1;
-            var enrichmentId = CreateEnrichmentId(candidate.CandidateKey);
+            var enrichmentId = CreateDomainSeparatedHash("enrichment", candidate.Identity);
             var limitations = new List<string>();
             var limitationCodes = new List<string>();
 
@@ -111,7 +121,7 @@ public sealed class CnvRegulatoryHitEnricher(
             audits.Add(new LegalCnvEnrichmentAudit(
                 EnrichmentId: enrichmentId,
                 Rank: rank,
-                CandidateKey: candidate.CandidateKey,
+                CandidateKey: candidate.AuditCandidateKey,
                 Score: candidate.Result.Score,
                 ContributingQueryIndices: candidate.ContributingQueryIndices,
                 Document: document.Audit,
@@ -140,7 +150,7 @@ public sealed class CnvRegulatoryHitEnricher(
         Candidate candidate,
         string enrichmentId,
         int rank,
-        IDictionary<string, DocumentRawOutcome> cache,
+        IDictionary<string, DocumentLookupOutcome> cache,
         ICollection<string> limitations,
         ICollection<string> limitationCodes,
         CancellationToken cancellationToken)
@@ -157,53 +167,47 @@ public sealed class CnvRegulatoryHitEnricher(
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        DocumentRawOutcome rawOutcome;
-        var fromCache = cache.TryGetValue(candidate.NormalizedDocumentId, out var cachedOutcome);
+        var documentCacheKey = CreateIdentityFingerprint(candidate.RequestDocumentId).Hash;
+        DocumentLookupOutcome lookupOutcome;
+        var fromCache = cache.TryGetValue(documentCacheKey, out var cachedOutcome);
         if (fromCache)
         {
-            rawOutcome = cachedOutcome!;
+            lookupOutcome = cachedOutcome!;
         }
         else
         {
-            rawOutcome = await RetrieveDocumentAsync(candidate.RequestDocumentId, cancellationToken)
+            lookupOutcome = await RetrieveDocumentAsync(candidate.RequestDocumentId, cancellationToken)
                 .ConfigureAwait(false);
-            cache[candidate.NormalizedDocumentId] = rawOutcome;
+            cache[documentCacheKey] = lookupOutcome;
         }
 
-        RegulatoryCanonicalDocument? document = null;
-        var status = rawOutcome.Status;
-        int? originalLength = null;
-        var isTruncated = false;
-
-        if (status == LegalCnvEnrichmentStageStatuses.Succeeded)
+        AppendBoundaryLimitations(
+            lookupOutcome.Limitations,
+            lookupOutcome.LimitationCodes,
+            limitations,
+            limitationCodes);
+        var status = lookupOutcome.Status;
+        if (status == LegalCnvEnrichmentStageStatuses.Succeeded &&
+            HasDocumentConflict(candidate, lookupOutcome))
         {
-            var response = rawOutcome.Response!;
-            var canonical = response.Document!;
-            var bounded = Bound(canonical.Text, _options.MaxDocumentContextCharacters);
-            document = MapDocument(
-                canonical,
-                response.Citations!,
-                bounded,
-                _options.MaxDocumentContextCharacters);
-            originalLength = bounded.OriginalLength;
-            isTruncated = bounded.IsTruncated;
-
-            if (HasDocumentConflict(candidate, canonical))
-            {
-                status = LegalCnvEnrichmentStageStatuses.Conflict;
-            }
+            status = LegalCnvEnrichmentStageStatuses.Conflict;
         }
 
-        AddLimitation("document", status, isTruncated, limitations, limitationCodes);
+        AddLimitation(
+            "document",
+            status,
+            lookupOutcome.IsTruncated,
+            limitations,
+            limitationCodes);
         var audit = StageAudit(
             selected: true,
             attempted: !fromCache,
             fromCache,
             status,
-            originalLength,
-            isTruncated);
+            lookupOutcome.OriginalTextLength,
+            lookupOutcome.IsTruncated);
         LogStage(enrichmentId, rank, "get_document", audit);
-        return new DocumentEnrichmentOutcome(document, audit);
+        return new DocumentEnrichmentOutcome(lookupOutcome.Snapshot, audit);
     }
 
     private async Task<ArticleEnrichmentOutcome> EnrichArticleAsync(
@@ -256,44 +260,37 @@ public sealed class CnvRegulatoryHitEnricher(
             Title: FirstNonBlank(candidate.PrimaryCitation.Title, candidate.Result.Title),
             Chapter: FirstNonBlank(candidate.PrimaryCitation.Chapter, candidate.Result.Chapter),
             Section: FirstNonBlank(candidate.PrimaryCitation.Section, candidate.Result.Section));
-        var rawOutcome = await RetrieveArticleAsync(request, cancellationToken).ConfigureAwait(false);
-
-        RegulatoryCanonicalArticle? article = null;
-        var status = rawOutcome.Status;
-        int? originalLength = null;
-        var isTruncated = false;
-        if (status == LegalCnvEnrichmentStageStatuses.Succeeded)
+        var lookupOutcome = await RetrieveArticleAsync(request, cancellationToken).ConfigureAwait(false);
+        AppendBoundaryLimitations(
+            lookupOutcome.Limitations,
+            lookupOutcome.LimitationCodes,
+            limitations,
+            limitationCodes);
+        var status = lookupOutcome.Status;
+        if (status == LegalCnvEnrichmentStageStatuses.Succeeded &&
+            HasArticleConflict(candidate, lookupOutcome))
         {
-            var response = rawOutcome.Response!;
-            var bounded = Bound(response.Text!, _options.MaxArticleContextCharacters);
-            article = new RegulatoryCanonicalArticle(
-                Citation: MapCanonicalCitation(response.Citation!, _options.MaxArticleContextCharacters),
-                Text: bounded.Text,
-                Confidence: response.Confidence,
-                OriginalTextLength: bounded.OriginalLength,
-                IsTruncated: bounded.IsTruncated);
-            originalLength = bounded.OriginalLength;
-            isTruncated = bounded.IsTruncated;
-
-            if (HasArticleConflict(candidate, response.Citation!))
-            {
-                status = LegalCnvEnrichmentStageStatuses.Conflict;
-            }
+            status = LegalCnvEnrichmentStageStatuses.Conflict;
         }
 
-        AddLimitation("article", status, isTruncated, limitations, limitationCodes);
+        AddLimitation(
+            "article",
+            status,
+            lookupOutcome.IsTruncated,
+            limitations,
+            limitationCodes);
         var audit = StageAudit(
             selected: true,
             attempted: true,
             fromCache: false,
             status,
-            originalLength,
-            isTruncated);
+            lookupOutcome.OriginalTextLength,
+            lookupOutcome.IsTruncated);
         LogStage(enrichmentId, rank, "get_article", audit);
-        return new ArticleEnrichmentOutcome(article, audit);
+        return new ArticleEnrichmentOutcome(lookupOutcome.Snapshot, audit);
     }
 
-    private async Task<DocumentRawOutcome> RetrieveDocumentAsync(
+    private async Task<DocumentLookupOutcome> RetrieveDocumentAsync(
         string documentId,
         CancellationToken cancellationToken)
     {
@@ -303,7 +300,7 @@ public sealed class CnvRegulatoryHitEnricher(
                 new CnvRegulationDocumentRequest(documentId),
                 cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return ValidateDocumentResponse(response);
+            return CreateDocumentLookupOutcome(response);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -312,16 +309,16 @@ public sealed class CnvRegulatoryHitEnricher(
         catch (TimeoutException)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.TimedOut, null);
+            return EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.TimedOut);
         }
         catch (Exception)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Failed, null);
+            return EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.Failed);
         }
     }
 
-    private async Task<ArticleRawOutcome> RetrieveArticleAsync(
+    private async Task<ArticleLookupOutcome> RetrieveArticleAsync(
         CnvRegulationArticleRequest request,
         CancellationToken cancellationToken)
     {
@@ -329,7 +326,7 @@ public sealed class CnvRegulatoryHitEnricher(
         {
             var response = await _client.GetArticleAsync(request, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            return ValidateArticleResponse(response);
+            return CreateArticleLookupOutcome(response);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -338,68 +335,100 @@ public sealed class CnvRegulatoryHitEnricher(
         catch (TimeoutException)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.TimedOut, null);
+            return EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.TimedOut);
         }
         catch (Exception)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Failed, null);
+            return EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.Failed);
         }
     }
 
-    private static DocumentRawOutcome ValidateDocumentResponse(CnvRegulationDocumentResponse? response)
+    private DocumentLookupOutcome CreateDocumentLookupOutcome(CnvRegulationDocumentResponse? response)
     {
         if (response is null || response.Warnings is null || response.Citations is null)
         {
-            return new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+            return EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
         if (!response.Found)
         {
             return response.Document is null
-                ? new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Missing, null)
-                : new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+                ? EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.Missing)
+                : EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
         if (response.Document is null ||
             string.IsNullOrWhiteSpace(response.Document.Id) ||
-            string.IsNullOrWhiteSpace(response.Document.Text))
+            string.IsNullOrWhiteSpace(response.Document.Source) ||
+            string.IsNullOrWhiteSpace(response.Document.DocumentType) ||
+            string.IsNullOrWhiteSpace(response.Document.Title) ||
+            string.IsNullOrWhiteSpace(response.Document.Url) ||
+            string.IsNullOrWhiteSpace(response.Document.Status) ||
+            string.IsNullOrWhiteSpace(response.Document.Text) ||
+            response.Citations.Any(citation =>
+                citation is null ||
+                string.IsNullOrWhiteSpace(citation.Source) ||
+                string.IsNullOrWhiteSpace(citation.Title)))
         {
-            return new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+            return EmptyDocumentLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
-        return new DocumentRawOutcome(LegalCnvEnrichmentStageStatuses.Succeeded, response);
+        var snapshot = BuildDocumentSnapshot(response.Document, response.Citations);
+        return new DocumentLookupOutcome(
+            Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+            Snapshot: snapshot.Snapshot,
+            IdFingerprint: CreateIdentityFingerprint(response.Document.Id),
+            SourceFingerprint: CreateIdentityFingerprint(response.Document.Source),
+            ResolutionFingerprint: CreateIdentityFingerprint(response.Document.ResolutionNumber),
+            OriginalTextLength: snapshot.Snapshot.OriginalTextLength,
+            IsTruncated: snapshot.Snapshot.IsTruncated,
+            Limitations: snapshot.Limitations,
+            LimitationCodes: snapshot.LimitationCodes);
     }
 
-    private static ArticleRawOutcome ValidateArticleResponse(CnvRegulationArticleResponse? response)
+    private ArticleLookupOutcome CreateArticleLookupOutcome(CnvRegulationArticleResponse? response)
     {
         if (response is null || response.Warnings is null)
         {
-            return new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+            return EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
         if (!response.Found)
         {
             return response.Text is null && response.Citation is null
-                ? new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Missing, null)
-                : new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+                ? EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.Missing)
+                : EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
         if (string.IsNullOrWhiteSpace(response.Text) ||
             response.Citation is null ||
-            string.IsNullOrWhiteSpace(response.Citation.Article))
+            string.IsNullOrWhiteSpace(response.Citation.Article) ||
+            string.IsNullOrWhiteSpace(response.Citation.Source) ||
+            string.IsNullOrWhiteSpace(response.Citation.Title) ||
+            !double.IsFinite(response.Confidence))
         {
-            return new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Malformed, null);
+            return EmptyArticleLookup(LegalCnvEnrichmentStageStatuses.Malformed);
         }
 
-        return new ArticleRawOutcome(LegalCnvEnrichmentStageStatuses.Succeeded, response);
+        var snapshot = BuildArticleSnapshot(response);
+        return new ArticleLookupOutcome(
+            Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+            Snapshot: snapshot.Snapshot,
+            ArticleFingerprint: CreateLocatorFingerprint(response.Citation.Article),
+            SourceFingerprint: CreateIdentityFingerprint(response.Citation.Source),
+            ResolutionFingerprint: CreateIdentityFingerprint(response.Citation.ResolutionNumber),
+            OriginalTextLength: snapshot.Snapshot.OriginalTextLength,
+            IsTruncated: snapshot.Snapshot.IsTruncated,
+            Limitations: snapshot.Limitations,
+            LimitationCodes: snapshot.LimitationCodes);
     }
 
     private static IReadOnlyList<Candidate> SelectCandidates(
         IReadOnlyList<CnvRegulationEnrichmentHit> hits,
         int maximumHits)
     {
-        var groups = new Dictionary<string, CandidateGroup>(StringComparer.Ordinal);
+        var groups = new Dictionary<CandidateIdentity, CandidateGroup>();
         foreach (var hit in hits)
         {
             if (!TryCreateCandidate(hit, out var candidate))
@@ -407,9 +436,9 @@ public sealed class CnvRegulatoryHitEnricher(
                 continue;
             }
 
-            if (!groups.TryGetValue(candidate.CandidateKey, out var group))
+            if (!groups.TryGetValue(candidate.Identity, out var group))
             {
-                groups[candidate.CandidateKey] = new CandidateGroup(candidate, hit!.QueryIndex);
+                groups[candidate.Identity] = new CandidateGroup(candidate, hit!.QueryIndex);
                 continue;
             }
 
@@ -426,8 +455,8 @@ public sealed class CnvRegulatoryHitEnricher(
                 ContributingQueryIndices = ReadOnly(group.ContributingQueryIndices)
             })
             .OrderByDescending(candidate => candidate.Result.Score)
-            .ThenBy(candidate => candidate.NormalizedDocumentId, StringComparer.Ordinal)
-            .ThenBy(candidate => candidate.NormalizedLocator, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.NormalizedDocumentId, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.NormalizedLocator, StringComparer.Ordinal)
             .ThenBy(candidate => NormalizeText(candidate.Result.ChunkId), StringComparer.Ordinal)
             .ThenBy(candidate => candidate.StableSnapshot, StringComparer.Ordinal)
             .Take(maximumHits)
@@ -464,7 +493,7 @@ public sealed class CnvRegulatoryHitEnricher(
             result.Section,
             result.Chapter) ?? string.Empty;
         var normalizedLocator = NormalizeLocator(primaryLocator);
-        var candidateKey = $"{normalizedDocumentId}|{normalizedLocator}";
+        var identity = new CandidateIdentity(normalizedDocumentId, normalizedLocator);
         var requestDocumentId = result.DocumentId.Trim();
         var articleLocator = FirstNonBlank(primaryCitation.Article, result.Article);
         candidate = new Candidate(
@@ -472,9 +501,8 @@ public sealed class CnvRegulatoryHitEnricher(
             PrimaryCitation: primaryCitation,
             RequestDocumentId: requestDocumentId,
             ArticleLocator: articleLocator,
-            NormalizedDocumentId: normalizedDocumentId,
-            NormalizedLocator: normalizedLocator,
-            CandidateKey: candidateKey,
+            Identity: identity,
+            AuditCandidateKey: CreateDomainSeparatedHash("candidate", identity),
             StableSnapshot: CreateStableSnapshot(result, primaryCitation),
             ContributingQueryIndices: ReadOnly([hit!.QueryIndex]));
         return true;
@@ -569,65 +597,299 @@ public sealed class CnvRegulatoryHitEnricher(
             .Append('|');
     }
 
-    private static bool HasDocumentConflict(Candidate candidate, CnvRegulationDocument document) =>
-        !StringComparer.Ordinal.Equals(
-            candidate.NormalizedDocumentId,
-            NormalizeText(document.Id)) ||
-        ValuesConflict(candidate.PrimaryCitation.Source, document.Source) ||
-        ValuesConflict(candidate.PrimaryCitation.ResolutionNumber, document.ResolutionNumber);
+    private static bool HasDocumentConflict(
+        Candidate candidate,
+        DocumentLookupOutcome outcome) =>
+        !CreateIdentityFingerprint(candidate.RequestDocumentId).Equals(outcome.IdFingerprint) ||
+        FingerprintsConflict(candidate.PrimaryCitation.Source, outcome.SourceFingerprint) ||
+        FingerprintsConflict(
+            candidate.PrimaryCitation.ResolutionNumber,
+            outcome.ResolutionFingerprint);
 
-    private static bool HasArticleConflict(Candidate candidate, CnvRegulationCitation citation) =>
-        !StringComparer.Ordinal.Equals(
-            NormalizeLocator(candidate.ArticleLocator),
-            NormalizeLocator(citation.Article)) ||
-        ValuesConflict(candidate.PrimaryCitation.Source, citation.Source) ||
-        ValuesConflict(candidate.PrimaryCitation.ResolutionNumber, citation.ResolutionNumber);
+    private static bool HasArticleConflict(
+        Candidate candidate,
+        ArticleLookupOutcome outcome) =>
+        !CreateLocatorFingerprint(candidate.ArticleLocator).Equals(outcome.ArticleFingerprint) ||
+        FingerprintsConflict(candidate.PrimaryCitation.Source, outcome.SourceFingerprint) ||
+        FingerprintsConflict(
+            candidate.PrimaryCitation.ResolutionNumber,
+            outcome.ResolutionFingerprint);
 
-    private static bool ValuesConflict(string? original, string? canonical) =>
-        !string.IsNullOrWhiteSpace(original) &&
-        !string.IsNullOrWhiteSpace(canonical) &&
-        !StringComparer.Ordinal.Equals(NormalizeText(original), NormalizeText(canonical));
+    private static bool FingerprintsConflict(
+        string? original,
+        IdentityFingerprint canonical)
+    {
+        var originalFingerprint = CreateIdentityFingerprint(original);
+        return originalFingerprint.HasValue &&
+            canonical.HasValue &&
+            !originalFingerprint.Equals(canonical);
+    }
 
-    private static RegulatoryCanonicalDocument MapDocument(
+    private DocumentSnapshotBuildResult BuildDocumentSnapshot(
         CnvRegulationDocument document,
-        IReadOnlyList<CnvRegulationCitation> citations,
-        (string Text, int OriginalLength, bool IsTruncated) bounded,
-        int maximumQuotedTextCharacters)
+        IReadOnlyList<CnvRegulationCitation> citations)
+    {
+        var boundedText = Bound(document.Text, _options.MaxDocumentContextCharacters);
+        var fieldsTruncated = false;
+        var id = BoundCanonicalField(document.Id, MaximumCanonicalIdentityFieldCharacters);
+        var source = BoundCanonicalField(document.Source, MaximumCanonicalIdentityFieldCharacters);
+        var documentType = BoundCanonicalField(
+            document.DocumentType,
+            MaximumCanonicalIdentityFieldCharacters);
+        var resolutionNumber = BoundCanonicalField(
+            document.ResolutionNumber,
+            MaximumCanonicalIdentityFieldCharacters);
+        var title = BoundCanonicalField(document.Title, MaximumCanonicalTitleCharacters);
+        var publicationDate = BoundCanonicalField(
+            document.PublicationDate,
+            MaximumCanonicalIdentityFieldCharacters);
+        var effectiveDate = BoundCanonicalField(
+            document.EffectiveDate,
+            MaximumCanonicalIdentityFieldCharacters);
+        var url = BoundCanonicalField(document.Url, MaximumCanonicalUrlCharacters);
+        var status = BoundCanonicalField(document.Status, MaximumCanonicalIdentityFieldCharacters);
+        var retrievedAt = BoundCanonicalField(
+            document.RetrievedAt,
+            MaximumCanonicalIdentityFieldCharacters);
+        fieldsTruncated = id.IsTruncated || source.IsTruncated || documentType.IsTruncated ||
+            resolutionNumber.IsTruncated || title.IsTruncated || publicationDate.IsTruncated ||
+            effectiveDate.IsTruncated || url.IsTruncated || status.IsTruncated ||
+            retrievedAt.IsTruncated;
+
+        var metadata = BuildMetadataSnapshot(document.Metadata);
+        var canonicalCitations = BuildDocumentCitationSnapshot(citations);
+        var boundary = CreateBoundaryLimitations(
+            fieldsTruncated,
+            metadata.WasAltered,
+            canonicalCitations.WasAltered);
+        var snapshot = new RegulatoryCanonicalDocument(
+            Id: id.Value!,
+            Source: source.Value!,
+            DocumentType: documentType.Value!,
+            ResolutionNumber: resolutionNumber.Value,
+            Title: title.Value!,
+            PublicationDate: publicationDate.Value,
+            EffectiveDate: effectiveDate.Value,
+            Url: url.Value!,
+            Status: status.Value!,
+            RequiresReview: document.RequiresReview,
+            RetrievedAt: retrievedAt.Value,
+            Text: boundedText.Text,
+            OriginalTextLength: boundedText.OriginalLength,
+            IsTruncated: boundedText.IsTruncated,
+            Metadata: metadata.Metadata,
+            Citations: canonicalCitations.Citations);
+        return new DocumentSnapshotBuildResult(
+            snapshot,
+            boundary.Limitations,
+            boundary.LimitationCodes);
+    }
+
+    private ArticleSnapshotBuildResult BuildArticleSnapshot(CnvRegulationArticleResponse response)
+    {
+        var boundedText = Bound(response.Text!, _options.MaxArticleContextCharacters);
+        var citation = SanitizeCanonicalCitation(
+            response.Citation!,
+            _options.MaxArticleContextCharacters,
+            retainQuotedText: true);
+        var boundary = CreateBoundaryLimitations(
+            fieldsTruncated: citation.WasAltered,
+            metadataTruncated: false,
+            citationsTruncated: false);
+        var snapshot = new RegulatoryCanonicalArticle(
+            Citation: citation.Citation,
+            Text: boundedText.Text,
+            Confidence: response.Confidence,
+            OriginalTextLength: boundedText.OriginalLength,
+            IsTruncated: boundedText.IsTruncated);
+        return new ArticleSnapshotBuildResult(
+            snapshot,
+            boundary.Limitations,
+            boundary.LimitationCodes);
+    }
+
+    private static MetadataSnapshot BuildMetadataSnapshot(
+        IReadOnlyDictionary<string, string>? source)
     {
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (document.Metadata is not null)
+        var wasAltered = false;
+        if (source is not null)
         {
-            foreach (var pair in document.Metadata.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            foreach (var pair in source.OrderBy(pair => pair.Key, StringComparer.Ordinal))
             {
-                if (pair.Key is not null)
+                if (pair.Key is null)
                 {
-                    metadata[pair.Key] = pair.Value ?? string.Empty;
+                    wasAltered = true;
+                    continue;
                 }
+
+                var key = BoundCanonicalField(pair.Key, MaximumMetadataKeyCharacters);
+                var value = BoundCanonicalField(pair.Value ?? string.Empty, MaximumMetadataValueCharacters);
+                wasAltered |= key.IsTruncated || value.IsTruncated || pair.Value is null;
+                if (metadata.ContainsKey(key.Value!))
+                {
+                    wasAltered = true;
+                    continue;
+                }
+
+                if (metadata.Count >= MaximumCanonicalMetadataEntries)
+                {
+                    wasAltered = true;
+                    continue;
+                }
+
+                metadata[key.Value!] = value.Value!;
             }
         }
 
-        var mappedCitations = citations
-            .Where(citation => citation is not null)
-            .Select(citation => MapCanonicalCitation(citation, maximumQuotedTextCharacters))
-            .ToArray();
+        return new MetadataSnapshot(
+            new ReadOnlyDictionary<string, string>(metadata),
+            wasAltered);
+    }
 
-        return new RegulatoryCanonicalDocument(
-            Id: document.Id,
-            Source: document.Source,
-            DocumentType: document.DocumentType,
-            ResolutionNumber: document.ResolutionNumber,
-            Title: document.Title,
-            PublicationDate: document.PublicationDate,
-            EffectiveDate: document.EffectiveDate,
-            Url: document.Url,
-            Status: document.Status,
-            RequiresReview: document.RequiresReview,
-            RetrievedAt: document.RetrievedAt,
-            Text: bounded.Text,
-            OriginalTextLength: bounded.OriginalLength,
-            IsTruncated: bounded.IsTruncated,
-            Metadata: new ReadOnlyDictionary<string, string>(metadata),
-            Citations: Array.AsReadOnly(mappedCitations));
+    private static CitationSnapshot BuildDocumentCitationSnapshot(
+        IReadOnlyList<CnvRegulationCitation> source)
+    {
+        var candidates = source
+            .Select(citation => SanitizeCanonicalCitation(
+                citation,
+                maximumQuotedTextCharacters: 0,
+                retainQuotedText: false))
+            .OrderBy(candidate => candidate.Identity.Source, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.DocumentType, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.ResolutionNumber, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.Title, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.Chapter, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.Section, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.Article, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.PublicationDate, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.Url, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.QuotedTextFingerprint, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.TieBreaker, StringComparer.Ordinal)
+            .ToArray();
+        var seen = new HashSet<CanonicalCitationIdentity>();
+        var retained = new List<RegulatoryEvidenceCitation>(MaximumCanonicalDocumentCitations);
+        var wasAltered = candidates.Any(candidate => candidate.WasAltered);
+        foreach (var candidate in candidates)
+        {
+            if (!seen.Add(candidate.Identity))
+            {
+                wasAltered = true;
+                continue;
+            }
+
+            if (retained.Count >= MaximumCanonicalDocumentCitations)
+            {
+                wasAltered = true;
+                continue;
+            }
+
+            retained.Add(candidate.Citation);
+        }
+
+        return new CitationSnapshot(ReadOnly(retained), wasAltered);
+    }
+
+    private static SanitizedCanonicalCitation SanitizeCanonicalCitation(
+        CnvRegulationCitation citation,
+        int maximumQuotedTextCharacters,
+        bool retainQuotedText)
+    {
+        var source = BoundCanonicalField(citation.Source, MaximumCanonicalIdentityFieldCharacters);
+        var documentType = BoundCanonicalField(
+            citation.DocumentType,
+            MaximumCanonicalIdentityFieldCharacters);
+        var resolutionNumber = BoundCanonicalField(
+            citation.ResolutionNumber,
+            MaximumCanonicalIdentityFieldCharacters);
+        var title = BoundCanonicalField(citation.Title, MaximumCanonicalTitleCharacters);
+        var chapter = BoundCanonicalField(citation.Chapter, MaximumCanonicalIdentityFieldCharacters);
+        var section = BoundCanonicalField(citation.Section, MaximumCanonicalIdentityFieldCharacters);
+        var article = BoundCanonicalField(citation.Article, MaximumCanonicalIdentityFieldCharacters);
+        var publicationDate = BoundCanonicalField(
+            citation.PublicationDate,
+            MaximumCanonicalIdentityFieldCharacters);
+        var url = BoundCanonicalField(citation.Url, MaximumCanonicalUrlCharacters);
+        var quotedText = retainQuotedText
+            ? BoundCanonicalField(citation.QuotedText, maximumQuotedTextCharacters)
+            : new BoundedCanonicalField(null, citation.QuotedText is not null);
+        var wasAltered = source.IsTruncated || documentType.IsTruncated ||
+            resolutionNumber.IsTruncated || title.IsTruncated || chapter.IsTruncated ||
+            section.IsTruncated || article.IsTruncated || publicationDate.IsTruncated ||
+            url.IsTruncated || quotedText.IsTruncated;
+        var snapshot = new RegulatoryEvidenceCitation(
+            Source: source.Value!,
+            DocumentType: documentType.Value,
+            ResolutionNumber: resolutionNumber.Value,
+            Title: title.Value!,
+            Chapter: chapter.Value,
+            Section: section.Value,
+            Article: article.Value,
+            PublicationDate: publicationDate.Value,
+            Url: url.Value,
+            QuotedText: quotedText.Value);
+        var identity = new CanonicalCitationIdentity(
+            Source: NormalizeText(snapshot.Source),
+            DocumentType: NormalizeText(snapshot.DocumentType),
+            ResolutionNumber: NormalizeText(snapshot.ResolutionNumber),
+            Title: NormalizeText(snapshot.Title),
+            Chapter: NormalizeText(snapshot.Chapter),
+            Section: NormalizeText(snapshot.Section),
+            Article: NormalizeLocator(snapshot.Article),
+            PublicationDate: NormalizeText(snapshot.PublicationDate),
+            Url: NormalizeText(snapshot.Url),
+            QuotedTextFingerprint: CreateIdentityFingerprint(citation.QuotedText).Hash);
+        var tieBreaker = CreateDomainSeparatedHash(
+            "canonical-citation",
+            snapshot.Source,
+            snapshot.DocumentType,
+            snapshot.ResolutionNumber,
+            snapshot.Title,
+            snapshot.Chapter,
+            snapshot.Section,
+            snapshot.Article,
+            snapshot.PublicationDate,
+            snapshot.Url,
+            identity.QuotedTextFingerprint);
+        return new SanitizedCanonicalCitation(snapshot, identity, tieBreaker, wasAltered);
+    }
+
+    private static BoundedCanonicalField BoundCanonicalField(string? value, int maximumCharacters)
+    {
+        if (value is null || value.Length <= maximumCharacters)
+        {
+            return new BoundedCanonicalField(value, false);
+        }
+
+        return new BoundedCanonicalField(value[..maximumCharacters], true);
+    }
+
+    private static BoundaryLimitations CreateBoundaryLimitations(
+        bool fieldsTruncated,
+        bool metadataTruncated,
+        bool citationsTruncated)
+    {
+        var limitations = new List<string>(3);
+        var limitationCodes = new List<string>(3);
+        if (fieldsTruncated)
+        {
+            limitationCodes.Add("canonical_field_truncated");
+            limitations.Add("Algunos campos del contexto canónico CNV fueron truncados por límites de seguridad.");
+        }
+
+        if (metadataTruncated)
+        {
+            limitationCodes.Add("document_metadata_truncated");
+            limitations.Add("Parte de los metadatos canónicos del documento CNV fue truncada o descartada por límites de seguridad.");
+        }
+
+        if (citationsTruncated)
+        {
+            limitationCodes.Add("document_citations_truncated");
+            limitations.Add("Parte de las citas canónicas del documento CNV fue truncada, deduplicada o descartada por límites de seguridad.");
+        }
+
+        return new BoundaryLimitations(ReadOnly(limitations), ReadOnly(limitationCodes));
     }
 
     private static RegulatoryEvidenceCitation MapOriginalCitation(CnvRegulationCitation citation) =>
@@ -642,29 +904,6 @@ public sealed class CnvRegulatoryHitEnricher(
             citation.PublicationDate,
             citation.Url,
             citation.QuotedText);
-
-    private static RegulatoryEvidenceCitation MapCanonicalCitation(
-        CnvRegulationCitation citation,
-        int maximumQuotedTextCharacters)
-    {
-        var quotedText = citation.QuotedText;
-        if (quotedText is not null && quotedText.Length > maximumQuotedTextCharacters)
-        {
-            quotedText = quotedText[..maximumQuotedTextCharacters];
-        }
-
-        return new RegulatoryEvidenceCitation(
-            citation.Source,
-            citation.DocumentType,
-            citation.ResolutionNumber,
-            citation.Title,
-            citation.Chapter,
-            citation.Section,
-            citation.Article,
-            citation.PublicationDate,
-            citation.Url,
-            quotedText);
-    }
 
     private static (string Text, int OriginalLength, bool IsTruncated) Bound(
         string text,
@@ -750,6 +989,47 @@ public sealed class CnvRegulatoryHitEnricher(
             ? RegulatoryEvidenceEnrichmentStatuses.Verified
             : RegulatoryEvidenceEnrichmentStatuses.Partial;
     }
+
+    private static void AppendBoundaryLimitations(
+        IReadOnlyList<string> sourceLimitations,
+        IReadOnlyList<string> sourceCodes,
+        ICollection<string> limitations,
+        ICollection<string> limitationCodes)
+    {
+        foreach (var limitation in sourceLimitations)
+        {
+            limitations.Add(limitation);
+        }
+
+        foreach (var code in sourceCodes)
+        {
+            limitationCodes.Add(code);
+        }
+    }
+
+    private static DocumentLookupOutcome EmptyDocumentLookup(string status) =>
+        new(
+            Status: status,
+            Snapshot: null,
+            IdFingerprint: IdentityFingerprint.Empty,
+            SourceFingerprint: IdentityFingerprint.Empty,
+            ResolutionFingerprint: IdentityFingerprint.Empty,
+            OriginalTextLength: null,
+            IsTruncated: false,
+            Limitations: Array.Empty<string>(),
+            LimitationCodes: Array.Empty<string>());
+
+    private static ArticleLookupOutcome EmptyArticleLookup(string status) =>
+        new(
+            Status: status,
+            Snapshot: null,
+            ArticleFingerprint: IdentityFingerprint.Empty,
+            SourceFingerprint: IdentityFingerprint.Empty,
+            ResolutionFingerprint: IdentityFingerprint.Empty,
+            OriginalTextLength: null,
+            IsTruncated: false,
+            Limitations: Array.Empty<string>(),
+            LimitationCodes: Array.Empty<string>());
 
     private static LegalCnvEnrichmentStageAudit StageAudit(
         bool selected,
@@ -848,8 +1128,44 @@ public sealed class CnvRegulatoryHitEnricher(
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
-    private static string CreateEnrichmentId(string candidateKey) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(candidateKey))).ToLowerInvariant();
+    private static IdentityFingerprint CreateIdentityFingerprint(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? IdentityFingerprint.Empty
+            : new IdentityFingerprint(
+                true,
+                CreateDomainSeparatedHash("identity", NormalizeText(value)));
+
+    private static IdentityFingerprint CreateLocatorFingerprint(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? IdentityFingerprint.Empty
+            : new IdentityFingerprint(
+                true,
+                CreateDomainSeparatedHash("locator", NormalizeLocator(value)));
+
+    private static string CreateDomainSeparatedHash(
+        string domain,
+        CandidateIdentity identity) =>
+        CreateDomainSeparatedHash(
+            domain,
+            identity.NormalizedDocumentId,
+            identity.NormalizedLocator);
+
+    private static string CreateDomainSeparatedHash(string domain, params string?[] components)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes(domain));
+        hash.AppendData([0]);
+        Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
+        foreach (var component in components)
+        {
+            var bytes = Encoding.UTF8.GetBytes(component ?? string.Empty);
+            BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, bytes.Length);
+            hash.AppendData(lengthPrefix);
+            hash.AppendData(bytes);
+        }
+
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
 
     private static CnvRegulatoryHitEnrichmentResult EmptyResult() =>
         new(
@@ -865,11 +1181,14 @@ public sealed class CnvRegulatoryHitEnricher(
         CnvRegulationCitation PrimaryCitation,
         string RequestDocumentId,
         string? ArticleLocator,
-        string NormalizedDocumentId,
-        string NormalizedLocator,
-        string CandidateKey,
+        CandidateIdentity Identity,
+        string AuditCandidateKey,
         string StableSnapshot,
         IReadOnlyList<int> ContributingQueryIndices);
+
+    private sealed record CandidateIdentity(
+        string NormalizedDocumentId,
+        string NormalizedLocator);
 
     private sealed class CandidateGroup(Candidate representative, int queryIndex)
     {
@@ -878,13 +1197,74 @@ public sealed class CnvRegulatoryHitEnricher(
         internal SortedSet<int> ContributingQueryIndices { get; } = [queryIndex];
     }
 
-    private sealed record DocumentRawOutcome(
+    private sealed record DocumentLookupOutcome(
         string Status,
-        CnvRegulationDocumentResponse? Response);
+        RegulatoryCanonicalDocument? Snapshot,
+        IdentityFingerprint IdFingerprint,
+        IdentityFingerprint SourceFingerprint,
+        IdentityFingerprint ResolutionFingerprint,
+        int? OriginalTextLength,
+        bool IsTruncated,
+        IReadOnlyList<string> Limitations,
+        IReadOnlyList<string> LimitationCodes);
 
-    private sealed record ArticleRawOutcome(
+    private sealed record ArticleLookupOutcome(
         string Status,
-        CnvRegulationArticleResponse? Response);
+        RegulatoryCanonicalArticle? Snapshot,
+        IdentityFingerprint ArticleFingerprint,
+        IdentityFingerprint SourceFingerprint,
+        IdentityFingerprint ResolutionFingerprint,
+        int? OriginalTextLength,
+        bool IsTruncated,
+        IReadOnlyList<string> Limitations,
+        IReadOnlyList<string> LimitationCodes);
+
+    private readonly record struct IdentityFingerprint(bool HasValue, string Hash)
+    {
+        internal static IdentityFingerprint Empty { get; } = new(false, EmptySha256Hex);
+    }
+
+    private sealed record DocumentSnapshotBuildResult(
+        RegulatoryCanonicalDocument Snapshot,
+        IReadOnlyList<string> Limitations,
+        IReadOnlyList<string> LimitationCodes);
+
+    private sealed record ArticleSnapshotBuildResult(
+        RegulatoryCanonicalArticle Snapshot,
+        IReadOnlyList<string> Limitations,
+        IReadOnlyList<string> LimitationCodes);
+
+    private sealed record MetadataSnapshot(
+        IReadOnlyDictionary<string, string> Metadata,
+        bool WasAltered);
+
+    private sealed record CitationSnapshot(
+        IReadOnlyList<RegulatoryEvidenceCitation> Citations,
+        bool WasAltered);
+
+    private sealed record SanitizedCanonicalCitation(
+        RegulatoryEvidenceCitation Citation,
+        CanonicalCitationIdentity Identity,
+        string TieBreaker,
+        bool WasAltered);
+
+    private sealed record CanonicalCitationIdentity(
+        string Source,
+        string DocumentType,
+        string ResolutionNumber,
+        string Title,
+        string Chapter,
+        string Section,
+        string Article,
+        string PublicationDate,
+        string Url,
+        string QuotedTextFingerprint);
+
+    private readonly record struct BoundedCanonicalField(string? Value, bool IsTruncated);
+
+    private sealed record BoundaryLimitations(
+        IReadOnlyList<string> Limitations,
+        IReadOnlyList<string> LimitationCodes);
 
     private sealed record DocumentEnrichmentOutcome(
         RegulatoryCanonicalDocument? Document,

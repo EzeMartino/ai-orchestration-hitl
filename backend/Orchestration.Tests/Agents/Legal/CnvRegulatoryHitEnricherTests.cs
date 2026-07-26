@@ -128,6 +128,30 @@ public sealed class CnvRegulatoryHitEnricherTests
     }
 
     [Fact]
+    public async Task EnrichAsync_DelimitedIdentityComponents_DoNotCollideAndRemainDeterministic()
+    {
+        CnvRegulationEnrichmentHit[] hits =
+        [
+            Hit(1, documentId: "A|B", article: "C"),
+            Hit(2, documentId: "A", article: "B|C")
+        ];
+        var firstClient = new BehaviorCnvRegulationMcpClient();
+        var secondClient = new BehaviorCnvRegulationMcpClient();
+
+        var first = await CreateSut(firstClient, articleLimit: 0)
+            .EnrichAsync(hits, CancellationToken.None);
+        var second = await CreateSut(secondClient, articleLimit: 0)
+            .EnrichAsync(hits.Reverse().ToArray(), CancellationToken.None);
+
+        first.Enrichments.Should().HaveCount(2);
+        firstClient.DocumentRequests.Should().HaveCount(2);
+        first.Audits.Select(x => x.CandidateKey).Should().OnlyHaveUniqueItems()
+            .And.AllSatisfy(key => key.Should().MatchRegex("^[0-9a-f]{64}$"));
+        first.Enrichments.Select(x => x.EnrichmentId).Should().OnlyHaveUniqueItems();
+        JsonSerializer.Serialize(first).Should().Be(JsonSerializer.Serialize(second));
+    }
+
+    [Fact]
     public async Task EnrichAsync_ThreeEligibleCandidates_SelectsAtMostTwoAndCallsSequentially()
     {
         var client = new BehaviorCnvRegulationMcpClient();
@@ -487,7 +511,15 @@ public sealed class CnvRegulatoryHitEnricherTests
         yield return ["false with document", new CnvRegulationDocumentResponse(false, Document("doc-1"), [], [])];
         yield return ["true without document", new CnvRegulationDocumentResponse(true, null, [], [])];
         yield return ["blank id", new CnvRegulationDocumentResponse(true, Document(" "), [], [])];
+        yield return ["blank source", new CnvRegulationDocumentResponse(true, Document("doc-1") with { Source = " " }, [], [])];
+        yield return ["blank document type", new CnvRegulationDocumentResponse(true, Document("doc-1") with { DocumentType = " " }, [], [])];
+        yield return ["blank title", new CnvRegulationDocumentResponse(true, Document("doc-1") with { Title = " " }, [], [])];
+        yield return ["blank url", new CnvRegulationDocumentResponse(true, Document("doc-1") with { Url = " " }, [], [])];
+        yield return ["blank status", new CnvRegulationDocumentResponse(true, Document("doc-1") with { Status = " " }, [], [])];
         yield return ["blank text", new CnvRegulationDocumentResponse(true, Document("doc-1") with { Text = " " }, [], [])];
+        yield return ["null citation element", new CnvRegulationDocumentResponse(true, Document("doc-1"), [null!], [])];
+        yield return ["blank citation source", new CnvRegulationDocumentResponse(true, Document("doc-1"), [Citation(source: " ")], [])];
+        yield return ["blank citation title", new CnvRegulationDocumentResponse(true, Document("doc-1"), [Citation(title: " ")], [])];
     }
 
     [Theory]
@@ -525,6 +557,21 @@ public sealed class CnvRegulatoryHitEnricherTests
             Citation(article: " "),
             0.9,
             [])];
+        yield return ["true with blank citation source", new CnvRegulationArticleResponse(
+            true,
+            "text",
+            Citation(source: " "),
+            0.9,
+            [])];
+        yield return ["true with blank citation title", new CnvRegulationArticleResponse(
+            true,
+            "text",
+            Citation(title: " "),
+            0.9,
+            [])];
+        yield return ["true with NaN confidence", new CnvRegulationArticleResponse(true, "text", Citation(), double.NaN, [])];
+        yield return ["true with positive infinite confidence", new CnvRegulationArticleResponse(true, "text", Citation(), double.PositiveInfinity, [])];
+        yield return ["true with negative infinite confidence", new CnvRegulationArticleResponse(true, "text", Citation(), double.NegativeInfinity, [])];
     }
 
     [Theory]
@@ -582,7 +629,7 @@ public sealed class CnvRegulatoryHitEnricherTests
     }
 
     [Fact]
-    public async Task EnrichAsync_CanonicalCitationQuote_UsesConfiguredDimensionLimit()
+    public async Task EnrichAsync_CanonicalDocumentCitationQuote_IsNotRetained()
     {
         const string quotedText = "0123456789-SECRET-SUFFIX";
         var client = new BehaviorCnvRegulationMcpClient
@@ -598,7 +645,184 @@ public sealed class CnvRegulatoryHitEnricherTests
         var result = await sut.EnrichAsync([Hit(1)], CancellationToken.None);
 
         result.Enrichments.Should().ContainSingle().Which.Document!.Citations
-            .Should().ContainSingle().Which.QuotedText.Should().Be("0123456789");
+            .Should().ContainSingle().Which.QuotedText.Should().BeNull();
+        result.Audits.Should().ContainSingle().Which.LimitationCodes
+            .Should().Contain("document_citations_truncated");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_OversizedMetadata_BoundsEntriesKeysValuesAndSecretSuffixes()
+    {
+        const string secretKeySuffix = "SECRET-METADATA-KEY-SUFFIX";
+        const string secretValueSuffix = "SECRET-METADATA-VALUE-SUFFIX";
+        var metadata = Enumerable.Range(0, 35)
+            .ToDictionary(index => $"key-{index:D2}", index => $"value-{index:D2}", StringComparer.Ordinal);
+        metadata["00-oversized-value"] = new string('v', 512) + secretValueSuffix;
+        metadata[new string('K', 128) + secretKeySuffix] = "bounded-value";
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId) with { Metadata = metadata },
+                [Citation(quotedText: null)],
+                []))
+        };
+        var sut = CreateSut(client, articleLimit: 0);
+
+        var result = await sut.EnrichAsync([Hit(1)], CancellationToken.None);
+
+        var document = result.Enrichments.Should().ContainSingle().Which.Document!;
+        document.Metadata.Should().HaveCount(32);
+        document.Metadata.Keys.Should().OnlyContain(key => key.Length <= 128);
+        document.Metadata.Values.Should().OnlyContain(value => value.Length <= 512);
+        result.Audits.Should().ContainSingle().Which.LimitationCodes
+            .Should().Contain("document_metadata_truncated");
+        JsonSerializer.Serialize(result).Should().NotContain(secretKeySuffix).And.NotContain(secretValueSuffix);
+    }
+
+    [Fact]
+    public async Task EnrichAsync_ExcessCanonicalCitations_DeduplicatesCapsAndDropsQuotedSecrets()
+    {
+        var citations = Enumerable.Range(0, 24)
+            .Select(index => Citation(
+                title: $"Canonical title {index:D2}",
+                article: $"Article {index:D2}",
+                quotedText: $"quote-{index:D2}-SECRET-CITATION-{index:D2}"))
+            .ToList();
+        citations.Add(citations[0]);
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId),
+                citations,
+                []))
+        };
+        var sut = CreateSut(client, articleLimit: 0);
+
+        var result = await sut.EnrichAsync([Hit(1)], CancellationToken.None);
+
+        var canonicalCitations = result.Enrichments.Should().ContainSingle().Which.Document!.Citations;
+        canonicalCitations.Should().HaveCount(16);
+        canonicalCitations.Should().OnlyContain(citation => citation.QuotedText == null);
+        result.Audits.Should().ContainSingle().Which.LimitationCodes
+            .Should().Contain("document_citations_truncated");
+        JsonSerializer.Serialize(result).Should().NotContain("SECRET-CITATION");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_OversizedCanonicalFields_BoundsDocumentAndArticleSnapshots()
+    {
+        const string documentSecret = "SECRET-DOCUMENT-FIELD-SUFFIX";
+        const string articleSecret = "SECRET-ARTICLE-FIELD-SUFFIX";
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId) with { Title = new string('D', 512) + documentSecret },
+                [Citation(quotedText: null)],
+                [])),
+            ArticleHandler = (request, _) => Task.FromResult(new CnvRegulationArticleResponse(
+                true,
+                "article text",
+                Citation(
+                    title: new string('A', 512) + articleSecret,
+                    article: request.Article,
+                    url: new string('u', 2_048) + articleSecret,
+                    quotedText: "12345678" + articleSecret),
+                0.9,
+                []))
+        };
+        var sut = CreateSut(client, articleLimit: 8);
+
+        var result = await sut.EnrichAsync([Hit(1)], CancellationToken.None);
+
+        var enrichment = result.Enrichments.Should().ContainSingle().Subject;
+        enrichment.Document!.Title.Should().HaveLength(512);
+        enrichment.Article!.Citation.Title.Should().HaveLength(512);
+        enrichment.Article.Citation.Url.Should().HaveLength(2_048);
+        enrichment.Article.Citation.QuotedText.Should().Be("12345678");
+        result.Audits.Should().ContainSingle().Which.LimitationCodes
+            .Should().Contain("canonical_field_truncated");
+        JsonSerializer.Serialize(result).Should().NotContain(documentSecret).And.NotContain(articleSecret);
+    }
+
+    [Fact]
+    public async Task EnrichAsync_CachedDocumentSnapshot_IsImmuneToRawResponseMutation()
+    {
+        var metadata = new Dictionary<string, string>(StringComparer.Ordinal) { ["stable"] = "before" };
+        var citations = new List<CnvRegulationCitation>
+        {
+            Citation(title: "before-title", quotedText: null)
+        };
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId) with { Metadata = metadata },
+                citations,
+                [])),
+            ArticleHandler = (request, _) =>
+            {
+                metadata["stable"] = "after-SECRET-MUTATION";
+                citations[0] = citations[0] with { Title = "after-SECRET-MUTATION" };
+                citations.Add(Citation(title: "added-SECRET-MUTATION", quotedText: null));
+                return Task.FromResult(ArticleResponse(request.Article));
+            }
+        };
+        var sut = CreateSut(client);
+
+        var result = await sut.EnrichAsync(
+            [
+                Hit(1, documentId: "doc-1", article: "Article 1"),
+                Hit(2, documentId: "DOC-1", article: "Article 2")
+            ],
+            CancellationToken.None);
+
+        client.DocumentRequests.Should().ContainSingle();
+        result.Enrichments.Should().HaveCount(2).And.AllSatisfy(enrichment =>
+        {
+            enrichment.Document!.Metadata["stable"].Should().Be("before");
+            enrichment.Document.Citations.Should().ContainSingle().Which.Title.Should().Be("before-title");
+        });
+        JsonSerializer.Serialize(result).Should().NotContain("SECRET-MUTATION");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_CanonicalCitationOrderChanges_DeduplicatesAndSerializesIdentically()
+    {
+        var a = Citation(source: "cnv", title: "A title", article: "Article 1", quotedText: null);
+        var z = Citation(source: "CNV", title: "Z title", article: "Article 9", quotedText: null);
+        var firstClient = ClientWithDocumentCitations([z, a, a]);
+        var secondClient = ClientWithDocumentCitations([a, z, a]);
+        var hit = Hit(1, article: null, citations: [Citation(chapter: "I", section: null, article: null)]);
+
+        var first = await CreateSut(firstClient).EnrichAsync([hit], CancellationToken.None);
+        var second = await CreateSut(secondClient).EnrichAsync([hit], CancellationToken.None);
+
+        first.Enrichments.Should().ContainSingle().Which.Document!.Citations
+            .Select(citation => citation.Title).Should().Equal("A title", "Z title");
+        JsonSerializer.Serialize(first).Should().Be(JsonSerializer.Serialize(second));
+    }
+
+    [Fact]
+    public async Task EnrichAsync_NullDocumentMetadata_UsesImmutableEmptySnapshot()
+    {
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId) with { Metadata = null },
+                [],
+                []))
+        };
+        var sut = CreateSut(client, articleLimit: 0);
+
+        var result = await sut.EnrichAsync([Hit(1)], CancellationToken.None);
+
+        result.Enrichments.Should().ContainSingle().Which.Document!.Metadata.Should().BeEmpty();
+        result.Enrichments.Should().ContainSingle().Which.Status
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
     }
 
     [Fact]
@@ -630,7 +854,7 @@ public sealed class CnvRegulatoryHitEnricherTests
         enrichment.Document!.Text.Should().Be("safe");
         enrichment.Document.OriginalTextLength.Should().Be(documentText.Length);
         enrichment.Document.IsTruncated.Should().BeTrue();
-        enrichment.Document.Citations.Should().ContainSingle().Which.QuotedText.Should().Be("cite");
+        enrichment.Document.Citations.Should().ContainSingle().Which.QuotedText.Should().BeNull();
         enrichment.Article!.Text.Should().Be("okay");
         enrichment.Article.OriginalTextLength.Should().Be(articleText.Length);
         enrichment.Article.IsTruncated.Should().BeTrue();
@@ -837,6 +1061,17 @@ public sealed class CnvRegulatoryHitEnricherTests
 
     private static CnvRegulationArticleResponse MissingArticleResponse() =>
         new(false, null, null, 0, []);
+
+    private static BehaviorCnvRegulationMcpClient ClientWithDocumentCitations(
+        IReadOnlyList<CnvRegulationCitation> citations) =>
+        new()
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId),
+                citations,
+                []))
+        };
 
     private sealed class BehaviorCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
