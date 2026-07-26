@@ -416,9 +416,9 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
           ],
           "evidenceReferences": [
             {
-              "source": "Reescritura LLM",
-              "title": "Título alterado",
-              "url": "https://example.invalid/inventado",
+              "source": "CNV",
+              "title": "Resolución General 923",
+              "url": "https://www.argentina.gob.ar/cnv/rg-923",
               "citation": "cnv art. 42",
               "snippet": "Resumen alterado",
               "regulationArea": "Área alterada",
@@ -634,9 +634,9 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
           ],
           "evidenceReferences": [
             {
-              "source": "Reescritura LLM",
-              "title": "Título alterado",
-              "url": "https://example.invalid/inventado",
+              "source": "CNV canónica",
+              "title": "Artículo canónico",
+              "url": "https://cnv.example/canonical-article",
               "citation": "CNV Art. 99",
               "snippet": "Texto alterado",
               "regulationArea": "Área alterada",
@@ -679,6 +679,148 @@ public sealed class SemanticKernelLegalAnalysisReviewServiceTests
                 Score: safe.Score));
         string.Join(" ", result.EvidenceReferences)
             .Should().NotContain("SECRETO-CONFLICTO-ALLOWLIST");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_remove_reference_when_identity_metadata_does_not_match_allowlist()
+    {
+        var response = """
+        {
+          "reviewSummary": "La aplicabilidad requiere revisión humana.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "La evidencia podría ser relevante.",
+              "severity": "Warning",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [
+            {
+              "source": "Otra fuente",
+              "title": "Otra resolución",
+              "url": "https://example.invalid/otra",
+              "citation": "CNV Art. 42",
+              "snippet": "Texto atribuido a otro documento.",
+              "regulationArea": "Liquidity",
+              "score": 0.9
+            }
+          ],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+        var service = CreateService(new FakeChatCompletionService(response));
+
+        var result = await service.ReviewAsync(CreateInput(), CancellationToken.None);
+
+        result.EvidenceReferences.Should().BeEmpty();
+        result.Warnings.Should().Contain(
+            "Unknown citations or references returned by the AI review were removed.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_fail_closed_for_ambiguous_locator_in_any_order()
+    {
+        const string locator = "CNV Art. 42";
+        var evidenceA = CreateEvidence(locator) with
+        {
+            Source = "CNV A",
+            Title = "Resolución A",
+            Url = "https://cnv.example/a",
+            Snippet = null
+        };
+        var evidenceB = CreateEvidence(locator) with
+        {
+            Source = "CNV B",
+            Title = "Resolución B",
+            Url = "https://cnv.example/b",
+            Snippet = null
+        };
+        var citationA = CreateCanonicalCitation(locator) with
+        {
+            Source = "CNV A",
+            ResolutionNumber = "A/2026",
+            Title = "Resolución A",
+            Url = "https://cnv.example/a"
+        };
+        var citationB = CreateCanonicalCitation(locator) with
+        {
+            Source = "CNV B",
+            ResolutionNumber = "B/2026",
+            Title = "Resolución B",
+            Url = "https://cnv.example/b"
+        };
+        var enrichmentA = CreateEnrichment(
+            "a",
+            RegulatoryEvidenceEnrichmentStatuses.Verified,
+            article: CreateCanonicalArticle(locator, "Texto A.") with { Citation = citationA }) with
+        {
+            Rank = 1,
+            Original = new RegulatoryOriginalEvidence(string.Empty, citationA)
+        };
+        var enrichmentB = CreateEnrichment(
+            "b",
+            RegulatoryEvidenceEnrichmentStatuses.Verified,
+            article: CreateCanonicalArticle(locator, "Texto B.") with { Citation = citationB }) with
+        {
+            Rank = 2,
+            Original = new RegulatoryOriginalEvidence(string.Empty, citationB)
+        };
+        var response = """
+        {
+          "reviewSummary": "La aplicabilidad requiere revisión humana.",
+          "possibleRegulatoryReviewAreas": [
+            {
+              "title": "Posible área de revisión",
+              "description": "La evidencia podría ser relevante.",
+              "severity": "Warning",
+              "relatedFinancialSignals": ["LOW_CURRENT_RATIO"],
+              "evidenceCitations": ["CNV Art. 42"]
+            }
+          ],
+          "evidenceReferences": [
+            {
+              "source": "CNV B",
+              "title": "Resolución B",
+              "url": "https://cnv.example/b",
+              "citation": "CNV Art. 42",
+              "snippet": "Texto B.",
+              "regulationArea": "Liquidity",
+              "score": 0.96
+            }
+          ],
+          "warnings": [],
+          "limitations": []
+        }
+        """;
+
+        foreach (var reverse in new[] { false, true })
+        {
+            var orderedEvidence = reverse
+                ? new[] { evidenceB, evidenceA }
+                : new[] { evidenceA, evidenceB };
+            var orderedEnrichments = reverse
+                ? new[]
+                {
+                    enrichmentB with { Rank = 1 },
+                    enrichmentA with { Rank = 2 }
+                }
+                : new[] { enrichmentA, enrichmentB };
+            var service = CreateService(new FakeChatCompletionService(response));
+
+            var result = await service.ReviewAsync(
+                CreateInput(
+                    cnvEvidence: orderedEvidence,
+                    evidenceEnrichments: orderedEnrichments),
+                CancellationToken.None);
+
+            result.PossibleRegulatoryReviewAreas.Should().BeEmpty();
+            result.EvidenceReferences.Should().BeEmpty();
+            result.Warnings.Should().Contain(
+                "Unknown citations or references returned by the AI review were removed.");
+        }
     }
 
     [Fact]

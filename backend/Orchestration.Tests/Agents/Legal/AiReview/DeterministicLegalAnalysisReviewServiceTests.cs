@@ -304,9 +304,13 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
     [Fact]
     public async Task ReviewAsync_Should_use_canonical_document_when_article_is_absent()
     {
+        var document = CreateCanonicalDocument("CNV Art. 42") with
+        {
+            Citations = [CreateOriginalCitation("CNV Art. 42")]
+        };
         var enrichment = CreateEnrichment(
             RegulatoryEvidenceEnrichmentStatuses.Partial,
-            document: CreateCanonicalDocument("CNV Art. 55"),
+            document: document,
             limitations: ["No se recuperó el artículo canónico."]);
         var input = CreateInput(
             riskSignals: [CreateSignal("LOW_CURRENT_RATIO", "High")],
@@ -317,14 +321,140 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
 
         result.EvidenceReferences.Should().ContainSingle().Which.Should().BeEquivalentTo(
             new LegalEvidenceReference(
-                Source: "CNV canónica",
-                Title: "Artículo canónico",
-                Url: "https://cnv.example/canonical-article",
-                Citation: "CNV Art. 55",
+                Source: "CNV",
+                Title: "General Resolution 923",
+                Url: "http://cnv.gob.ar/923",
+                Citation: "CNV Art. 42",
                 Snippet: "Contexto documental canónico.",
                 RegulationArea: "Liquidity",
                 Score: enrichment.Score));
         result.Limitations.Should().Contain("No se recuperó el artículo canónico.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_correlate_same_locator_to_strong_document_identity_in_any_order()
+    {
+        var evidenceA = CreateEvidence("CNV Art. 42") with
+        {
+            Title = "Resolución A",
+            Url = null,
+            Snippet = null
+        };
+        var evidenceB = CreateEvidence("CNV Art. 42") with
+        {
+            Title = "Resolución B",
+            Url = null,
+            Snippet = null
+        };
+        var enrichment = CreateEnrichment(
+            RegulatoryEvidenceEnrichmentStatuses.Verified,
+            article: CreateCanonicalArticle("CNV Art. 99")) with
+        {
+            Original = new RegulatoryOriginalEvidence(
+                string.Empty,
+                CreateCanonicalCitation("CNV Art. 42") with
+                {
+                    Source = "CNV",
+                    ResolutionNumber = "B/2026",
+                    Title = "Resolución B",
+                    Url = null,
+                    QuotedText = null
+                })
+        };
+
+        foreach (var evidence in new[]
+                 {
+                     new[] { evidenceA, evidenceB },
+                     new[] { evidenceB, evidenceA }
+                 })
+        {
+            var result = await _service.ReviewAsync(
+                CreateInput(
+                    riskSignals: [],
+                    cnvEvidence: evidence,
+                    evidenceEnrichments: [enrichment]),
+                CancellationToken.None);
+
+            result.EvidenceReferences.Should().HaveCount(2);
+            result.EvidenceReferences.Should().ContainEquivalentOf(evidenceA);
+            result.EvidenceReferences.Should().Contain(reference =>
+                reference.Citation == "CNV Art. 99" &&
+                reference.Snippet == "Texto canónico del artículo.");
+        }
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_select_correlated_document_citation_in_any_order()
+    {
+        var article1 = CreateOriginalCitation("CNV Art. 1");
+        var article42 = CreateOriginalCitation("CNV Art. 42");
+
+        foreach (var citations in new[]
+                 {
+                     new[] { article1, article42 },
+                     new[] { article42, article1 }
+                 })
+        {
+            var document = CreateCanonicalDocument("CNV Art. 1") with
+            {
+                Citations = citations
+            };
+            var enrichment = CreateEnrichment(
+                RegulatoryEvidenceEnrichmentStatuses.Partial,
+                document: document);
+
+            var result = await _service.ReviewAsync(
+                CreateInput(
+                    riskSignals: [],
+                    cnvEvidence: [CreateEvidence("CNV Art. 42")],
+                    evidenceEnrichments: [enrichment]),
+                CancellationToken.None);
+
+            result.EvidenceReferences.Should().ContainSingle()
+                .Which.Citation.Should().Be("CNV Art. 42");
+        }
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_keep_original_when_document_has_no_correlated_citation()
+    {
+        var original = CreateEvidence("CNV Art. 42");
+        var document = CreateCanonicalDocument("CNV Art. 1") with
+        {
+            Citations = [CreateOriginalCitation("CNV Art. 1")]
+        };
+        var enrichment = CreateEnrichment(
+            RegulatoryEvidenceEnrichmentStatuses.Partial,
+            document: document);
+
+        var result = await _service.ReviewAsync(
+            CreateInput(
+                riskSignals: [],
+                cnvEvidence: [original],
+                evidenceEnrichments: [enrichment]),
+            CancellationToken.None);
+
+        result.EvidenceReferences.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(original);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_keep_original_when_document_identity_conflicts_at_same_locator()
+    {
+        var original = CreateEvidence("CNV Art. 42");
+        var enrichment = CreateEnrichment(
+            RegulatoryEvidenceEnrichmentStatuses.Partial,
+            document: CreateCanonicalDocument("CNV Art. 42"));
+
+        var result = await _service.ReviewAsync(
+            CreateInput(
+                riskSignals: [],
+                cnvEvidence: [original],
+                evidenceEnrichments: [enrichment]),
+            CancellationToken.None);
+
+        result.EvidenceReferences.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(original);
     }
 
     [Fact]
@@ -503,5 +633,15 @@ public sealed class DeterministicLegalAnalysisReviewServiceTests
             PublicationDate: "2022-03-01",
             Url: "https://cnv.example/canonical-article",
             QuotedText: null);
+    }
+
+    private static RegulatoryEvidenceCitation CreateOriginalCitation(string article)
+    {
+        return CreateCanonicalCitation(article) with
+        {
+            Source = "CNV",
+            Title = "General Resolution 923",
+            Url = "http://cnv.gob.ar/923"
+        };
     }
 }

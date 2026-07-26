@@ -107,7 +107,8 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
         foreach (var original in citedEvidence)
         {
             var replacement = safeEnrichments
-                .Where(enrichment => MatchesOriginalEvidence(original, enrichment.Original))
+                .Where(enrichment =>
+                    RegulatoryEvidenceIdentity.MatchesOriginal(original, enrichment.Original))
                 .Select(enrichment => MapCanonicalReference(original, enrichment))
                 .FirstOrDefault(reference => reference is not null);
 
@@ -119,23 +120,6 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
             .Select(group => group.First())
             .OrderBy(CreateEvidenceSortKey, StringComparer.Ordinal)
             .ToArray();
-    }
-
-    private static bool MatchesOriginalEvidence(
-        LegalEvidenceReference reference,
-        RegulatoryOriginalEvidence original)
-    {
-        var locator = GetCitationLocator(original.Citation);
-        if (string.IsNullOrWhiteSpace(locator) ||
-            !string.Equals(reference.Citation?.Trim(), locator.Trim(), StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return string.Equals(reference.Title, original.Citation.Title, StringComparison.Ordinal) ||
-               string.Equals(reference.Url, original.Citation.Url, StringComparison.Ordinal) ||
-               string.Equals(reference.Snippet, original.Snippet, StringComparison.Ordinal) ||
-               string.Equals(reference.Snippet, original.Citation.QuotedText, StringComparison.Ordinal);
     }
 
     private static LegalEvidenceReference? MapCanonicalReference(
@@ -161,11 +145,21 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
             return null;
         }
 
-        var documentCitation = (enrichment.Document.Citations ??
-                                Array.Empty<RegulatoryEvidenceCitation>())
-            .Where(citation => !string.IsNullOrWhiteSpace(GetCitationLocator(citation)))
+        var originalLocator = GetCitationLocator(enrichment.Original.Citation);
+        var locatorMatches = (enrichment.Document.Citations ??
+                              Array.Empty<RegulatoryEvidenceCitation>())
+            .Where(citation =>
+                !string.IsNullOrWhiteSpace(originalLocator) &&
+                string.Equals(
+                    GetCitationLocator(citation)?.Trim(),
+                    originalLocator.Trim(),
+                    StringComparison.Ordinal))
             .OrderBy(CreateCitationSortKey, StringComparer.Ordinal)
-            .FirstOrDefault();
+            .ToArray();
+        var documentCitation = locatorMatches.FirstOrDefault(citation =>
+                RegulatoryEvidenceIdentity.RepresentsSameCitationDocument(
+                    citation,
+                    enrichment.Original.Citation));
         if (documentCitation is not null)
         {
             return MapCanonicalCitation(
@@ -176,24 +170,7 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
                 enrichment.Score);
         }
 
-        var originalLocator = GetCitationLocator(enrichment.Original.Citation);
-        if (string.IsNullOrWhiteSpace(originalLocator))
-        {
-            return null;
-        }
-
-        return new LegalEvidenceReference(
-            Source: enrichment.Document.Source,
-            Title: enrichment.Document.Title,
-            Url: string.IsNullOrWhiteSpace(enrichment.Document.Url)
-                ? null
-                : enrichment.Document.Url,
-            Citation: originalLocator,
-            Snippet: string.IsNullOrWhiteSpace(enrichment.Document.Text)
-                ? null
-                : enrichment.Document.Text,
-            RegulationArea: original.RegulationArea,
-            Score: enrichment.Score);
+        return null;
     }
 
     private static LegalEvidenceReference MapCanonicalCitation(
@@ -215,7 +192,7 @@ public sealed class DeterministicLegalAnalysisReviewService : ILegalAnalysisRevi
 
     private static string? GetCitationLocator(RegulatoryEvidenceCitation citation)
     {
-        return citation.Article ?? citation.Section ?? citation.Chapter;
+        return RegulatoryEvidenceIdentity.GetCitationLocator(citation);
     }
 
     private static string CreateCitationSortKey(RegulatoryEvidenceCitation citation)

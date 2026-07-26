@@ -246,15 +246,7 @@ Return this JSON shape:
         SemanticKernelLegalAnalysisReviewParsedResponse parsed,
         CancellationToken cancellationToken)
     {
-        var canonicalEvidence = BuildCanonicalEvidenceReferences(input);
-        var allowedEvidenceByCitation = canonicalEvidence
-            .Concat(input.CnvEvidence ?? Array.Empty<LegalEvidenceReference>())
-            .Where(e => !string.IsNullOrWhiteSpace(e.Citation))
-            .GroupBy(e => e.Citation!.Trim(), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => group.First(),
-                StringComparer.OrdinalIgnoreCase);
+        var allowedEvidenceByCitation = BuildUnambiguousEvidenceAllowlist(input);
         var allowedSignalsByName = (input.FinancialRiskSignals ?? Array.Empty<FinancialRiskSignal>())
             .Where(signal => !string.IsNullOrWhiteSpace(signal.Name))
             .GroupBy(signal => signal.Name.Trim(), StringComparer.OrdinalIgnoreCase)
@@ -304,9 +296,20 @@ Return this JSON shape:
 
         var unknownReferencesRemoved = false;
         var sanitizedReferences = (parsed.EvidenceReferences ?? Array.Empty<LegalEvidenceReference>())
-            .Where(e => !string.IsNullOrWhiteSpace(e.Citation) &&
-                        allowedEvidenceByCitation.ContainsKey(e.Citation.Trim()))
-            .Select(e => allowedEvidenceByCitation[e.Citation!.Trim()])
+            .Select(reference =>
+            {
+                if (string.IsNullOrWhiteSpace(reference.Citation) ||
+                    !allowedEvidenceByCitation.TryGetValue(
+                        reference.Citation.Trim(),
+                        out var allowed) ||
+                    !RegulatoryEvidenceIdentity.MatchesAllowedReference(reference, allowed))
+                {
+                    return null;
+                }
+
+                return allowed;
+            })
+            .OfType<LegalEvidenceReference>()
             .DistinctBy(e => e.Citation, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -907,72 +910,77 @@ Return this JSON shape:
     {
         var originals = (input.CnvEvidence ?? Array.Empty<LegalEvidenceReference>())
             .Where(reference => !string.IsNullOrWhiteSpace(reference.Citation))
+            .OrderBy(CreateEvidenceSortKey, StringComparer.Ordinal)
             .ToArray();
         var references = new List<LegalEvidenceReference>();
+        var safeEnrichments = GetSafeEnrichments(input.EvidenceEnrichments);
 
-        foreach (var enrichment in GetSafeEnrichments(input.EvidenceEnrichments))
+        foreach (var original in originals)
         {
-            var original = originals
-                .Where(reference => MatchesOriginalEvidence(reference, enrichment.Original))
-                .OrderBy(CreateEvidenceSortKey, StringComparer.Ordinal)
-                .FirstOrDefault();
-            if (original is null)
+            var countBeforeCanonicalMapping = references.Count;
+            foreach (var enrichment in safeEnrichments.Where(enrichment =>
+                         RegulatoryEvidenceIdentity.MatchesOriginal(
+                             original,
+                             enrichment.Original)))
             {
-                continue;
-            }
+                if (enrichment.Article is not null)
+                {
+                    var articleLocator = GetCitationLocator(enrichment.Article.Citation);
+                    if (!string.IsNullOrWhiteSpace(articleLocator))
+                    {
+                        references.Add(MapCanonicalCitation(
+                            enrichment.Article.Citation,
+                            articleLocator,
+                            enrichment.Article.Text,
+                            original.RegulationArea,
+                            enrichment.Score));
+                    }
+                }
 
-            if (enrichment.Article is not null)
-            {
-                var articleLocator = GetCitationLocator(enrichment.Article.Citation);
-                if (!string.IsNullOrWhiteSpace(articleLocator))
+                if (enrichment.Document is null)
+                {
+                    continue;
+                }
+
+                var documentCitations = (enrichment.Document.Citations ??
+                                         Array.Empty<RegulatoryEvidenceCitation>())
+                    .Where(citation => !string.IsNullOrWhiteSpace(GetCitationLocator(citation)))
+                    .OrderBy(CreateCitationSortKey, StringComparer.Ordinal)
+                    .ToArray();
+                foreach (var citation in documentCitations)
                 {
                     references.Add(MapCanonicalCitation(
-                        enrichment.Article.Citation,
-                        articleLocator,
-                        enrichment.Article.Text,
+                        citation,
+                        GetCitationLocator(citation)!,
+                        enrichment.Document.Text,
                         original.RegulationArea,
                         enrichment.Score));
                 }
-            }
 
-            if (enrichment.Document is null)
-            {
-                continue;
-            }
-
-            var documentCitations = (enrichment.Document.Citations ??
-                                     Array.Empty<RegulatoryEvidenceCitation>())
-                .Where(citation => !string.IsNullOrWhiteSpace(GetCitationLocator(citation)))
-                .OrderBy(CreateCitationSortKey, StringComparer.Ordinal)
-                .ToArray();
-            foreach (var citation in documentCitations)
-            {
-                references.Add(MapCanonicalCitation(
-                    citation,
-                    GetCitationLocator(citation)!,
-                    enrichment.Document.Text,
-                    original.RegulationArea,
-                    enrichment.Score));
-            }
-
-            if (documentCitations.Length == 0)
-            {
-                var originalLocator = GetCitationLocator(enrichment.Original.Citation);
-                if (!string.IsNullOrWhiteSpace(originalLocator))
+                if (documentCitations.Length == 0)
                 {
-                    references.Add(new LegalEvidenceReference(
-                        Source: enrichment.Document.Source,
-                        Title: enrichment.Document.Title,
-                        Url: string.IsNullOrWhiteSpace(enrichment.Document.Url)
-                            ? null
-                            : enrichment.Document.Url,
-                        Citation: originalLocator,
-                        Snippet: string.IsNullOrWhiteSpace(enrichment.Document.Text)
-                            ? null
-                            : enrichment.Document.Text,
-                        RegulationArea: original.RegulationArea,
-                        Score: enrichment.Score));
+                    var originalLocator = GetCitationLocator(enrichment.Original.Citation);
+                    if (!string.IsNullOrWhiteSpace(originalLocator))
+                    {
+                        references.Add(new LegalEvidenceReference(
+                            Source: enrichment.Document.Source,
+                            Title: enrichment.Document.Title,
+                            Url: string.IsNullOrWhiteSpace(enrichment.Document.Url)
+                                ? null
+                                : enrichment.Document.Url,
+                            Citation: originalLocator,
+                            Snippet: string.IsNullOrWhiteSpace(enrichment.Document.Text)
+                                ? null
+                                : enrichment.Document.Text,
+                            RegulationArea: original.RegulationArea,
+                            Score: enrichment.Score));
+                    }
                 }
+            }
+
+            if (references.Count == countBeforeCanonicalMapping)
+            {
+                references.Add(original);
             }
         }
 
@@ -990,21 +998,35 @@ Return this JSON shape:
         return uniqueReferences;
     }
 
-    private static bool MatchesOriginalEvidence(
-        LegalEvidenceReference reference,
-        RegulatoryOriginalEvidence original)
+    private static IReadOnlyDictionary<string, LegalEvidenceReference>
+        BuildUnambiguousEvidenceAllowlist(LegalAnalysisReviewInput input)
     {
-        var locator = GetCitationLocator(original.Citation);
-        if (string.IsNullOrWhiteSpace(locator) ||
-            !string.Equals(reference.Citation?.Trim(), locator.Trim(), StringComparison.Ordinal))
+        var allowlist = new Dictionary<string, LegalEvidenceReference>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in BuildCanonicalEvidenceReferences(input)
+                     .Where(reference => !string.IsNullOrWhiteSpace(reference.Citation))
+                     .GroupBy(
+                         reference => reference.Citation!.Trim(),
+                         StringComparer.OrdinalIgnoreCase))
         {
-            return false;
+            var candidates = group
+                .GroupBy(CreateEvidenceSortKey, StringComparer.Ordinal)
+                .Select(candidateGroup => candidateGroup.First())
+                .ToArray();
+            if (candidates.Length == 0 ||
+                candidates.Skip(1).Any(candidate =>
+                    !RegulatoryEvidenceIdentity.RepresentsSameDocument(
+                        candidates[0],
+                        candidate)))
+            {
+                continue;
+            }
+
+            allowlist.Add(group.Key, candidates[0]);
         }
 
-        return string.Equals(reference.Title, original.Citation.Title, StringComparison.Ordinal) ||
-               string.Equals(reference.Url, original.Citation.Url, StringComparison.Ordinal) ||
-               string.Equals(reference.Snippet, original.Snippet, StringComparison.Ordinal) ||
-               string.Equals(reference.Snippet, original.Citation.QuotedText, StringComparison.Ordinal);
+        return allowlist;
     }
 
     private static LegalEvidenceReference MapCanonicalCitation(
@@ -1026,7 +1048,7 @@ Return this JSON shape:
 
     private static string? GetCitationLocator(RegulatoryEvidenceCitation citation)
     {
-        return citation.Article ?? citation.Section ?? citation.Chapter;
+        return RegulatoryEvidenceIdentity.GetCitationLocator(citation);
     }
 
     private static string CreateCitationSortKey(RegulatoryEvidenceCitation citation)
