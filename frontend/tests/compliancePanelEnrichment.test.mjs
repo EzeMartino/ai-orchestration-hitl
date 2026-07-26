@@ -41,8 +41,9 @@ test("renders regulatory context verification as a separate accessible section",
   );
   assert.match(
     componentSource,
-    /\(compliance\.evidenceEnrichments\?\.length \?\? 0\) > 0/,
+    /normalizeRegulatoryEvidenceEnrichments\(compliance\.evidenceEnrichments\)/,
   );
+  assert.match(componentSource, /evidenceEnrichments\.length > 0/);
 });
 
 test("keeps original and canonical evidence distinct and canonical text collapsed", () => {
@@ -52,7 +53,7 @@ test("keeps original and canonical evidence distinct and canonical text collapse
   assert.match(componentSource, /<details>/);
   assert.match(
     componentSource,
-    /<summary>Mostrar contexto canónico verificado<\/summary>/,
+    /<summary>\{formatRegulatoryEnrichmentSummary\(item\.status\)\}<\/summary>/,
   );
   assert.match(componentSource, /Documento canónico:/);
   assert.match(componentSource, /Artículo canónico:/);
@@ -69,12 +70,17 @@ test("keeps original and canonical evidence distinct and canonical text collapse
 });
 
 test("uses stable list keys, safe links, and React text rendering", () => {
-  assert.match(componentSource, /<article key=\{item\.enrichmentId\}>/);
+  assert.match(
+    componentSource,
+    /<article\s+key=\{item\.enrichmentId\}\s+style=\{longRegulatoryContentStyle\}\s*>/,
+  );
   assert.match(
     componentSource,
     /key=\{`\$\{item\.enrichmentId\}-limitation-\$\{index\}`\}/,
   );
   assert.match(componentSource, /rel="noopener noreferrer"/);
   assert.match(componentSource, /getSafeRegulatoryEvidenceUrl/);
+  assert.match(componentSource, /overflowWrap: "anywhere"/);
+  assert.match(componentSource, /whiteSpace: "pre-wrap"/);
   assert.doesNotMatch(componentSource, /dangerouslySetInnerHTML/);
 });

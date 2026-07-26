@@ -5,12 +5,19 @@ import {
 } from "../utils/legalEvidenceAssessment";
 import {
   formatRegulatoryEnrichmentStatus,
+  formatRegulatoryEnrichmentSummary,
   getSafeRegulatoryEvidenceUrl,
+  normalizeRegulatoryEvidenceEnrichments,
 } from "../utils/regulatoryEvidenceEnrichment";
 
 interface CompliancePanelProps {
   compliance?: ComplianceContext;
 }
+
+const longRegulatoryContentStyle = {
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+} as const;
 
 export function CompliancePanel({ compliance }: CompliancePanelProps) {
   if (!compliance) {
@@ -24,7 +31,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
 
   const legalReview = compliance.legalReview;
   const evidenceAssessment = compliance.evidenceAssessment;
-  const evidenceEnrichments = compliance.evidenceEnrichments ?? [];
+  const evidenceEnrichments = normalizeRegulatoryEvidenceEnrichments(compliance.evidenceEnrichments);
 
   return (
     <section className="compliancePanel">
@@ -105,7 +112,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
         </section>
       )}
 
-      {(compliance.evidenceEnrichments?.length ?? 0) > 0 && (
+      {evidenceEnrichments.length > 0 && (
         <section aria-labelledby="regulatory-context-verification-title">
           <h3 id="regulatory-context-verification-title">
             Verificación de contexto regulatorio
@@ -126,7 +133,10 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
             );
 
             return (
-              <article key={item.enrichmentId}>
+              <article
+                key={item.enrichmentId}
+                style={longRegulatoryContentStyle}
+              >
                 <h4>
                   Resultado {item.rank}:{" "}
                   {formatRegulatoryEnrichmentStatus(item.status)}
@@ -203,7 +213,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
 
                 {(item.document || item.article) && (
                   <details>
-                    <summary>Mostrar contexto canónico verificado</summary>
+                    <summary>{formatRegulatoryEnrichmentSummary(item.status)}</summary>
 
                     {item.document && (
                       <section>
