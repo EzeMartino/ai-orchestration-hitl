@@ -13,7 +13,8 @@ public sealed record LegalCompliancePluginResult(
     object? QueryStrategy = null,
     LegalAnalysisReviewResult? LegalReview = null,
     bool RequiresHumanReview = false,
-    RegulatoryEvidenceAssessment? EvidenceAssessment = null
+    RegulatoryEvidenceAssessment? EvidenceAssessment = null,
+    IReadOnlyList<RegulatoryEvidenceEnrichment>? EvidenceEnrichments = null
 );
 
 public sealed record LegalComplianceEvidenceResult(

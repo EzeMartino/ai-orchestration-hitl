@@ -363,6 +363,207 @@ public class ToolExecutionResultMapperTests
         result.Should().NotBeNull();
         result!.QueryStrategy.Should().BeNull();
         result.LegalReview.Should().BeNull();
+        result.EvidenceEnrichments.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_snapshot_valid_enrichment_and_audit_as_immutable()
+    {
+        var enrichment = CreateEnrichment(
+            "enrichment-valid",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Verified,
+            limitations: ["segunda", "primera"]);
+        var aggregate = CreateEnrichedLegalResult(enrichment);
+
+        var result = MapLegalResults(aggregate);
+
+        result.Should().NotBeNull();
+        result!.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(enrichment);
+        result.EvidenceEnrichments.Should()
+            .BeAssignableTo<IList<RegulatoryEvidenceEnrichment>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.EvidenceEnrichments![0].Limitations.Should()
+            .BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.EvidenceEnrichments[0].Document!.Metadata.Should()
+            .BeAssignableTo<IDictionary<string, string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        result.EvidenceEnrichments[0].Document!.Citations.Should()
+            .BeAssignableTo<IList<RegulatoryEvidenceCitation>>()
+            .Which.IsReadOnly.Should().BeTrue();
+
+        var strategy = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        strategy.Enrichments.Should().ContainSingle()
+            .Which.EnrichmentId.Should().Be("enrichment-valid");
+        strategy.Enrichments.Should()
+            .BeAssignableTo<IList<LegalCnvEnrichmentAudit>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        strategy.Enrichments![0].ContributingQueryIndices.Should()
+            .BeAssignableTo<IList<int>>()
+            .Which.IsReadOnly.Should().BeTrue();
+        strategy.Enrichments[0].LimitationCodes.Should()
+            .BeAssignableTo<IList<string>>()
+            .Which.IsReadOnly.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidEvidenceEnrichmentJsonCases))]
+    public void TryMapLegalResult_Should_reject_malformed_enrichment_or_audit(
+        string caseName,
+        string outputJson)
+    {
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", outputJson)]);
+
+        result.Should().BeNull(caseName);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_merge_distinct_enrichments_order_independently()
+    {
+        var rankedSecond = CreateEnrichedLegalResult(
+            CreateEnrichment(
+                "enrichment-z",
+                rank: 2,
+                RegulatoryEvidenceEnrichmentStatuses.Partial,
+                includeArticle: false),
+            "second");
+        var rankedFirst = CreateEnrichedLegalResult(
+            CreateEnrichment(
+                "enrichment-a",
+                rank: 1,
+                RegulatoryEvidenceEnrichmentStatuses.Verified),
+            "first");
+
+        var forward = MapLegalResults(rankedSecond, rankedFirst);
+        var reverse = MapLegalResults(rankedFirst, rankedSecond);
+
+        forward.Should().NotBeNull();
+        reverse.Should().NotBeNull();
+        forward!.EvidenceEnrichments.Should().BeEquivalentTo(
+            reverse!.EvidenceEnrichments,
+            options => options.WithStrictOrdering());
+        forward.EvidenceEnrichments!.Select(item => item.EnrichmentId)
+            .Should().Equal("enrichment-a", "enrichment-z");
+
+        var forwardAudit = forward.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        var reverseAudit = reverse.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        forwardAudit.Enrichments.Should().BeEquivalentTo(
+            reverseAudit.Enrichments,
+            options => options.WithStrictOrdering());
+        forwardAudit.Enrichments!.Select(item => item.EnrichmentId)
+            .Should().Equal("enrichment-a", "enrichment-z");
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_merge_richer_duplicate_and_union_limitations()
+    {
+        var partial = CreateEnrichment(
+            "enrichment-duplicate",
+            rank: 2,
+            RegulatoryEvidenceEnrichmentStatuses.Partial,
+            includeDocument: true,
+            includeArticle: false,
+            limitations: ["zeta", "compartida"]);
+        var verified = CreateEnrichment(
+            "enrichment-duplicate",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Verified,
+            includeDocument: true,
+            includeArticle: true,
+            limitations: ["alfa", "compartida"]);
+
+        var result = MapLegalResults(
+            CreateEnrichedLegalResult(partial, "partial"),
+            CreateEnrichedLegalResult(verified, "verified"));
+
+        var merged = result!.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        merged.Rank.Should().Be(1);
+        merged.Document.Should().NotBeNull();
+        merged.Article.Should().NotBeNull();
+        merged.Limitations.Should().Equal("alfa", "compartida", "zeta");
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Enrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(
+                RegulatoryEvidenceEnrichmentStatuses.Verified);
+        MapLegalResults(result).Should().NotBeNull(
+            "the merged snapshot must remain valid mapper input");
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_not_hide_explicit_duplicate_conflict()
+    {
+        var verified = CreateEnrichment(
+            "enrichment-conflict",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Verified);
+        var conflict = verified with
+        {
+            Status = RegulatoryEvidenceEnrichmentStatuses.Conflict,
+            Limitations = ["Conflicto explícito."]
+        };
+
+        var result = MapLegalResults(
+            CreateEnrichedLegalResult(verified, "verified"),
+            CreateEnrichedLegalResult(conflict, "conflict"));
+
+        result!.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(
+                RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Enrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(
+                RegulatoryEvidenceEnrichmentStatuses.Conflict);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_fail_closed_to_conflict_on_stable_identity_mismatch()
+    {
+        var first = CreateEnrichment(
+            "enrichment-identity",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Verified);
+        var mismatched = first with
+        {
+            DocumentId = "different-document",
+            Document = first.Document! with { Id = "different-document" }
+        };
+
+        var firstPayload = CreateEnrichedLegalResult(first, "first") with
+        {
+            HasComplianceRisk = false,
+            RiskLevel = "NotEstablished",
+            RequiresHumanReview = false,
+            EvidenceAssessment = null
+        };
+        var mismatchedPayload =
+            CreateEnrichedLegalResult(mismatched, "mismatched") with
+            {
+                HasComplianceRisk = false,
+                RiskLevel = "NotEstablished",
+                RequiresHumanReview = false,
+                EvidenceAssessment = null
+            };
+
+        var result = MapLegalResults(firstPayload, mismatchedPayload);
+
+        var merged = result!.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        merged.Document.Should().NotBeNull();
+        merged.Article.Should().NotBeNull();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.RequiresHumanReview.Should().BeTrue();
+        MapLegalResults(result).Should().NotBeNull(
+            "the synthesized conflict audit must remain internally consistent");
     }
 
     [Theory]
@@ -424,6 +625,28 @@ public class ToolExecutionResultMapperTests
             [CreateExecutionResult(
                 "legal.search_cnv_regulation",
                 root.ToJsonString(JsonOptions))]);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_reject_duplicate_case_insensitive_enrichment_properties()
+    {
+        var json = JsonSerializer.Serialize(
+            CreateEnrichedLegalResult(
+                CreateEnrichment(
+                    "enrichment-duplicate-property",
+                    rank: 1,
+                    RegulatoryEvidenceEnrichmentStatuses.Verified)),
+            JsonOptions);
+        var ambiguous = json.Replace(
+            "\"enrichmentId\":\"enrichment-duplicate-property\"",
+            "\"enrichmentId\":\"enrichment-duplicate-property\"," +
+            "\"EnrichmentId\":\"tampered\"",
+            StringComparison.Ordinal);
+
+        var result = new ToolExecutionResultMapper().TryMapLegalResult(
+            [CreateExecutionResult("legal.search_cnv_regulation", ambiguous)]);
 
         result.Should().BeNull();
     }
@@ -942,6 +1165,136 @@ public class ToolExecutionResultMapperTests
             root["legalReview"]!["evidenceReferences"] = JsonNode.Parse("[null]"));
     }
 
+    public static IEnumerable<object[]> InvalidEvidenceEnrichmentJsonCases()
+    {
+        yield return InvalidEnrichmentCase("null enrichment item", root =>
+            root["evidenceEnrichments"] = JsonNode.Parse("[null]"));
+        yield return InvalidEnrichmentCase("blank enrichment ID", root =>
+            root["evidenceEnrichments"]![0]!["enrichmentId"] = " ");
+        yield return InvalidEnrichmentCase("rank below contract", root =>
+            root["evidenceEnrichments"]![0]!["rank"] = 0);
+        yield return InvalidEnrichmentCase("rank above contract", root =>
+            root["evidenceEnrichments"]![0]!["rank"] = 3);
+        yield return InvalidEnrichmentCase("score below eligibility boundary", root =>
+            root["evidenceEnrichments"]![0]!["score"] = 0.39);
+        yield return InvalidEnrichmentCase("unknown enrichment status", root =>
+            root["evidenceEnrichments"]![0]!["status"] = "Trusted");
+        yield return InvalidEnrichmentCase("null original snapshot", root =>
+            root["evidenceEnrichments"]![0]!["original"] = null);
+        yield return InvalidEnrichmentCase("null original snippet", root =>
+            root["evidenceEnrichments"]![0]!["original"]!["snippet"] = null);
+        yield return InvalidEnrichmentCase("null original citation", root =>
+            root["evidenceEnrichments"]![0]!["original"]!["citation"] = null);
+        yield return InvalidEnrichmentCase("blank original citation source", root =>
+            root["evidenceEnrichments"]![0]!["original"]!["citation"]!["source"] = " ");
+        yield return InvalidEnrichmentCase("blank original citation title", root =>
+            root["evidenceEnrichments"]![0]!["original"]!["citation"]!["title"] = " ");
+        yield return InvalidEnrichmentCase("null limitations", root =>
+            root["evidenceEnrichments"]![0]!["limitations"] = null);
+        yield return InvalidEnrichmentCase("null limitation item", root =>
+            root["evidenceEnrichments"]![0]!["limitations"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidEnrichmentCase("document text above contract maximum", root =>
+        {
+            root["evidenceEnrichments"]![0]!["document"]!["text"] =
+                new string('d', 12_001);
+            root["evidenceEnrichments"]![0]!["document"]!["originalTextLength"] =
+                12_001;
+        });
+        yield return InvalidEnrichmentCase("negative document original length", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["originalTextLength"] = -1);
+        yield return InvalidEnrichmentCase("document original shorter than stored", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["originalTextLength"] = 1);
+        yield return InvalidEnrichmentCase("document truncation flag missing", root =>
+        {
+            var document = root["evidenceEnrichments"]![0]!["document"]!;
+            document["originalTextLength"] =
+                document["text"]!.GetValue<string>().Length + 1;
+            document["isTruncated"] = false;
+        });
+        yield return InvalidEnrichmentCase("document truncation flag contradictory", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["isTruncated"] = true);
+        yield return InvalidEnrichmentCase("null document metadata", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["metadata"] = null);
+        yield return InvalidEnrichmentCase("null document citations", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["citations"] = null);
+        yield return InvalidEnrichmentCase("null document citation", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["citations"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidEnrichmentCase("non-conflict document identity mismatch", root =>
+            root["evidenceEnrichments"]![0]!["document"]!["id"] =
+                "different-document");
+        yield return InvalidEnrichmentCase("article text above contract maximum", root =>
+        {
+            root["evidenceEnrichments"]![0]!["article"]!["text"] =
+                new string('a', 6_001);
+            root["evidenceEnrichments"]![0]!["article"]!["originalTextLength"] =
+                6_001;
+        });
+        yield return InvalidEnrichmentCase("negative article original length", root =>
+            root["evidenceEnrichments"]![0]!["article"]!["originalTextLength"] = -1);
+        yield return InvalidEnrichmentCase("article original shorter than stored", root =>
+            root["evidenceEnrichments"]![0]!["article"]!["originalTextLength"] = 1);
+        yield return InvalidEnrichmentCase("article truncation flag missing", root =>
+        {
+            var article = root["evidenceEnrichments"]![0]!["article"]!;
+            article["originalTextLength"] =
+                article["text"]!.GetValue<string>().Length + 1;
+            article["isTruncated"] = false;
+        });
+        yield return InvalidEnrichmentCase("article truncation flag contradictory", root =>
+            root["evidenceEnrichments"]![0]!["article"]!["isTruncated"] = true);
+        yield return InvalidEnrichmentCase("null article citation", root =>
+            root["evidenceEnrichments"]![0]!["article"]!["citation"] = null);
+        yield return InvalidEnrichmentCase("blank canonical article locator", root =>
+            root["evidenceEnrichments"]![0]!["article"]!["citation"]!["article"] =
+                " ");
+        yield return InvalidEnrichmentCase("null audit item", root =>
+            root["queryStrategy"]!["enrichments"] = JsonNode.Parse("[null]"));
+        yield return InvalidEnrichmentCase("blank audit ID", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["enrichmentId"] = " ");
+        yield return InvalidEnrichmentCase("invalid audit rank", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["rank"] = 0);
+        yield return InvalidEnrichmentCase("blank audit candidate key", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["candidateKey"] = " ");
+        yield return InvalidEnrichmentCase("null audit contributing indices", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["contributingQueryIndices"] = null);
+        yield return InvalidEnrichmentCase("invalid audit contributing index", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["contributingQueryIndices"] =
+                JsonNode.Parse("[0]"));
+        yield return InvalidEnrichmentCase("null document stage audit", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["document"] = null);
+        yield return InvalidEnrichmentCase("invalid stage status", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["document"]!["status"] =
+                "Retried");
+        yield return InvalidEnrichmentCase("selected failed stage without retrieval", root =>
+        {
+            root["evidenceEnrichments"]![0]!["article"] = null;
+            root["evidenceEnrichments"]![0]!["status"] =
+                RegulatoryEvidenceEnrichmentStatuses.Partial;
+            var audit = root["queryStrategy"]!["enrichments"]![0]!;
+            audit["status"] = RegulatoryEvidenceEnrichmentStatuses.Partial;
+            audit["article"]!["status"] =
+                LegalCnvEnrichmentStageStatuses.Missing;
+            audit["article"]!["attempted"] = false;
+            audit["article"]!["originalTextLength"] = null;
+        });
+        yield return InvalidEnrichmentCase("negative stage original length", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["document"]![
+                "originalTextLength"] = -1);
+        yield return InvalidEnrichmentCase("stage length differs from snapshot", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["document"]![
+                "originalTextLength"] = 999);
+        yield return InvalidEnrichmentCase("null audit limitation codes", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["limitationCodes"] = null);
+        yield return InvalidEnrichmentCase("null audit limitation code", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["limitationCodes"] =
+                JsonNode.Parse("[null]"));
+        yield return InvalidEnrichmentCase("audit status differs from enrichment", root =>
+            root["queryStrategy"]!["enrichments"]![0]!["status"] =
+                RegulatoryEvidenceEnrichmentStatuses.Conflict);
+    }
+
     public static IEnumerable<object?[]> ValidRawFinancialAnalysisStatusCases()
     {
         yield return ["\"succeeded\"", FinancialAnalysisExecutionStatus.Succeeded];
@@ -968,6 +1321,23 @@ public class ToolExecutionResultMapperTests
     {
         var root = JsonNode.Parse(
             JsonSerializer.Serialize(CreateLegalResult(), JsonOptions))!
+            .AsObject();
+        mutate(root);
+        return [caseName, root.ToJsonString(JsonOptions)];
+    }
+
+    private static object[] InvalidEnrichmentCase(
+        string caseName,
+        Action<JsonObject> mutate)
+    {
+        var root = JsonNode.Parse(
+            JsonSerializer.Serialize(
+                CreateEnrichedLegalResult(
+                    CreateEnrichment(
+                        "enrichment-valid",
+                        rank: 1,
+                        RegulatoryEvidenceEnrichmentStatuses.Verified)),
+                JsonOptions))!
             .AsObject();
         mutate(root);
         return [caseName, root.ToJsonString(JsonOptions)];
@@ -1088,6 +1458,139 @@ public class ToolExecutionResultMapperTests
             RequiresHumanReview = relevant,
             EvidenceAssessment = assessment
         };
+    }
+
+    private static LegalAgentResult CreateEnrichedLegalResult(
+        RegulatoryEvidenceEnrichment enrichment,
+        string id = "enriched")
+    {
+        var result = CreateAssessedLegalResult(
+            relevance: "Strong",
+            quality: "Strong",
+            warning: $"{id} warning.",
+            id: id);
+        var strategy = (LegalQueryStrategyAudit)result.QueryStrategy!;
+        return result with
+        {
+            EvidenceEnrichments = Array.AsReadOnly([enrichment]),
+            QueryStrategy = strategy with
+            {
+                Enrichments = Array.AsReadOnly([CreateEnrichmentAudit(enrichment)])
+            }
+        };
+    }
+
+    private static RegulatoryEvidenceEnrichment CreateEnrichment(
+        string enrichmentId,
+        int rank,
+        string status,
+        bool includeDocument = true,
+        bool includeArticle = true,
+        IReadOnlyList<string>? limitations = null)
+    {
+        const string documentId = "document-stable";
+        var citation = new RegulatoryEvidenceCitation(
+            Source: "CNV",
+            DocumentType: "Normas",
+            ResolutionNumber: "622/2013",
+            Title: "Normas CNV",
+            Chapter: "I",
+            Section: "1",
+            Article: "Artículo 1",
+            PublicationDate: "2013-09-05",
+            Url: "https://example.test/cnv/1",
+            QuotedText: "Texto citado");
+        const string documentText = "Contexto canónico del documento.";
+        const string articleText = "Contexto canónico del artículo.";
+        return new RegulatoryEvidenceEnrichment(
+            EnrichmentId: enrichmentId,
+            DocumentId: documentId,
+            ChunkId: "chunk-stable",
+            Rank: rank,
+            Score: 0.9,
+            Original: new RegulatoryOriginalEvidence(
+                "Fragmento original.",
+                citation),
+            Document: includeDocument
+                ? new RegulatoryCanonicalDocument(
+                    Id: documentId,
+                    Source: "CNV",
+                    DocumentType: "Normas",
+                    ResolutionNumber: "622/2013",
+                    Title: "Normas CNV",
+                    PublicationDate: "2013-09-05",
+                    EffectiveDate: "2013-09-05",
+                    Url: "https://example.test/cnv",
+                    Status: "current",
+                    RequiresReview: false,
+                    RetrievedAt: "2026-07-21T12:00:00Z",
+                    Text: documentText,
+                    OriginalTextLength: documentText.Length,
+                    IsTruncated: false,
+                    Metadata: new Dictionary<string, string>
+                    {
+                        ["jurisdiction"] = "AR"
+                    },
+                    Citations: Array.AsReadOnly([citation]))
+                : null,
+            Article: includeArticle
+                ? new RegulatoryCanonicalArticle(
+                    citation,
+                    articleText,
+                    Confidence: 0.95,
+                    OriginalTextLength: articleText.Length,
+                    IsTruncated: false)
+                : null,
+            Status: status,
+            Limitations: Array.AsReadOnly(
+                (limitations ?? ["limitación base"]).ToArray()));
+    }
+
+    private static LegalCnvEnrichmentAudit CreateEnrichmentAudit(
+        RegulatoryEvidenceEnrichment enrichment)
+    {
+        var document = enrichment.Document;
+        var article = enrichment.Article;
+        return new LegalCnvEnrichmentAudit(
+            EnrichmentId: enrichment.EnrichmentId,
+            Rank: enrichment.Rank,
+            CandidateKey: $"candidate-{enrichment.EnrichmentId}",
+            Score: enrichment.Score,
+            ContributingQueryIndices: Array.AsReadOnly([1]),
+            Document: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: true,
+                FromCache: false,
+                Status: enrichment.Status ==
+                        RegulatoryEvidenceEnrichmentStatuses.Conflict &&
+                    document is not null
+                        ? LegalCnvEnrichmentStageStatuses.Conflict
+                        : document is null
+                            ? LegalCnvEnrichmentStageStatuses.Missing
+                            : LegalCnvEnrichmentStageStatuses.Succeeded,
+                OriginalTextLength: document?.OriginalTextLength,
+                IsTruncated: document?.IsTruncated ?? false),
+            Article: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: true,
+                FromCache: false,
+                Status: article is null
+                    ? LegalCnvEnrichmentStageStatuses.Missing
+                    : LegalCnvEnrichmentStageStatuses.Succeeded,
+                OriginalTextLength: article?.OriginalTextLength,
+                IsTruncated: article?.IsTruncated ?? false),
+            Status: enrichment.Status,
+            LimitationCodes: Array.AsReadOnly(["test_limitation"]));
+    }
+
+    private static LegalAgentResult? MapLegalResults(
+        params LegalAgentResult[] results)
+    {
+        return new ToolExecutionResultMapper().TryMapLegalResult(results
+            .Select(result => CreateExecutionResult(
+                "legal.search_cnv_regulation",
+                JsonSerializer.Serialize(result, JsonOptions)))
+            .ToArray());
     }
 
     private static ToolExecutionResult CreateExecutionResult(
