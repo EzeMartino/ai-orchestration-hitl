@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
+using static Orchestration.Application.Agents.Legal.Regulations.RegulatoryEvidenceIdentityNormalizer;
 
 namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
 
@@ -1053,79 +1054,6 @@ public sealed class CnvRegulatoryHitEnricher(
             rank,
             tool,
             audit.Status);
-
-    private static string NormalizeText(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var decomposed = value.Normalize(NormalizationForm.FormD);
-        var builder = new StringBuilder(decomposed.Length);
-        var pendingSpace = false;
-        foreach (var character in decomposed)
-        {
-            var category = CharUnicodeInfo.GetUnicodeCategory(character);
-            if (category is UnicodeCategory.NonSpacingMark or
-                UnicodeCategory.SpacingCombiningMark or
-                UnicodeCategory.EnclosingMark)
-            {
-                continue;
-            }
-
-            if (char.IsWhiteSpace(character))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(char.ToUpperInvariant(character));
-        }
-
-        return builder.ToString().Normalize(NormalizationForm.FormC);
-    }
-
-    private static string NormalizeLocator(string? value)
-    {
-        var normalized = NormalizeText(value);
-        if (normalized.Length == 0)
-        {
-            return normalized;
-        }
-
-        var builder = new StringBuilder(normalized.Length);
-        var pendingSpace = false;
-        foreach (var character in normalized)
-        {
-            if (char.IsPunctuation(character))
-            {
-                continue;
-            }
-
-            if (char.IsWhiteSpace(character))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(character);
-        }
-
-        return builder.ToString();
-    }
 
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

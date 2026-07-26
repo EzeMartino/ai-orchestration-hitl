@@ -567,6 +567,161 @@ public class ToolExecutionResultMapperTests
     }
 
     [Theory]
+    [InlineData("Artículo 1 A", "Artículo 1A", true)]
+    [InlineData("Artículo   1 A", "articulo 1 A", false)]
+    [InlineData("Artículo 1-A", "articulo 1A", false)]
+    [InlineData("Artículo 1°", "Articulo 1", true)]
+    [InlineData("ARTÍCULO É", "articulo E\u0301", false)]
+    [InlineData("Artículo A\u20DD", "Articulo A", false)]
+    public void TryMapLegalResult_Should_use_producer_locator_normalization(
+        string firstLocator,
+        string secondLocator,
+        bool shouldConflict)
+    {
+        var first = CreateArticleOnlyEnrichment(
+            "enrichment-normalization",
+            firstLocator);
+        var second = CreateArticleOnlyEnrichment(
+            "enrichment-normalization",
+            secondLocator);
+
+        var forward = MapLegalResults(
+            CreateEnrichedLegalResult(first, "first"),
+            CreateEnrichedLegalResult(second, "second"));
+        var reverse = MapLegalResults(
+            CreateEnrichedLegalResult(second, "second"),
+            CreateEnrichedLegalResult(first, "first"));
+
+        forward.Should().NotBeNull();
+        reverse.Should().NotBeNull();
+        forward!.EvidenceEnrichments.Should().BeEquivalentTo(
+            reverse!.EvidenceEnrichments,
+            options => options.WithStrictOrdering());
+        var merged = forward.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Status.Should().Be(shouldConflict
+            ? RegulatoryEvidenceEnrichmentStatuses.Conflict
+            : RegulatoryEvidenceEnrichmentStatuses.Partial);
+        MapLegalResults(forward).Should().NotBeNull(
+            "the normalized aggregate must remain valid mapper input");
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_preserve_article_snapshot_when_identity_conflicts()
+    {
+        var first = CreateArticleOnlyEnrichment(
+            "enrichment-article-conflict",
+            "Artículo 1 A");
+        var second = CreateArticleOnlyEnrichment(
+            "enrichment-article-conflict",
+            "Artículo 1B");
+
+        var forward = MapLegalResults(
+            CreateEnrichedLegalResult(first, "first"),
+            CreateEnrichedLegalResult(second, "second"));
+        var reverse = MapLegalResults(
+            CreateEnrichedLegalResult(second, "second"),
+            CreateEnrichedLegalResult(first, "first"));
+
+        AssertConflictAggregateIsOrderIndependentAndRemappable(forward, reverse);
+        var merged = forward!.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Document.Should().BeNull();
+        merged.Article.Should().NotBeNull();
+        var audit = ((LegalQueryStrategyAudit)forward.QueryStrategy!)
+            .Enrichments.Should().ContainSingle().Subject;
+        audit.Document.Status.Should().Be(
+            LegalCnvEnrichmentStageStatuses.Missing);
+        audit.Article.Status.Should().Be(
+            LegalCnvEnrichmentStageStatuses.Conflict);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_retain_valid_stages_for_snapshotless_identity_conflict()
+    {
+        var first = CreateUnavailableEnrichment(
+            "enrichment-unavailable-conflict",
+            documentId: "document-a");
+        var second = CreateUnavailableEnrichment(
+            "enrichment-unavailable-conflict",
+            documentId: "document-b");
+
+        var forward = MapLegalResults(
+            CreateEnrichedLegalResult(first, "first"),
+            CreateEnrichedLegalResult(second, "second"));
+        var reverse = MapLegalResults(
+            CreateEnrichedLegalResult(second, "second"),
+            CreateEnrichedLegalResult(first, "first"));
+
+        AssertConflictAggregateIsOrderIndependentAndRemappable(forward, reverse);
+        var merged = forward!.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Document.Should().BeNull();
+        merged.Article.Should().BeNull();
+        merged.Limitations.Should().Contain(limitation =>
+            limitation.Contains("identidad", StringComparison.OrdinalIgnoreCase));
+        var audit = ((LegalQueryStrategyAudit)forward.QueryStrategy!)
+            .Enrichments.Should().ContainSingle().Subject;
+        audit.Document.Status.Should().Be(
+            LegalCnvEnrichmentStageStatuses.Missing);
+        audit.Article.Status.Should().Be(
+            LegalCnvEnrichmentStageStatuses.Missing);
+        audit.LimitationCodes.Should().Contain(
+            "aggregate_identity_conflict");
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_preserve_explicit_conflict_snapshot_over_unavailable_duplicate()
+    {
+        var conflict = CreateEnrichment(
+            "enrichment-explicit-conflict",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Conflict,
+            includeDocument: true,
+            includeArticle: false,
+            limitations: ["Conflicto explícito."]);
+        var unavailable = CreateUnavailableEnrichment(
+            "enrichment-explicit-conflict",
+            documentId: conflict.DocumentId);
+
+        var forward = MapLegalResults(
+            CreateEnrichedLegalResult(conflict, "conflict"),
+            CreateEnrichedLegalResult(unavailable, "unavailable"));
+        var reverse = MapLegalResults(
+            CreateEnrichedLegalResult(unavailable, "unavailable"),
+            CreateEnrichedLegalResult(conflict, "conflict"));
+
+        AssertConflictAggregateIsOrderIndependentAndRemappable(forward, reverse);
+        var merged = forward!.EvidenceEnrichments.Should().ContainSingle().Subject;
+        merged.Document.Should().BeEquivalentTo(conflict.Document);
+        var audit = ((LegalQueryStrategyAudit)forward.QueryStrategy!)
+            .Enrichments.Should().ContainSingle().Subject;
+        audit.Document.Status.Should().Be(
+            LegalCnvEnrichmentStageStatuses.Conflict);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_Should_fail_closed_on_candidate_key_mismatch()
+    {
+        var enrichment = CreateEnrichment(
+            "enrichment-candidate-conflict",
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Verified);
+        var first = WithCandidateKey(
+            CreateEnrichedLegalResult(enrichment, "first"),
+            "candidate-a");
+        var second = WithCandidateKey(
+            CreateEnrichedLegalResult(enrichment, "second"),
+            "candidate-b");
+
+        var forward = MapLegalResults(first, second);
+        var reverse = MapLegalResults(second, first);
+
+        AssertConflictAggregateIsOrderIndependentAndRemappable(forward, reverse);
+        var audit = ((LegalQueryStrategyAudit)forward!.QueryStrategy!)
+            .Enrichments.Should().ContainSingle().Subject;
+        audit.LimitationCodes.Should().Contain(
+            "aggregate_candidate_key_conflict");
+    }
+
+    [Theory]
     [InlineData("\"tampered\"")]
     [InlineData("42")]
     [InlineData("{}")]
@@ -1544,6 +1699,94 @@ public class ToolExecutionResultMapperTests
             Status: status,
             Limitations: Array.AsReadOnly(
                 (limitations ?? ["limitación base"]).ToArray()));
+    }
+
+    private static RegulatoryEvidenceEnrichment CreateArticleOnlyEnrichment(
+        string enrichmentId,
+        string locator)
+    {
+        var enrichment = CreateEnrichment(
+            enrichmentId,
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Partial,
+            includeDocument: false,
+            includeArticle: true);
+        var originalCitation = enrichment.Original.Citation with
+        {
+            Article = locator
+        };
+        var articleCitation = enrichment.Article!.Citation with
+        {
+            Article = locator
+        };
+        return enrichment with
+        {
+            Original = enrichment.Original with
+            {
+                Citation = originalCitation
+            },
+            Article = enrichment.Article with
+            {
+                Citation = articleCitation
+            }
+        };
+    }
+
+    private static RegulatoryEvidenceEnrichment CreateUnavailableEnrichment(
+        string enrichmentId,
+        string documentId)
+    {
+        return CreateEnrichment(
+            enrichmentId,
+            rank: 1,
+            RegulatoryEvidenceEnrichmentStatuses.Unavailable,
+            includeDocument: false,
+            includeArticle: false) with
+        {
+            DocumentId = documentId
+        };
+    }
+
+    private static LegalAgentResult WithCandidateKey(
+        LegalAgentResult result,
+        string candidateKey)
+    {
+        var strategy = (LegalQueryStrategyAudit)result.QueryStrategy!;
+        var audit = strategy.Enrichments!.Single() with
+        {
+            CandidateKey = candidateKey
+        };
+        return result with
+        {
+            QueryStrategy = strategy with
+            {
+                Enrichments = Array.AsReadOnly([audit])
+            }
+        };
+    }
+
+    private static void AssertConflictAggregateIsOrderIndependentAndRemappable(
+        LegalAgentResult? forward,
+        LegalAgentResult? reverse)
+    {
+        forward.Should().NotBeNull();
+        reverse.Should().NotBeNull();
+        forward!.EvidenceEnrichments.Should().BeEquivalentTo(
+            reverse!.EvidenceEnrichments,
+            options => options.WithStrictOrdering());
+        var forwardAudit = (LegalQueryStrategyAudit)forward.QueryStrategy!;
+        var reverseAudit = (LegalQueryStrategyAudit)reverse.QueryStrategy!;
+        forwardAudit.Enrichments.Should().BeEquivalentTo(
+            reverseAudit.Enrichments,
+            options => options.WithStrictOrdering());
+        forward.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(
+                RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        forward.HasComplianceRisk.Should().BeFalse();
+        forward.RiskLevel.Should().Be("NotEstablished");
+        forward.RequiresHumanReview.Should().BeTrue();
+        MapLegalResults(forward).Should().NotBeNull(
+            "a merged conflict must remain valid mapper input");
     }
 
     private static LegalCnvEnrichmentAudit CreateEnrichmentAudit(

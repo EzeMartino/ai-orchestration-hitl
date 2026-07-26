@@ -825,7 +825,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             Queries: Array.AsReadOnly(mergedQueries),
             Enrichments: RegulatoryEvidenceEnrichmentMapper.MergeAudits(
                 strategyContexts,
-                mergedEnrichments));
+                mergedEnrichments,
+                results));
     }
 
     private static bool TrySnapshotEvidenceAssessment(

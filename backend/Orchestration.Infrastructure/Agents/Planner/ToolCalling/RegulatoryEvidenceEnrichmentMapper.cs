@@ -1,9 +1,8 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
+using static Orchestration.Application.Agents.Legal.Regulations.RegulatoryEvidenceIdentityNormalizer;
 
 namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 
@@ -20,6 +19,14 @@ internal static class RegulatoryEvidenceEnrichmentMapper
     private const int MaximumIdentityCharacters = 256;
     private const int MaximumTitleCharacters = 512;
     private const int MaximumUrlCharacters = 2_048;
+    private const string AggregateIdentityConflictCode =
+        "aggregate_identity_conflict";
+    private const string AggregateCandidateKeyConflictCode =
+        "aggregate_candidate_key_conflict";
+    private const string AggregateIdentityConflictLimitation =
+        "Se detectaron identidades regulatorias contradictorias al combinar verificaciones CNV; se requiere revisión humana.";
+    private const string AggregateCandidateKeyConflictLimitation =
+        "Se detectaron claves de candidato contradictorias al combinar verificaciones CNV; se requiere revisión humana.";
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> EnrichmentStatuses = new(
@@ -183,16 +190,31 @@ internal static class RegulatoryEvidenceEnrichmentMapper
                 : Array.Empty<RegulatoryEvidenceEnrichment>();
         }
 
+        var candidateKeyConflicts = results
+            .SelectMany(result =>
+                (result.QueryStrategy as LegalQueryStrategyAudit)?.Enrichments ?? [])
+            .GroupBy(audit => audit.EnrichmentId, StringComparer.Ordinal)
+            .Where(group => group
+                .Select(audit => audit.CandidateKey)
+                .Distinct(StringComparer.Ordinal)
+                .Skip(1)
+                .Any())
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
         return ReadOnly(all
             .GroupBy(item => item.EnrichmentId, StringComparer.Ordinal)
-            .Select(MergeEnrichmentGroup)
+            .Select(group => MergeEnrichmentGroup(
+                group,
+                candidateKeyConflicts.Contains(group.Key)))
             .OrderBy(item => item.Rank)
             .ThenBy(item => item.EnrichmentId, StringComparer.Ordinal));
     }
 
     public static IReadOnlyList<LegalCnvEnrichmentAudit>? MergeAudits(
         IReadOnlyList<(LegalQueryStrategyAudit Strategy, int QueryOffset)> strategies,
-        IReadOnlyList<RegulatoryEvidenceEnrichment>? mergedEnrichments)
+        IReadOnlyList<RegulatoryEvidenceEnrichment>? mergedEnrichments,
+        IReadOnlyList<Orchestration.Application.Agents.Legal.LegalAgentResult> results)
     {
         var all = strategies
             .SelectMany(item => item.Strategy.Enrichments?
@@ -207,9 +229,19 @@ internal static class RegulatoryEvidenceEnrichmentMapper
 
         var mergedById = (mergedEnrichments ?? [])
             .ToDictionary(item => item.EnrichmentId, StringComparer.Ordinal);
+        var sourceById = results
+            .SelectMany(result => result.EvidenceEnrichments ?? [])
+            .GroupBy(item => item.EnrichmentId, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToArray(),
+                StringComparer.Ordinal);
         return ReadOnly(all
             .GroupBy(item => item.Audit.EnrichmentId, StringComparer.Ordinal)
-            .Select(group => MergeAuditGroup(group, mergedById))
+            .Select(group => MergeAuditGroup(
+                group,
+                mergedById,
+                sourceById))
             .OrderBy(item => item.Rank)
             .ThenBy(item => item.EnrichmentId, StringComparer.Ordinal));
     }
@@ -434,11 +466,30 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             !TrySnapshotStage(audit.Document, out var document) ||
             !TrySnapshotStage(audit.Article, out var article) ||
             !EnrichmentStatuses.Contains(audit.Status) ||
-            audit.Status != DetermineStatus(document!, article!) ||
             !TrySnapshotStrings(
                 audit.LimitationCodes,
                 requireNonBlank: true,
                 out var limitationCodes))
+        {
+            return false;
+        }
+
+        var immutableLimitationCodes = limitationCodes!;
+        var determinedStatus = DetermineStatus(document!, article!);
+        var hasAggregateConflictCode = immutableLimitationCodes.Contains(
+                AggregateIdentityConflictCode,
+                StringComparer.Ordinal) ||
+            immutableLimitationCodes.Contains(
+                AggregateCandidateKeyConflictCode,
+                StringComparer.Ordinal);
+        var isSnapshotlessAggregateConflict =
+            audit.Status == RegulatoryEvidenceEnrichmentStatuses.Conflict &&
+            determinedStatus != RegulatoryEvidenceEnrichmentStatuses.Conflict &&
+            hasAggregateConflictCode;
+        if ((audit.Status != determinedStatus &&
+                !isSnapshotlessAggregateConflict) ||
+            (audit.Status != RegulatoryEvidenceEnrichmentStatuses.Conflict &&
+                hasAggregateConflictCode))
         {
             return false;
         }
@@ -452,7 +503,7 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             document!,
             article!,
             audit.Status,
-            limitationCodes!);
+            immutableLimitationCodes);
         return true;
     }
 
@@ -547,7 +598,7 @@ internal static class RegulatoryEvidenceEnrichmentMapper
         }
 
         if (document is not null &&
-            NormalizeIdentity(document.Id) != NormalizeIdentity(documentId))
+            NormalizeText(document.Id) != NormalizeText(documentId))
         {
             return false;
         }
@@ -630,16 +681,10 @@ internal static class RegulatoryEvidenceEnrichmentMapper
         value is null || value.Length <= maximum;
 
     private static RegulatoryEvidenceEnrichment MergeEnrichmentGroup(
-        IGrouping<string, RegulatoryEvidenceEnrichment> group)
+        IGrouping<string, RegulatoryEvidenceEnrichment> group,
+        bool candidateKeyConflict)
     {
         var items = group.ToArray();
-        var ordered = items
-            .OrderByDescending(EnrichmentRichness)
-            .ThenByDescending(item => item.Document?.Text.Length ?? -1)
-            .ThenByDescending(item => item.Article?.Text.Length ?? -1)
-            .ThenBy(Serialize, StringComparer.Ordinal)
-            .ToArray();
-        var representative = ordered[0];
         var identityConflict = items
             .Select(CreateStableIdentity)
             .Distinct(StringComparer.Ordinal)
@@ -648,6 +693,33 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             HasCanonicalIdentityConflict(items);
         var explicitConflict = items.Any(item =>
             item.Status == RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        var representativeCandidates = explicitConflict
+            ? items.Where(item =>
+                item.Status == RegulatoryEvidenceEnrichmentStatuses.Conflict)
+            : items.AsEnumerable();
+        var representative = representativeCandidates
+            .OrderByDescending(item => explicitConflict
+                ? CanonicalSnapshotRichness(item)
+                : EnrichmentRichness(item))
+            .ThenByDescending(CanonicalSnapshotRichness)
+            .ThenByDescending(item =>
+                (item.Document?.Text.Length ?? 0) +
+                (item.Article?.Text.Length ?? 0))
+            .ThenBy(Serialize, StringComparer.Ordinal)
+            .First();
+        var limitations = items
+            .SelectMany(item => item.Limitations)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (identityConflict)
+        {
+            limitations.Add(AggregateIdentityConflictLimitation);
+        }
+
+        if (candidateKeyConflict)
+        {
+            limitations.Add(AggregateCandidateKeyConflictLimitation);
+        }
 
         return new RegulatoryEvidenceEnrichment(
             group.Key,
@@ -658,22 +730,34 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             representative.Original,
             representative.Document,
             representative.Article,
-            identityConflict || explicitConflict
+            identityConflict || candidateKeyConflict || explicitConflict
                 ? RegulatoryEvidenceEnrichmentStatuses.Conflict
                 : representative.Status,
-            ReadOnly(items
-                .SelectMany(item => item.Limitations)
+            ReadOnly(limitations
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(value => value, StringComparer.Ordinal)));
     }
 
     private static LegalCnvEnrichmentAudit MergeAuditGroup(
         IGrouping<string, OffsetAudit> group,
-        IReadOnlyDictionary<string, RegulatoryEvidenceEnrichment> mergedById)
+        IReadOnlyDictionary<string, RegulatoryEvidenceEnrichment> mergedById,
+        IReadOnlyDictionary<string, RegulatoryEvidenceEnrichment[]> sourceById)
     {
         var items = group.ToArray();
         var audits = items.Select(item => item.Audit).ToArray();
         var enrichment = mergedById[group.Key];
+        var sourceEnrichments = sourceById[group.Key];
+        var identityConflict = sourceEnrichments
+            .Select(CreateStableIdentity)
+            .Distinct(StringComparer.Ordinal)
+            .Skip(1)
+            .Any() ||
+            HasCanonicalIdentityConflict(sourceEnrichments);
+        var candidateKeyConflict = audits
+            .Select(audit => audit.CandidateKey)
+            .Distinct(StringComparer.Ordinal)
+            .Skip(1)
+            .Any();
         var representative = audits
             .Where(audit =>
                 AuditMatchesEnrichmentSnapshots(audit, enrichment))
@@ -698,20 +782,33 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             document.Status != LegalCnvEnrichmentStageStatuses.Conflict &&
             article.Status != LegalCnvEnrichmentStageStatuses.Conflict)
         {
-            if (document.Selected)
+            if (enrichment.Document is not null)
             {
                 document = document with
                 {
                     Status = LegalCnvEnrichmentStageStatuses.Conflict
                 };
             }
-            else if (article.Selected)
+            else if (enrichment.Article is not null)
             {
                 article = article with
                 {
                     Status = LegalCnvEnrichmentStageStatuses.Conflict
                 };
             }
+        }
+        var limitationCodes = audits
+            .SelectMany(audit => audit.LimitationCodes)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (identityConflict)
+        {
+            limitationCodes.Add(AggregateIdentityConflictCode);
+        }
+
+        if (candidateKeyConflict)
+        {
+            limitationCodes.Add(AggregateCandidateKeyConflictCode);
         }
 
         return new LegalCnvEnrichmentAudit(
@@ -729,8 +826,7 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             document,
             article,
             enrichment.Status,
-            ReadOnly(audits
-                .SelectMany(audit => audit.LimitationCodes)
+            ReadOnly(limitationCodes
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(value => value, StringComparer.Ordinal)));
     }
@@ -743,6 +839,11 @@ internal static class RegulatoryEvidenceEnrichmentMapper
             RegulatoryEvidenceEnrichmentStatuses.Unavailable => 1,
             _ => 0
         };
+
+    private static int CanonicalSnapshotRichness(
+        RegulatoryEvidenceEnrichment item) =>
+        (item.Document is null ? 0 : 2) +
+        (item.Article is null ? 0 : 1);
 
     private static int StageRichness(LegalCnvEnrichmentStageAudit stage) =>
         stage.Status switch
@@ -839,12 +940,12 @@ internal static class RegulatoryEvidenceEnrichmentMapper
     }
 
     private static bool RequiredIdentityConflict(string? left, string? right) =>
-        NormalizeIdentity(left) != NormalizeIdentity(right);
+        NormalizeText(left) != NormalizeText(right);
 
     private static bool OptionalIdentityConflict(string? left, string? right)
     {
-        var normalizedLeft = NormalizeIdentity(left);
-        var normalizedRight = NormalizeIdentity(right);
+        var normalizedLeft = NormalizeText(left);
+        var normalizedRight = NormalizeText(right);
         return normalizedLeft.Length > 0 &&
             normalizedRight.Length > 0 &&
             normalizedLeft != normalizedRight;
@@ -866,55 +967,12 @@ internal static class RegulatoryEvidenceEnrichmentMapper
         RegulatoryEvidenceEnrichment item) =>
         string.Join(
             "\u001f",
-            NormalizeIdentity(item.DocumentId),
+            NormalizeText(item.DocumentId),
             NormalizeLocator(
                 FirstNonBlank(
                     item.Original.Citation.Article,
                     item.Original.Citation.Section,
                     item.Original.Citation.Chapter)));
-
-    private static string NormalizeIdentity(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder();
-        var pendingSpace = false;
-        foreach (var character in value.Normalize(NormalizationForm.FormD))
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(character) ==
-                UnicodeCategory.NonSpacingMark)
-            {
-                continue;
-            }
-
-            if (char.IsWhiteSpace(character))
-            {
-                pendingSpace = builder.Length > 0;
-                continue;
-            }
-
-            if (pendingSpace)
-            {
-                builder.Append(' ');
-                pendingSpace = false;
-            }
-
-            builder.Append(char.ToLowerInvariant(character));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string NormalizeLocator(string? value)
-    {
-        var normalized = NormalizeIdentity(value);
-        return new string(normalized
-            .Where(character => char.IsLetterOrDigit(character))
-            .ToArray());
-    }
 
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
