@@ -94,11 +94,14 @@ function normalizeEnrichment(
   const articleProvided = value.article !== null && value.article !== undefined;
   const document = normalizeDocument(value.document);
   const article = normalizeArticle(value.article);
+  const requiresCanonicalContext =
+    status === "Verified" || status === "Partial";
 
   if (
-    (status === "Verified" || status === "Partial") &&
-    document === null &&
-    article === null
+    requiresCanonicalContext &&
+    ((documentProvided && document === null) ||
+      (articleProvided && article === null) ||
+      (document === null && article === null))
   ) {
     return null;
   }

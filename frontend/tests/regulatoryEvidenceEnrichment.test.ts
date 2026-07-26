@@ -66,6 +66,15 @@ function createValidEnrichment(
   };
 }
 
+function withoutProperty(
+  value: Record<string, unknown>,
+  property: string,
+): Record<string, unknown> {
+  const copy = { ...value };
+  delete copy[property];
+  return copy;
+}
+
 test("formats known regulatory enrichment statuses in Spanish", () => {
   assert.equal(formatRegulatoryEnrichmentStatus("Verified"), "Verificado");
   assert.equal(formatRegulatoryEnrichmentStatus("Partial"), "Parcial");
@@ -156,43 +165,104 @@ test("preserves complete valid enrichments without mutation and in source order"
   );
 });
 
-test("omits malformed snapshots without reclassifying persisted statuses", () => {
+test("rejects verified items when a present canonical snapshot is malformed", () => {
   const valid = createValidEnrichment();
   const normalized = normalizeRegulatoryEvidenceEnrichments([
     {
       ...valid,
-      document: {
-        ...valid.document,
-        text: 42,
+      article: {
+        ...valid.article,
+        citation: null,
       },
     },
     {
       ...valid,
       enrichmentId: "enrichment-2",
-      article: {
-        ...valid.article,
-        citation: null,
-      },
-    },
-    {
-      ...valid,
-      enrichmentId: "enrichment-3",
       document: {
         ...valid.document,
-        text: null,
-      },
-      article: {
-        ...valid.article,
-        citation: null,
+        text: 42,
       },
     },
   ]);
 
-  assert.equal(normalized.length, 2);
+  assert.deepEqual(normalized, []);
+});
+
+test("keeps verified document-only and article-only items when the other snapshot is null or absent", () => {
+  const valid = createValidEnrichment();
+  const documentOnlyAbsent = {
+    ...withoutProperty(valid, "article"),
+    enrichmentId: "document-only-absent",
+  };
+  const articleOnlyAbsent = {
+    ...withoutProperty(valid, "document"),
+    enrichmentId: "article-only-absent",
+  };
+
+  const normalized = normalizeRegulatoryEvidenceEnrichments([
+    { ...valid, enrichmentId: "document-only-null", article: null },
+    documentOnlyAbsent,
+    { ...valid, enrichmentId: "article-only-null", document: null },
+    articleOnlyAbsent,
+  ]);
+
+  assert.deepEqual(
+    normalized.map((item) => [item.enrichmentId, item.status]),
+    [
+      ["document-only-null", "Verified"],
+      ["document-only-absent", "Verified"],
+      ["article-only-null", "Verified"],
+      ["article-only-absent", "Verified"],
+    ],
+  );
+});
+
+test("rejects partial items with a present malformed snapshot but keeps normal missing stages", () => {
+  const valid = createValidEnrichment();
+  const normalized = normalizeRegulatoryEvidenceEnrichments([
+    {
+      ...valid,
+      enrichmentId: "partial-corrupt",
+      status: "Partial",
+      article: { ...valid.article, citation: null },
+    },
+    {
+      ...valid,
+      enrichmentId: "partial-document-only",
+      status: "Partial",
+      article: null,
+    },
+    {
+      ...withoutProperty(valid, "document"),
+      enrichmentId: "partial-article-only",
+      status: "Partial",
+    },
+  ]);
+
+  assert.deepEqual(
+    normalized.map((item) => [item.enrichmentId, item.status]),
+    [
+      ["partial-document-only", "Partial"],
+      ["partial-article-only", "Partial"],
+    ],
+  );
+});
+
+test("keeps conflict audit evidence while omitting its malformed snapshot", () => {
+  const valid = createValidEnrichment();
+  const normalized = normalizeRegulatoryEvidenceEnrichments([
+    {
+      ...valid,
+      status: "Conflict",
+      document: { ...valid.document, text: null },
+      article: null,
+    },
+  ]);
+
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0]?.status, "Conflict");
   assert.equal(normalized[0]?.document, null);
-  assert.equal(normalized[0]?.status, "Verified");
-  assert.equal(normalized[1]?.article, null);
-  assert.equal(normalized[1]?.status, "Verified");
+  assert.equal(normalized[0]?.article, null);
 });
 
 test("filters contradictory or unverifiable statuses without inventing semantics", () => {
