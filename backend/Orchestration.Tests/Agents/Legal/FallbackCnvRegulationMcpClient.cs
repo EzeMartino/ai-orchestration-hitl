@@ -91,13 +91,19 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
                 Enabled = true,
                 Command = "dotnet",
                 Args = [],
-                DefaultLimit = 5
+                DefaultLimit = 5,
+                MaxEnrichedHits = 0
             }
         );
+        var enricher = new CnvRegulatoryHitEnricher(
+            client,
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CnvRegulatoryHitEnricher>.Instance);
 
         var source = new McpRegulatoryKnowledgeSource(
             client,
             options,
+            enricher,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             new DeterministicLegalAnalysisReviewService()
         );

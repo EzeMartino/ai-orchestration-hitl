@@ -187,6 +187,7 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<CnvRegulationMcpOptions>, CnvRegulationMcpOptionsValidator>();
 builder.Services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+builder.Services.AddScoped<CnvRegulatoryHitEnricher>();
 
 var cnvMcpOptions = builder.Configuration
     .GetSection(CnvRegulationMcpOptions.SectionName)

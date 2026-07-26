@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using FluentAssertions;
 using Xunit;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Data.FinancialAnalysis.AiReview;
 using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Regulations;
 
 namespace Orchestration.Tests.Agents.Legal.AiReview;
 
@@ -16,7 +18,10 @@ public sealed class LegalAnalysisReviewContractsTests
     [Fact]
     public void LegalAnalysisReviewInput_Should_round_trip_as_json()
     {
-        var input = CreateInput();
+        var input = CreateInput() with
+        {
+            EvidenceEnrichments = [CreateEnrichment()]
+        };
 
         var json = JsonSerializer.Serialize(input, JsonOptions);
         var roundTripped = JsonSerializer.Deserialize<LegalAnalysisReviewInput>(
@@ -27,7 +32,42 @@ public sealed class LegalAnalysisReviewContractsTests
         json.Should().Contain("\"metricsInputSource\":\"session_context\"");
         json.Should().Contain("\"metricsProvenance\"");
         json.Should().Contain("\"financialAiReview\"");
+        json.Should().Contain("\"evidenceEnrichments\"");
         roundTripped.Should().BeEquivalentTo(input);
+    }
+
+    [Fact]
+    public void LegalAnalysisReviewInput_Should_deserialize_legacy_json_without_enrichments()
+    {
+        var json = JsonSerializer.Serialize(CreateInput(), JsonOptions);
+        using var document = JsonDocument.Parse(json);
+        var legacyJson = JsonSerializer.Serialize(
+            document.RootElement
+                .EnumerateObject()
+                .Where(property => property.Name != "evidenceEnrichments")
+                .ToDictionary(property => property.Name, property => property.Value),
+            JsonOptions);
+
+        var roundTripped = JsonSerializer.Deserialize<LegalAnalysisReviewInput>(
+            legacyJson,
+            JsonOptions);
+
+        roundTripped.Should().NotBeNull();
+        roundTripped!.EvidenceEnrichments.Should().BeNull();
+    }
+
+    [Fact]
+    public void RegulatoryReviewResult_Legacy_constructor_Should_leave_enrichments_null()
+    {
+        var result = new RegulatoryReviewResult(
+            HasComplianceRisk: false,
+            RiskLevel: "NotEstablished",
+            Summary: "Resumen.",
+            SourceEngine: "MCP CNV Regulation Server",
+            Findings: [],
+            Warnings: []);
+
+        result.EvidenceEnrichments.Should().BeNull();
     }
 
     [Fact]
@@ -256,5 +296,53 @@ public sealed class LegalAnalysisReviewContractsTests
             Model: "gpt-4o",
             FailureReason: null
         );
+    }
+
+    private static RegulatoryEvidenceEnrichment CreateEnrichment()
+    {
+        var citation = new RegulatoryEvidenceCitation(
+            Source: "CNV",
+            DocumentType: "Resolución General",
+            ResolutionNumber: "923/2022",
+            Title: "Resolución General 923/2022",
+            Chapter: "I",
+            Section: "1",
+            Article: "Artículo 42",
+            PublicationDate: "2022-03-01",
+            Url: "https://www.argentina.gob.ar/cnv/rg-923",
+            QuotedText: "Texto original");
+
+        return new RegulatoryEvidenceEnrichment(
+            EnrichmentId: "enrichment-1",
+            DocumentId: "document-1",
+            ChunkId: "chunk-1",
+            Rank: 1,
+            Score: 0.95,
+            Original: new RegulatoryOriginalEvidence("Fragmento original", citation),
+            Document: new RegulatoryCanonicalDocument(
+                Id: "document-1",
+                Source: "CNV",
+                DocumentType: "Resolución General",
+                ResolutionNumber: "923/2022",
+                Title: "Resolución General 923/2022",
+                PublicationDate: "2022-03-01",
+                EffectiveDate: "2022-04-01",
+                Url: "https://www.argentina.gob.ar/cnv/rg-923",
+                Status: "vigente",
+                RequiresReview: true,
+                RetrievedAt: "2026-07-26T00:00:00Z",
+                Text: "Contexto documental canónico.",
+                OriginalTextLength: 29,
+                IsTruncated: false,
+                Metadata: new Dictionary<string, string> { ["jurisdiccion"] = "AR" },
+                Citations: [citation]),
+            Article: new RegulatoryCanonicalArticle(
+                citation,
+                "Texto canónico del artículo.",
+                0.98,
+                28,
+                false),
+            Status: RegulatoryEvidenceEnrichmentStatuses.Verified,
+            Limitations: ["Limitación de prueba."]);
     }
 }

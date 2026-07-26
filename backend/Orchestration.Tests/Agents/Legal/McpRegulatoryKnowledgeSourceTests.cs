@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -206,6 +207,333 @@ public class McpRegulatoryKnowledgeSourceTests
             "La búsqueda MCP no recuperó evidencia regulatoria; esto no establece ausencia de riesgo ni constituye una conclusión legal.");
     }
 
+    [Fact]
+    public async Task ReviewAsync_Should_enrich_top_two_hits_globally_after_all_searches()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        const string canonicalSecret = "SECRETO-CANONICO-SOLO-RESULTADO";
+        var client = new AggregateEnrichmentCnvRegulationMcpClient(
+        [
+            [
+                CreateEnrichmentSearchResult("low-1", 0.70, "Artículo 1"),
+                CreateEnrichmentSearchResult("low-2", 0.60, "Artículo 2")
+            ],
+            [
+                CreateEnrichmentSearchResult("top-1", 0.99, "Artículo 3"),
+                CreateEnrichmentSearchResult("top-2", 0.95, "Artículo 4")
+            ]
+        ])
+        {
+            DocumentHandler = (request, _) => Task.FromResult(
+                CreateCanonicalDocumentResponse(request.DocumentId, canonicalSecret)),
+            ArticleHandler = (request, _) => request.Article == "Artículo 4"
+                ? Task.FromException<CnvRegulationArticleResponse>(new TimeoutException())
+                : Task.FromResult(CreateCanonicalArticleResponse(request.Article))
+        };
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan()),
+            publisher,
+            reviewService,
+            mcpOptions: CreateEnrichmentOptions());
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        client.CallOrder.Take(2).Should().Equal("search:1", "search:2");
+        client.CallOrder.Skip(2).Should().OnlyContain(step =>
+            step.StartsWith("document:", StringComparison.Ordinal) ||
+            step.StartsWith("article:", StringComparison.Ordinal));
+        client.DocumentRequests.Select(request => request.DocumentId)
+            .Should().BeEquivalentTo("top-1", "top-2");
+        client.DocumentRequests.Should().HaveCount(2);
+        client.ArticleRequests.Should().HaveCount(2);
+        result.Findings.Should().HaveCount(4);
+        reviewService.LastInput.Should().NotBeNull();
+        reviewService.LastInput!.CnvEvidence.Should().HaveCount(4);
+        reviewService.LastInput.EvidenceEnrichments.Should().HaveCount(2);
+        reviewService.LastInput.EvidenceEnrichments.Should().OnlyContain(enrichment =>
+            enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Verified ||
+            enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Partial);
+        reviewService.LastInput.EvidenceEnrichments
+            .Single(enrichment =>
+                enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Partial)
+            .Limitations.Should().Contain(
+                "No se pudo verificar el contexto canónico del artículo CNV porque la consulta agotó el tiempo de espera.");
+        result.EvidenceEnrichments.Should().HaveCount(2);
+        result.EvidenceEnrichments!.Select(enrichment => enrichment.Status)
+            .Should().BeEquivalentTo(
+                RegulatoryEvidenceEnrichmentStatuses.Verified,
+                RegulatoryEvidenceEnrichmentStatuses.Partial);
+        result.Warnings.Count(warning =>
+                warning == "No se pudo verificar el contexto canónico del artículo CNV porque la consulta agotó el tiempo de espera.")
+            .Should().Be(1);
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.EvidenceAssessment!.Applicability.Should().Be("NotEstablished");
+        result.EvidenceAssessment.Severity.Should().Be("Warning");
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject;
+        audit.Enrichments.Should().HaveCount(2);
+        audit.Enrichments.Should().BeAssignableTo<System.Collections.IList>()
+            .Which.IsReadOnly.Should().BeTrue();
+        audit.Enrichments!.Single(item =>
+                item.Status == RegulatoryEvidenceEnrichmentStatuses.Partial)
+            .Article.Status.Should().Be(LegalCnvEnrichmentStageStatuses.TimedOut);
+        JsonSerializer.Serialize(audit.Enrichments).Should().NotContain(canonicalSecret);
+        publisher.PublishedEvents.Should().ContainSingle(@event =>
+            @event.Type == "legal_cnv_enrichment_completed" &&
+            @event.Agent == "LegalAgent" &&
+            @event.Message ==
+                "Verificación de contexto CNV: 2 seleccionados, 1 verificados, 1 parciales, 0 con conflicto y 0 no disponibles.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_retain_conflict_for_audit_but_exclude_it_from_review()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        const string canonicalSecret = "SECRETO-CANONICO-CONFLICTO";
+        const string metadataSecret = "SECRETO-METADATA-CONFLICTO";
+        var client = new AggregateEnrichmentCnvRegulationMcpClient(
+        [[CreateEnrichmentSearchResult("conflict-doc", 0.90, "Artículo 8")]])
+        {
+            DocumentHandler = (_, _) => Task.FromResult(
+                CreateCanonicalDocumentResponse(
+                    "otro-documento",
+                    canonicalSecret,
+                    metadataSecret))
+        };
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var publisher = new FakeActivityEventPublisher();
+        var logger = new CapturingLogger();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            publisher,
+            reviewService,
+            logger,
+            CreateEnrichmentOptions());
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        result.Findings.Should().ContainSingle();
+        reviewService.LastInput!.CnvEvidence.Should().ContainSingle();
+        reviewService.LastInput.EvidenceEnrichments.Should().BeEmpty();
+        result.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        result.EvidenceEnrichments![0].Document!.Text.Should().Be(canonicalSecret);
+        result.EvidenceEnrichments[0].Document!.Metadata["secret"]
+            .Should().Be(metadataSecret);
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.RequiresHumanReview.Should().BeTrue();
+        result.EvidenceAssessment!.Applicability.Should().Be("NotEstablished");
+        result.EvidenceAssessment.Severity.Should().Be("Warning");
+
+        var audit = result.QueryStrategy.Should()
+            .BeOfType<LegalQueryStrategyAudit>().Subject
+            .Enrichments.Should().ContainSingle().Subject;
+        audit.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        audit.Document.Status.Should().Be(LegalCnvEnrichmentStageStatuses.Conflict);
+        audit.LimitationCodes.Should().Contain("document_conflict");
+        JsonSerializer.Serialize(audit).Should().NotContain(canonicalSecret);
+        string.Join(" ", logger.Entries.Select(entry => entry.Message)
+                .Concat(publisher.PublishedEvents.Select(@event => @event.Message)))
+            .Should().NotContain(canonicalSecret)
+            .And.NotContain(metadataSecret);
+        publisher.PublishedEvents.Should().ContainSingle(@event =>
+            @event.Type == "legal_cnv_enrichment_completed" &&
+            @event.Message ==
+                "Verificación de contexto CNV: 1 seleccionados, 0 verificados, 0 parciales, 1 con conflicto y 0 no disponibles.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_retain_unavailable_original_and_require_human_review()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new AggregateEnrichmentCnvRegulationMcpClient(
+        [[CreateEnrichmentSearchResult("missing-doc", 0.90, "Artículo 9")]])
+        {
+            DocumentHandler = (_, _) => Task.FromResult(
+                new CnvRegulationDocumentResponse(false, null, [], [])),
+            ArticleHandler = (_, _) => Task.FromResult(
+                new CnvRegulationArticleResponse(false, null, null, 0, []))
+        };
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            reviewService: reviewService,
+            mcpOptions: CreateEnrichmentOptions());
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        result.Findings.Should().ContainSingle();
+        reviewService.LastInput!.CnvEvidence.Should().ContainSingle();
+        reviewService.LastInput.EvidenceEnrichments.Should().BeEmpty();
+        result.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Unavailable);
+        result.RequiresHumanReview.Should().BeTrue();
+        result.HasComplianceRisk.Should().BeFalse();
+        result.RiskLevel.Should().Be("NotEstablished");
+        result.EvidenceAssessment!.Applicability.Should().Be("NotEstablished");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_retain_enrichment_when_ai_review_is_not_run()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var client = new AggregateEnrichmentCnvRegulationMcpClient(
+        [[CreateEnrichmentSearchResult("no-ai-doc", 0.90, "Artículo 11")]]);
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            reviewService: reviewService,
+            mcpOptions: CreateEnrichmentOptions());
+
+        var result = await source.ReviewAsync(
+            new RegulatoryReviewRequest(
+                CreateReport(),
+                new LegalReviewContext(
+                    FinancialAnalysisResolutionMode.ProvidedOnly)),
+            CancellationToken.None);
+
+        reviewService.CallCount.Should().Be(0);
+        result.LegalReview!.FailureReason.Should().Be("financial_analysis_missing");
+        result.EvidenceEnrichments.Should().ContainSingle()
+            .Which.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+    }
+
+    [Fact]
+    public async Task ReviewAsync_CallerCancellationDuringEnrichment_Should_stop_review_and_events()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        using var cts = new CancellationTokenSource();
+        var client = new AggregateEnrichmentCnvRegulationMcpClient(
+        [[CreateEnrichmentSearchResult("cancel-doc", 0.90, "Artículo 10")]])
+        {
+            DocumentHandler = (_, cancellationToken) =>
+            {
+                cts.Cancel();
+                return Task.FromCanceled<CnvRegulationDocumentResponse>(
+                    cancellationToken);
+            }
+        };
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(
+            client,
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            publisher,
+            reviewService,
+            mcpOptions: CreateEnrichmentOptions());
+
+        Func<Task> action = () => source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            cts.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        reviewService.CallCount.Should().Be(0);
+        publisher.PublishedEvents.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReviewAsync_Should_publish_zero_selection_enrichment_event()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var publisher = new FakeActivityEventPublisher();
+        var source = CreateSource(
+            new AggregateEnrichmentCnvRegulationMcpClient([[]]),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            publisher,
+            mcpOptions: CreateEnrichmentOptions());
+
+        await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        publisher.PublishedEvents.Should().ContainSingle(@event =>
+            @event.Type == "legal_cnv_enrichment_completed" &&
+            @event.Message ==
+                "Verificación de contexto CNV: 0 seleccionados, 0 verificados, 0 parciales, 0 con conflicto y 0 no disponibles.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_EnrichmentPublisherFailure_Should_log_and_continue()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var logger = new CapturingLogger();
+        var publisher = new EnrichmentActivityEventPublisher(throwOnEnrichment: true);
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new AggregateEnrichmentCnvRegulationMcpClient([[]]),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            publisher,
+            reviewService,
+            logger,
+            CreateEnrichmentOptions());
+
+        var result = await source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        result.Should().NotBeNull();
+        reviewService.CallCount.Should().Be(1);
+        logger.Entries.Should().Contain(entry =>
+            entry.Level == LogLevel.Warning &&
+            entry.Message ==
+                "Failed to publish activity feed event for CNV enrichment.");
+    }
+
+    [Fact]
+    public async Task ReviewAsync_EnrichmentPublisherCancellation_Should_propagate_before_review()
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var publisher = new EnrichmentActivityEventPublisher(cancelOnEnrichment: true);
+        var reviewService = new TrackingLegalAnalysisReviewService();
+        var source = CreateSource(
+            new AggregateEnrichmentCnvRegulationMcpClient([[]]),
+            dbContext,
+            new StaticLegalCnvQueryStrategy(CreateAuditPlan(queryCount: 1)),
+            publisher,
+            reviewService,
+            mcpOptions: CreateEnrichmentOptions());
+
+        Func<Task> action = () => source.ReviewAsync(
+            CreateReportWithFinancialAnalysis(),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        reviewService.CallCount.Should().Be(0);
+        publisher.PublishedEvents.Should().NotContain(@event =>
+            @event.Type == "legal_agent_ai_review_completed");
+    }
+
     private static McpRegulatoryKnowledgeSource CreateSource(
         ICnvRegulationMcpClient client,
         ILegalAnalysisReviewService? reviewService = null)
@@ -216,13 +544,19 @@ public class McpRegulatoryKnowledgeSourceTests
                 Enabled = true,
                 Command = "dotnet",
                 Args = [],
-                DefaultLimit = 5
+                DefaultLimit = 5,
+                MaxEnrichedHits = 0
             }
         );
+        var enricher = new CnvRegulatoryHitEnricher(
+            client,
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CnvRegulatoryHitEnricher>.Instance);
 
         return new McpRegulatoryKnowledgeSource(
             client,
             options,
+            enricher,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             reviewService ?? new DeterministicLegalAnalysisReviewService()
         );
@@ -601,6 +935,187 @@ public class McpRegulatoryKnowledgeSourceTests
         );
     }
 
+    private static CnvRegulationMcpOptions CreateEnrichmentOptions()
+    {
+        return new CnvRegulationMcpOptions
+        {
+            Enabled = true,
+            Command = "dotnet",
+            Args = [],
+            DefaultLimit = 5,
+            MaxEnrichedHits = 2,
+            MaxDocumentContextCharacters = 1_000,
+            MaxArticleContextCharacters = 1_000
+        };
+    }
+
+    private static CnvRegulationSearchResult CreateEnrichmentSearchResult(
+        string documentId,
+        double score,
+        string article)
+    {
+        var citation = CreateCanonicalCitation(article);
+        return new CnvRegulationSearchResult(
+            DocumentId: documentId,
+            ChunkId: $"chunk-{documentId}",
+            Title: citation.Title,
+            Chapter: citation.Chapter,
+            Section: citation.Section,
+            Article: citation.Article,
+            Source: citation.Source,
+            Url: citation.Url,
+            Snippet: $"Fragmento original {documentId}.",
+            Score: score,
+            Citations: [citation]);
+    }
+
+    private static CnvRegulationDocumentResponse CreateCanonicalDocumentResponse(
+        string documentId,
+        string text = "Contexto documental canónico.",
+        string metadataValue = "AR")
+    {
+        return new CnvRegulationDocumentResponse(
+            Found: true,
+            Document: new CnvRegulationDocument(
+                Id: documentId,
+                Source: "CNV",
+                DocumentType: "Resolución General",
+                ResolutionNumber: "1/2020",
+                Title: "Documento canónico",
+                PublicationDate: "2020-01-01",
+                EffectiveDate: "2020-02-01",
+                Url: "https://cnv.example/document",
+                Status: "vigente",
+                RequiresReview: true,
+                RetrievedAt: "2026-07-26T00:00:00Z",
+                Metadata: new Dictionary<string, string>
+                {
+                    ["jurisdiccion"] = "AR",
+                    ["secret"] = metadataValue
+                },
+                Text: text),
+            Citations: [CreateCanonicalCitation(article: null)],
+            Warnings: []);
+    }
+
+    private static CnvRegulationArticleResponse CreateCanonicalArticleResponse(
+        string article)
+    {
+        return new CnvRegulationArticleResponse(
+            Found: true,
+            Text: "Texto canónico del artículo.",
+            Citation: CreateCanonicalCitation(article),
+            Confidence: 0.98,
+            Warnings: []);
+    }
+
+    private static CnvRegulationCitation CreateCanonicalCitation(string? article)
+    {
+        return new CnvRegulationCitation(
+            Source: "CNV",
+            DocumentType: "Resolución General",
+            ResolutionNumber: "1/2020",
+            Title: "Resolución General 1/2020",
+            Chapter: "I",
+            Section: "1",
+            Article: article,
+            PublicationDate: "2020-01-01",
+            Url: "https://cnv.example/citation",
+            QuotedText: "Texto original citado.");
+    }
+
+    private sealed class AggregateEnrichmentCnvRegulationMcpClient(
+        IReadOnlyList<IReadOnlyList<CnvRegulationSearchResult>> searchResults)
+        : ICnvRegulationMcpClient
+    {
+        private int _searchIndex;
+
+        public Func<
+            CnvRegulationDocumentRequest,
+            CancellationToken,
+            Task<CnvRegulationDocumentResponse>> DocumentHandler { get; init; } =
+                (request, _) => Task.FromResult(
+                    CreateCanonicalDocumentResponse(request.DocumentId));
+
+        public Func<
+            CnvRegulationArticleRequest,
+            CancellationToken,
+            Task<CnvRegulationArticleResponse>> ArticleHandler { get; init; } =
+                (request, _) => Task.FromResult(
+                    CreateCanonicalArticleResponse(request.Article));
+
+        public bool IsConnected => true;
+        public int ColdStartCount => 0;
+        public int ResetCount => 0;
+        public string? LastError => null;
+        public List<string> CallOrder { get; } = [];
+        public List<CnvRegulationDocumentRequest> DocumentRequests { get; } = [];
+        public List<CnvRegulationArticleRequest> ArticleRequests { get; } = [];
+
+        public Task<CnvRegulationSearchResponse> SearchAsync(
+            CnvRegulationSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            var index = _searchIndex++;
+            CallOrder.Add($"search:{index + 1}");
+            var results = index < searchResults.Count
+                ? searchResults[index]
+                : Array.Empty<CnvRegulationSearchResult>();
+            return Task.FromResult(new CnvRegulationSearchResponse(
+                request.Query,
+                results,
+                []));
+        }
+
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken)
+        {
+            DocumentRequests.Add(request);
+            CallOrder.Add($"document:{request.DocumentId}");
+            return DocumentHandler(request, cancellationToken);
+        }
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken)
+        {
+            ArticleRequests.Add(request);
+            CallOrder.Add($"article:{request.Article}");
+            return ArticleHandler(request, cancellationToken);
+        }
+    }
+
+    private sealed class EnrichmentActivityEventPublisher(
+        bool throwOnEnrichment = false,
+        bool cancelOnEnrichment = false) : IActivityEventPublisher
+    {
+        public List<ActivityEvent> PublishedEvents { get; } = [];
+
+        public Task PublishAsync(
+            ActivityEvent @event,
+            CancellationToken cancellationToken = default)
+        {
+            PublishedEvents.Add(@event);
+            if (@event.Type == "legal_cnv_enrichment_completed")
+            {
+                if (cancelOnEnrichment)
+                {
+                    throw new OperationCanceledException(
+                        "Publisher canceled enrichment event.");
+                }
+
+                if (throwOnEnrichment)
+                {
+                    throw new InvalidOperationException(
+                        "Publisher failed enrichment event.");
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     // ==========================================
     // Phase 10 Block 10.4 Integration Tests
     // ==========================================
@@ -611,21 +1126,29 @@ public class McpRegulatoryKnowledgeSourceTests
         ILegalCnvQueryStrategy? queryStrategy = null,
         IActivityEventPublisher? activityPublisher = null,
         ILegalAnalysisReviewService? reviewService = null,
-        ILogger<McpRegulatoryKnowledgeSource>? logger = null)
+        ILogger<McpRegulatoryKnowledgeSource>? logger = null,
+        CnvRegulationMcpOptions? mcpOptions = null)
     {
+        var optionsValue = mcpOptions ?? new CnvRegulationMcpOptions
+        {
+            Enabled = true,
+            Command = "dotnet",
+            Args = [],
+            DefaultLimit = 5,
+            MaxEnrichedHits = 0
+        };
         var options = Options.Create(
-            new CnvRegulationMcpOptions
-            {
-                Enabled = true,
-                Command = "dotnet",
-                Args = [],
-                DefaultLimit = 5
-            }
+            optionsValue
         );
+        var enricher = new CnvRegulatoryHitEnricher(
+            client,
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CnvRegulatoryHitEnricher>.Instance);
 
         return new McpRegulatoryKnowledgeSource(
             client,
             options,
+            enricher,
             logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             reviewService ?? new DeterministicLegalAnalysisReviewService(),
             dbContext,

@@ -739,15 +739,21 @@ public sealed class ProductionLikeWorkflowE2ETests
         {
             dataAgent = new ObservingDataAgent(dataAgent, dataReportObserver);
         }
+        var cnvOptions = Options.Create(new CnvRegulationMcpOptions
+        {
+            Enabled = true,
+            Command = "not-used",
+            Args = [],
+            DefaultLimit = 5,
+            MaxEnrichedHits = 0
+        });
         var legalSource = new McpRegulatoryKnowledgeSource(
             cnvClient,
-            Options.Create(new CnvRegulationMcpOptions
-            {
-                Enabled = true,
-                Command = "not-used",
-                Args = [],
-                DefaultLimit = 5
-            }),
+            cnvOptions,
+            new CnvRegulatoryHitEnricher(
+                cnvClient,
+                cnvOptions,
+                NullLogger<CnvRegulatoryHitEnricher>.Instance),
             NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             new DeterministicLegalAnalysisReviewService(),
             dbContext,

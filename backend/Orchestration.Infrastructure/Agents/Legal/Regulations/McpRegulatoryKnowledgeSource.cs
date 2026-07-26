@@ -23,6 +23,7 @@ namespace Orchestration.Infrastructure.Agents.Legal.Regulations;
 public sealed class McpRegulatoryKnowledgeSource(
     ICnvRegulationMcpClient client,
     IOptions<CnvRegulationMcpOptions> options,
+    CnvRegulatoryHitEnricher hitEnricher,
     ILogger<McpRegulatoryKnowledgeSource> logger,
     ILegalAnalysisReviewService legalAnalysisReviewService,
     IOrchestrationDbContext? dbContext = null,
@@ -31,6 +32,7 @@ public sealed class McpRegulatoryKnowledgeSource(
 {
     private readonly ICnvRegulationMcpClient _client = client;
     private readonly CnvRegulationMcpOptions _options = options.Value;
+    private readonly CnvRegulatoryHitEnricher _hitEnricher = hitEnricher;
     private readonly ILogger<McpRegulatoryKnowledgeSource> _logger = logger;
     private readonly ILegalAnalysisReviewService _legalAnalysisReviewService = legalAnalysisReviewService;
     private readonly IOrchestrationDbContext? _dbContext = dbContext;
@@ -42,6 +44,7 @@ public sealed class McpRegulatoryKnowledgeSource(
         IReadOnlyList<LegalEvidenceReference> EvidenceReferences,
         IReadOnlyList<string> Warnings,
         IReadOnlyList<LegalCnvQueryAudit> QueryAudits,
+        IReadOnlyList<CnvRegulationEnrichmentHit> EnrichmentHits,
         int CompletedQueries,
         int FailedQueries,
         RegulatoryEvidenceAssessment EvidenceAssessment
@@ -102,6 +105,11 @@ public sealed class McpRegulatoryKnowledgeSource(
             derivedQueries,
             cancellationToken
         );
+        var enrichment = await _hitEnricher.EnrichAsync(
+            outcome.EnrichmentHits,
+            cancellationToken);
+        var allEnrichments = Array.AsReadOnly(enrichment.Enrichments.ToArray());
+        var safeEnrichments = GetSafeEnrichments(allEnrichments);
 
         var audit = new LegalQueryStrategyAudit(
             StrategyVersion: queryPlan.StrategyVersion,
@@ -110,7 +118,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             DataToolStatus: queryPlan.DataEvidence.DataToolStatus,
             FinancialAnalysisStatus: queryPlan.DataEvidence.FinancialAnalysisStatus,
             FailedStages: queryPlan.DataEvidence.FailedStages.ToList().AsReadOnly(),
-            Queries: outcome.QueryAudits.ToList().AsReadOnly()
+            Queries: outcome.QueryAudits.ToList().AsReadOnly(),
+            Enrichments: Array.AsReadOnly(enrichment.Audits.ToArray())
         );
 
         await PublishQueryPlanEventAsync(
@@ -118,11 +127,19 @@ public sealed class McpRegulatoryKnowledgeSource(
             usedContextualPlan,
             cancellationToken
         );
+        await PublishEnrichmentEventAsync(
+            report.SessionId,
+            enrichment,
+            cancellationToken);
 
-        var warnings = new List<string>(outcome.Warnings);
+        var warnings = new List<string>();
+        AddOrdinalDistinct(warnings, outcome.Warnings);
+        AddOrdinalDistinct(warnings, enrichment.Warnings);
         if (!usedContextualPlan)
         {
-            warnings.Add("No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera.");
+            AddOrdinalDistinct(
+                warnings,
+                ["No había señales de riesgo financiero específicas disponibles; utilizando una consulta general de información financiera."]);
         }
 
         var findings = outcome.Findings;
@@ -163,7 +180,8 @@ public sealed class McpRegulatoryKnowledgeSource(
                 FinancialWarnings: financialAnalysis.Warnings ?? Array.Empty<string>(),
                 FinancialLimitations: financialAnalysis.Limitations ?? Array.Empty<string>(),
                 CnvEvidence: outcome.EvidenceReferences,
-                EvidenceAssessment: evidenceAssessment
+                EvidenceAssessment: evidenceAssessment,
+                EvidenceEnrichments: safeEnrichments
             );
 
             legalReviewResult = await _legalAnalysisReviewService.ReviewAsync(input, cancellationToken);
@@ -216,16 +234,96 @@ public sealed class McpRegulatoryKnowledgeSource(
             Summary: summary,
             SourceEngine: "MCP CNV Regulation Server",
             Findings: findings,
-            Warnings: warnings.Distinct().ToList(),
+            Warnings: Array.AsReadOnly(warnings.ToArray()),
             QueryStrategy: audit,
             LegalReview: legalReviewResult,
             RequiresHumanReview:
                 evidenceAssessment.RequiresHumanReview ||
                 !usedContextualPlan ||
                 outcome.FailedQueries > 0 ||
-                derivedQueries.Count == 0,
-            EvidenceAssessment: evidenceAssessment
+                derivedQueries.Count == 0 ||
+                allEnrichments.Any(RequiresHumanReview),
+            EvidenceAssessment: evidenceAssessment,
+            EvidenceEnrichments: allEnrichments
         );
+    }
+
+    private async Task PublishEnrichmentEventAsync(
+        Guid sessionId,
+        CnvRegulatoryHitEnrichmentResult enrichment,
+        CancellationToken cancellationToken)
+    {
+        if (_activityPublisher is null)
+        {
+            return;
+        }
+
+        var selected = enrichment.Audits.Count;
+        var verified = enrichment.Enrichments.Count(item =>
+            item.Status == RegulatoryEvidenceEnrichmentStatuses.Verified);
+        var partial = enrichment.Enrichments.Count(item =>
+            item.Status == RegulatoryEvidenceEnrichmentStatuses.Partial);
+        var conflict = enrichment.Enrichments.Count(item =>
+            item.Status == RegulatoryEvidenceEnrichmentStatuses.Conflict);
+        var unavailable = enrichment.Enrichments.Count(item =>
+            item.Status == RegulatoryEvidenceEnrichmentStatuses.Unavailable);
+        var message =
+            $"Verificación de contexto CNV: {selected} seleccionados, {verified} verificados, {partial} parciales, {conflict} con conflicto y {unavailable} no disponibles.";
+
+        try
+        {
+            await _activityPublisher.PublishAsync(
+                new ActivityEvent(
+                    sessionId,
+                    "legal_cnv_enrichment_completed",
+                    "LegalAgent",
+                    message,
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to publish activity feed event for CNV enrichment.");
+        }
+    }
+
+    private static IReadOnlyList<RegulatoryEvidenceEnrichment> GetSafeEnrichments(
+        IReadOnlyList<RegulatoryEvidenceEnrichment> enrichments)
+    {
+        return Array.AsReadOnly(enrichments
+            .Where(enrichment =>
+                (enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Verified ||
+                 enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Partial) &&
+                (enrichment.Document is not null || enrichment.Article is not null))
+            .ToArray());
+    }
+
+    private static bool RequiresHumanReview(
+        RegulatoryEvidenceEnrichment enrichment)
+    {
+        return enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Partial ||
+               enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Conflict ||
+               enrichment.Status == RegulatoryEvidenceEnrichmentStatuses.Unavailable;
+    }
+
+    private static void AddOrdinalDistinct(
+        ICollection<string> target,
+        IEnumerable<string> values)
+    {
+        var seen = new HashSet<string>(target, StringComparer.Ordinal);
+        foreach (var value in values)
+        {
+            if (seen.Add(value))
+            {
+                target.Add(value);
+            }
+        }
     }
 
     private async Task PublishQueryPlanEventAsync(
@@ -372,6 +470,7 @@ public sealed class McpRegulatoryKnowledgeSource(
         var findingKeys = new HashSet<string>(StringComparer.Ordinal);
         var evidenceKeys = new HashSet<string>(StringComparer.Ordinal);
         var allRetrievedResults = new List<CnvRegulationSearchResult>();
+        var allEnrichmentHits = new List<CnvRegulationEnrichmentHit>();
         var warnings = new List<string>();
         var queryAudits = new List<LegalCnvQueryAudit>(queries.Count);
         var completedQueries = 0;
@@ -384,6 +483,8 @@ public sealed class McpRegulatoryKnowledgeSource(
             var queryFindings = new List<RegulatoryFinding>();
             var queryEvidence = new List<LegalEvidenceReference>();
             var queryWarnings = new List<string>();
+            var queryRetrievedResults = new List<CnvRegulationSearchResult>();
+            var queryEnrichmentHits = new List<CnvRegulationEnrichmentHit>();
             var queryFindingKeys = new HashSet<string>(StringComparer.Ordinal);
             var queryEvidenceKeys = new HashSet<string>(StringComparer.Ordinal);
             var queryHasUncitedEvidence = false;
@@ -413,7 +514,10 @@ public sealed class McpRegulatoryKnowledgeSource(
                     foreach (var result in response.Results)
                     {
                         ArgumentNullException.ThrowIfNull(result);
-                        allRetrievedResults.Add(result);
+                        queryRetrievedResults.Add(result);
+                        queryEnrichmentHits.Add(new CnvRegulationEnrichmentHit(
+                            QueryIndex: queryIndex + 1,
+                            Result: result));
                         if (result.Citations == null || result.Citations.Count == 0)
                         {
                             queryHasUncitedEvidence = true;
@@ -493,6 +597,8 @@ public sealed class McpRegulatoryKnowledgeSource(
 
                 warnings.AddRange(queryWarnings);
                 hasUncitedEvidence |= queryHasUncitedEvidence;
+                allRetrievedResults.AddRange(queryRetrievedResults);
+                allEnrichmentHits.AddRange(queryEnrichmentHits);
 
                 completedQueries++;
                 queryAudits.Add(CreateQueryAudit(
@@ -554,6 +660,7 @@ public sealed class McpRegulatoryKnowledgeSource(
             EvidenceReferences: Array.AsReadOnly(allEvidence.ToArray()),
             Warnings: Array.AsReadOnly(warnings.Distinct().ToArray()),
             QueryAudits: Array.AsReadOnly(queryAudits.ToArray()),
+            EnrichmentHits: Array.AsReadOnly(allEnrichmentHits.ToArray()),
             CompletedQueries: completedQueries,
             FailedQueries: failedQueries,
             EvidenceAssessment: evidenceAssessment
