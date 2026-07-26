@@ -103,7 +103,8 @@ public sealed class CnvRegulatoryHitEnricher(
                 cancellationToken).ConfigureAwait(false);
 
             var status = DetermineFinalStatus(document.Audit, article.Audit);
-            var immutableLimitations = ReadOnly(limitations);
+            var immutableLimitations = ReadOnlyOrdinalDistinct(limitations);
+            var immutableLimitationCodes = ReadOnlyOrdinalDistinct(limitationCodes);
             enrichments.Add(new RegulatoryEvidenceEnrichment(
                 EnrichmentId: enrichmentId,
                 DocumentId: candidate.RequestDocumentId,
@@ -127,9 +128,9 @@ public sealed class CnvRegulatoryHitEnricher(
                 Document: document.Audit,
                 Article: article.Audit,
                 Status: status,
-                LimitationCodes: ReadOnly(limitationCodes)));
+                LimitationCodes: immutableLimitationCodes));
 
-            foreach (var limitation in limitations)
+            foreach (var limitation in immutableLimitations)
             {
                 warningSet.Add(limitation);
             }
@@ -764,7 +765,7 @@ public sealed class CnvRegulatoryHitEnricher(
             .ThenBy(candidate => candidate.Identity.Article, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Identity.PublicationDate, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Identity.Url, StringComparer.Ordinal)
-            .ThenBy(candidate => candidate.Identity.QuotedTextFingerprint, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Identity.QuotedText, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.TieBreaker, StringComparer.Ordinal)
             .ToArray();
         var seen = new HashSet<CanonicalCitationIdentity>();
@@ -838,7 +839,8 @@ public sealed class CnvRegulatoryHitEnricher(
             Article: NormalizeLocator(snapshot.Article),
             PublicationDate: NormalizeText(snapshot.PublicationDate),
             Url: NormalizeText(snapshot.Url),
-            QuotedTextFingerprint: CreateIdentityFingerprint(citation.QuotedText).Hash);
+            QuotedText: NormalizeText(snapshot.QuotedText));
+        var rawQuoteFingerprint = CreateIdentityFingerprint(citation.QuotedText).Hash;
         var tieBreaker = CreateDomainSeparatedHash(
             "canonical-citation",
             snapshot.Source,
@@ -850,7 +852,7 @@ public sealed class CnvRegulatoryHitEnricher(
             snapshot.Article,
             snapshot.PublicationDate,
             snapshot.Url,
-            identity.QuotedTextFingerprint);
+            rawQuoteFingerprint);
         return new SanitizedCanonicalCitation(snapshot, identity, tieBreaker, wasAltered);
     }
 
@@ -1176,6 +1178,21 @@ public sealed class CnvRegulatoryHitEnricher(
     private static IReadOnlyList<T> ReadOnly<T>(IEnumerable<T> values) =>
         Array.AsReadOnly(values.ToArray());
 
+    private static IReadOnlyList<string> ReadOnlyOrdinalDistinct(IEnumerable<string> values)
+    {
+        var distinct = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in values)
+        {
+            if (seen.Add(value))
+            {
+                distinct.Add(value);
+            }
+        }
+
+        return ReadOnly(distinct);
+    }
+
     private sealed record Candidate(
         CnvRegulationSearchResult Result,
         CnvRegulationCitation PrimaryCitation,
@@ -1258,7 +1275,7 @@ public sealed class CnvRegulatoryHitEnricher(
         string Article,
         string PublicationDate,
         string Url,
-        string QuotedTextFingerprint);
+        string QuotedText);
 
     private readonly record struct BoundedCanonicalField(string? Value, bool IsTruncated);
 

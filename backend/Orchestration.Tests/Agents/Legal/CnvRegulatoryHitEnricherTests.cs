@@ -711,6 +711,69 @@ public sealed class CnvRegulatoryHitEnricherTests
     }
 
     [Fact]
+    public async Task EnrichAsync_DocumentCitations_DeduplicatesBySanitizedOutputBeforeApplyingCap()
+    {
+        var rawQuoteVariants = Enumerable.Range(0, 24)
+            .Select(index => Citation(
+                title: "Same retained citation",
+                article: "Article 1",
+                quotedText: $"RAW-QUOTE-SECRET-{index:D2}"))
+            .ToArray();
+        var distinct = Citation(
+            title: "Distinct retained citation",
+            article: "Article 2",
+            quotedText: "DISTINCT-QUOTE-SECRET");
+        var hit = Hit(1, article: null, citations: [Citation(chapter: "I", section: null, article: null)]);
+
+        var first = await CreateSut(ClientWithDocumentCitations([.. rawQuoteVariants, distinct]))
+            .EnrichAsync([hit], CancellationToken.None);
+        var second = await CreateSut(ClientWithDocumentCitations([distinct, .. rawQuoteVariants.Reverse()]))
+            .EnrichAsync([hit], CancellationToken.None);
+
+        var citations = first.Enrichments.Should().ContainSingle().Which.Document!.Citations;
+        citations.Select(citation => citation.Title).Should().Equal(
+            "Distinct retained citation",
+            "Same retained citation");
+        citations.Should().OnlyContain(citation => citation.QuotedText == null);
+        JsonSerializer.Serialize(first).Should().NotContain("RAW-QUOTE-SECRET").And.NotContain("DISTINCT-QUOTE-SECRET");
+        JsonSerializer.Serialize(first).Should().Be(JsonSerializer.Serialize(second));
+    }
+
+    [Fact]
+    public async Task EnrichAsync_RepeatedCanonicalFieldTruncation_DeduplicatesFinalLimitationsAndCodes()
+    {
+        const string canonicalFieldLimitation =
+            "Algunos campos del contexto canónico CNV fueron truncados por límites de seguridad.";
+        const string documentCitationLimitation =
+            "Parte de las citas canónicas del documento CNV fue truncada, deduplicada o descartada por límites de seguridad.";
+        var client = new BehaviorCnvRegulationMcpClient
+        {
+            DocumentHandler = (request, _) => Task.FromResult(new CnvRegulationDocumentResponse(
+                true,
+                Document(request.DocumentId) with { Title = new string('D', 513) },
+                [Citation(quotedText: "discarded document quote")],
+                [])),
+            ArticleHandler = (request, _) => Task.FromResult(new CnvRegulationArticleResponse(
+                true,
+                "article text",
+                Citation(title: new string('A', 513), article: request.Article),
+                0.9,
+                []))
+        };
+
+        var result = await CreateSut(client).EnrichAsync([Hit(1)], CancellationToken.None);
+
+        var enrichment = result.Enrichments.Should().ContainSingle().Subject;
+        enrichment.Limitations.Should().ContainSingle(message => message == canonicalFieldLimitation);
+        enrichment.Limitations.Should().ContainSingle(message => message == documentCitationLimitation);
+        var audit = result.Audits.Should().ContainSingle().Subject;
+        audit.LimitationCodes.Should().ContainSingle(code => code == "canonical_field_truncated");
+        audit.LimitationCodes.Should().ContainSingle(code => code == "document_citations_truncated");
+        result.Warnings.Should().ContainSingle(message => message == canonicalFieldLimitation);
+        result.Warnings.Should().ContainSingle(message => message == documentCitationLimitation);
+    }
+
+    [Fact]
     public async Task EnrichAsync_OversizedCanonicalFields_BoundsDocumentAndArticleSnapshots()
     {
         const string documentSecret = "SECRET-DOCUMENT-FIELD-SUFFIX";
