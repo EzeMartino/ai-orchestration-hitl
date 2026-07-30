@@ -210,6 +210,14 @@ builder.Services.AddLegalAgentAiReview(builder.Configuration);
 
 
 // Persistence configuration
+var orchestrationConnectionString = builder.Configuration.GetConnectionString("orchestrationdb");
+if (string.IsNullOrWhiteSpace(orchestrationConnectionString))
+{
+    throw new InvalidOperationException("The orchestration database connection is not configured.");
+}
+
+builder.Configuration["ConnectionStrings:orchestrationdb"] =
+    PostgresConnectionStringNormalizer.Normalize(orchestrationConnectionString);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());

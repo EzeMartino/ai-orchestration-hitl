@@ -26,12 +26,16 @@ public sealed class RegulationDbOptions
         var environmentConnectionString = Environment.GetEnvironmentVariable(
             "CNV_REGULATION_DB_CONNECTION_STRING");
 
+        var resolvedConnectionString = string.IsNullOrWhiteSpace(environmentConnectionString)
+            ? connectionString
+            : environmentConnectionString;
+
         return new RegulationDbOptions
         {
             Provider = string.IsNullOrWhiteSpace(provider) ? "InMemory" : provider.Trim(),
-            ConnectionString = string.IsNullOrWhiteSpace(environmentConnectionString)
-                ? connectionString
-                : environmentConnectionString
+            ConnectionString = string.IsNullOrWhiteSpace(resolvedConnectionString)
+                ? null
+                : PostgresConnectionStringNormalizer.Normalize(resolvedConnectionString)
         };
     }
 
