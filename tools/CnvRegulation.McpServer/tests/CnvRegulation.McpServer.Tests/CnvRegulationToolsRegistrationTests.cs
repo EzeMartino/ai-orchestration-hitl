@@ -71,6 +71,22 @@ public sealed class CnvRegulationToolsRegistrationTests
     }
 
     [Fact]
+    public void CnvRegulationTools_SourceDocumentation_ShouldNotDescribePostgresCapableToolsAsMock()
+    {
+        var sourcePath = FindRepositoryFile(
+            "tools",
+            "CnvRegulation.McpServer",
+            "src",
+            "CnvRegulation.McpServer",
+            "CnvRegulationTools.cs");
+        var source = File.ReadAllText(sourcePath);
+
+        source.ToLowerInvariant().Should().NotContain("mock");
+        source.Split("recuperación documental CNV", StringSplitOptions.None)
+            .Should().HaveCountGreaterThan(5);
+    }
+
+    [Fact]
     public void AddCnvRegulationMcpServices_ShouldRegisterApplicationInterfaces()
     {
         var services = new ServiceCollection();
@@ -146,4 +162,21 @@ public sealed class CnvRegulationToolsRegistrationTests
 
     private static StaticRegulationQueryExpander CreateQueryExpander() =>
         new(new RegulationAliasesOptions());
+
+    private static string FindRepositoryFile(params string[] segments)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            var path = Path.Combine([directory.FullName, .. segments]);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"Could not locate repository file '{Path.Combine(segments)}'.");
+    }
 }

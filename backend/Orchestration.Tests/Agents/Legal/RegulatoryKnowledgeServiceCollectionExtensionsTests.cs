@@ -4,8 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Orchestration.Application.Agents.Legal.AiReview;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
+using Orchestration.Infrastructure.Agents.Legal.AiReview;
 using Orchestration.Infrastructure.Agents.Legal.Regulations;
+using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 namespace Orchestration.Tests.Agents.Legal;
 
@@ -64,6 +68,57 @@ public sealed class RegulatoryKnowledgeServiceCollectionExtensionsTests
             .ContainSingle(registration => registration.Name == "cnv_mcp")
             .Which;
         registration.Tags.Should().ContainSingle().Which.Should().Be("ready");
+    }
+
+    [Fact]
+    public async Task AddRegulatoryKnowledgeSource_Should_resolve_real_scoped_mcp_graph_without_starting_transport()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mcp:CnvRegulation:Enabled"] = "true",
+                ["Mcp:CnvRegulation:Required"] = "true",
+                ["Mcp:CnvRegulation:Args:0"] = "run"
+            })
+            .Build();
+        services.AddLogging();
+        services.AddScoped<
+            ILegalAnalysisReviewService,
+            DeterministicLegalAnalysisReviewService>();
+        services.AddRegulatoryKnowledgeSource(
+            configuration,
+            new TestHostEnvironment(Environments.Production));
+
+        await using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions
+            {
+                ValidateOnBuild = true,
+                ValidateScopes = true
+            });
+        await using var firstScope = provider.CreateAsyncScope();
+        await using var secondScope = provider.CreateAsyncScope();
+
+        var firstSource = firstScope.ServiceProvider
+            .GetRequiredService<IRegulatoryKnowledgeSource>();
+        var sameScopeSource = firstScope.ServiceProvider
+            .GetRequiredService<IRegulatoryKnowledgeSource>();
+        var secondSource = secondScope.ServiceProvider
+            .GetRequiredService<IRegulatoryKnowledgeSource>();
+
+        firstSource.Should().BeOfType<McpRegulatoryKnowledgeSource>();
+        firstSource.Should().BeSameAs(sameScopeSource);
+        firstSource.Should().NotBeSameAs(secondSource);
+        firstScope.ServiceProvider
+            .GetRequiredService<CnvRegulatoryHitEnricher>()
+            .Should().NotBeNull();
+        firstScope.ServiceProvider
+            .GetRequiredService<ILegalCnvQueryStrategy>()
+            .Should().BeOfType<FinancialAnalysisLegalCnvQueryStrategy>();
+        provider.GetRequiredService<ICnvRegulationMcpClient>()
+            .Should().BeOfType<CnvRegulationStdioMcpClient>();
+        provider.GetRequiredService<ICnvRegulationMcpProbe>()
+            .Should().BeOfType<CnvRegulationMcpProbe>();
     }
 
     private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment

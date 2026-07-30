@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Orchestration.Application.Agents.Legal.Cnv;
 using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
@@ -28,6 +29,10 @@ public static class RegulatoryKnowledgeServiceCollectionExtensions
         services.AddSingleton<IValidateOptions<CnvRegulationMcpOptions>, CnvRegulationMcpOptionsValidator>();
         services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
         services.AddSingleton<ICnvRegulationMcpProbe, CnvRegulationMcpProbe>();
+        services.AddScoped<CnvRegulatoryHitEnricher>();
+        services.AddSingleton<
+            ILegalCnvQueryStrategy,
+            FinancialAnalysisLegalCnvQueryStrategy>();
         services.AddHealthChecks().AddCheck<CnvRegulationMcpHealthCheck>("cnv_mcp", tags: ["ready"]);
 
         var options = configuration.GetSection(CnvRegulationMcpOptions.SectionName)

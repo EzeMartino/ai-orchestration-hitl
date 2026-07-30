@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
@@ -182,14 +183,16 @@ public class CnvRegulationStdioMcpClientTests
     public async Task GetDocumentAsync_Should_set_last_error_when_json_is_malformed()
     {
         await using var client = CreateClient((_, _, _) =>
-            Task.FromResult(TextResult("{ malformed")));
+            Task.FromResult(TextResult(
+                "{ malformed password=secret-value https://private.example/body")));
 
         var act = () => client.GetDocumentAsync(
             new CnvRegulationDocumentRequest("doc-1"),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<JsonException>();
-        client.LastError.Should().NotBeNullOrWhiteSpace();
+        client.LastError.Should().Be(
+            "La herramienta MCP devolvió una respuesta no válida.");
     }
 
     [Fact]
@@ -240,11 +243,13 @@ public class CnvRegulationStdioMcpClientTests
     }
 
     [Fact]
-    public async Task GetArticleAsync_Should_extract_tool_error_and_set_last_error()
+    public async Task GetArticleAsync_Should_sanitize_tool_error_body_in_exception_and_last_error()
     {
+        const string sensitiveBody =
+            "query=secret-query password=secret-value https://private.example/body";
         await using var client = CreateClient((_, _, _) => Task.FromResult(new CallToolResult
         {
-            Content = [new TextContentBlock { Text = "article unavailable" }],
+            Content = [new TextContentBlock { Text = sensitiveBody }],
             IsError = true
         }));
 
@@ -253,8 +258,35 @@ public class CnvRegulationStdioMcpClientTests
             CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*article unavailable*");
-        client.LastError.Should().Contain("article unavailable");
+            .WithMessage("La herramienta MCP devolvió un error.");
+        client.LastError.Should().Be("La herramienta MCP devolvió un error.");
+        client.LastError.Should().NotContain(sensitiveBody);
+    }
+
+    [Fact]
+    public async Task SearchAsync_Should_not_log_or_retain_external_transport_failure_details()
+    {
+        const string sensitivePayload =
+            "query=secret-query password=secret-value https://private.example/body";
+        var logger = new CapturingLogger();
+        await using var client = CreateClient(
+            (_, _, _) => Task.FromException<CallToolResult>(
+                new IOException(sensitivePayload)),
+            logger: logger);
+
+        var act = () => client.SearchAsync(
+            new CnvRegulationSearchRequest("secret-query", Limit: 1),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<IOException>();
+        client.LastError.Should().Be("MCP transport or protocol failure.");
+        logger.Entries.Should().NotBeEmpty();
+        logger.Entries.Should().OnlyContain(entry =>
+            entry.Exception == null &&
+            !entry.Message.Contains(sensitivePayload, StringComparison.Ordinal) &&
+            !entry.Message.Contains("secret-query", StringComparison.Ordinal) &&
+            !entry.Message.Contains("secret-value", StringComparison.Ordinal) &&
+            !entry.Message.Contains("private.example", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -366,21 +398,29 @@ public class CnvRegulationStdioMcpClientTests
     [Fact]
     public async Task SearchAsync_Should_track_failures_and_errors_on_invalid_command()
     {
+        const string sensitiveCommand = "non-existent-secret-command";
+        const string sensitiveArgument = "secret-argument";
+        const string sensitiveQuery = "secret-query";
+        var logger = new CapturingLogger();
         var options = Options.Create(new CnvRegulationMcpOptions
         {
             Enabled = true,
-            Command = "non-existent-executable-file-name",
-            Args = ["some-arg"],
+            Command = sensitiveCommand,
+            Args = [sensitiveArgument],
             ConnectionTimeoutSeconds = 1,
             ToolCallTimeoutSeconds = 1
         });
 
         var client = new CnvRegulationStdioMcpClient(
             options,
-            NullLogger<CnvRegulationStdioMcpClient>.Instance
+            logger
         );
 
-        var request = new CnvRegulationSearchRequest(Query: "test", Area: "Agentes", Limit: 5, RequiresReview: true);
+        var request = new CnvRegulationSearchRequest(
+            Query: sensitiveQuery,
+            Area: "Agentes",
+            Limit: 5,
+            RequiresReview: true);
 
         var act = async () => await client.SearchAsync(request, CancellationToken.None);
 
@@ -388,16 +428,43 @@ public class CnvRegulationStdioMcpClientTests
         await act.Should().ThrowAsync<Exception>();
 
         client.IsConnected.Should().BeFalse();
-        client.LastError.Should().NotBeNullOrEmpty();
+        client.LastError.Should().Be("MCP connection failed.");
         client.ColdStartCount.Should().Be(0); // Failed cold starts do not increment successful connection counts
+        logger.Entries.Should().OnlyContain(entry =>
+            entry.Exception == null &&
+            !entry.Message.Contains(sensitiveCommand, StringComparison.Ordinal) &&
+            !entry.Message.Contains(sensitiveArgument, StringComparison.Ordinal) &&
+            !entry.Message.Contains(sensitiveQuery, StringComparison.Ordinal));
 
         // Let's dispose it and ensure no crash
         await client.DisposeAsync();
     }
 
+    [Fact]
+    public void CnvRegulationStdioMcpClient_Source_Should_not_pass_external_exceptions_or_messages_to_logs_or_last_error()
+    {
+        var sourcePath = FindRepositoryFile(
+            "backend",
+            "Orchestration.Infrastructure",
+            "Agents",
+            "Legal",
+            "Regulations",
+            "Mcp",
+            "CnvRegulationStdioMcpClient.cs");
+        var source = File.ReadAllText(sourcePath).ReplaceLineEndings("\n");
+
+        source.Should().NotContain("LogError(\n                ex,");
+        source.Should().NotContain("LogWarning(\n            ex,");
+        source.Should().NotContain("LogDebug(ex,");
+        source.Should().NotContain("_lastError = ex.Message");
+        source.Should().NotContain("ex?.Message");
+        source.Should().NotContain("GetToolErrorMessage");
+    }
+
     private static CnvRegulationStdioMcpClient CreateClient(
         Func<string, IReadOnlyDictionary<string, object?>, CancellationToken, Task<CallToolResult>> toolCallOverride,
-        int toolCallTimeoutSeconds = 30)
+        int toolCallTimeoutSeconds = 30,
+        ILogger<CnvRegulationStdioMcpClient>? logger = null)
     {
         var options = Options.Create(new CnvRegulationMcpOptions
         {
@@ -409,7 +476,7 @@ public class CnvRegulationStdioMcpClientTests
 
         return new CnvRegulationStdioMcpClient(
             options,
-            NullLogger<CnvRegulationStdioMcpClient>.Instance,
+            logger ?? NullLogger<CnvRegulationStdioMcpClient>.Instance,
             toolCallOverride);
     }
 
@@ -425,4 +492,49 @@ public class CnvRegulationStdioMcpClientTests
         Content = [new TextContentBlock { Text = text }],
         IsError = false
     };
+
+    private static string FindRepositoryFile(params string[] segments)
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            var path = Path.Combine([directory.FullName, .. segments]);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"Could not locate repository file '{Path.Combine(segments)}'.");
+    }
+
+    private sealed class CapturingLogger : ILogger<CnvRegulationStdioMcpClient>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add(new LogEntry(
+                logLevel,
+                formatter(state, exception),
+                exception));
+        }
+    }
+
+    private sealed record LogEntry(
+        LogLevel Level,
+        string Message,
+        Exception? Exception);
 }

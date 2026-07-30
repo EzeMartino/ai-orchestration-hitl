@@ -12,7 +12,7 @@ namespace CnvRegulation.McpServer;
 public static class CnvRegulationTools
 {
     /// <summary>
-    /// Searches mock CNV regulatory material.
+    /// Realiza recuperación documental CNV; las citas recuperadas requieren revisión legal humana.
     /// </summary>
     [McpServerTool(
         Name = "search_cnv_regulation",
@@ -59,7 +59,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a repository-backed CNV regulatory document by identifier.
+    /// Realiza recuperación documental CNV por identificador sin determinar aplicabilidad legal.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_document",
@@ -86,7 +86,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a repository-backed CNV regulatory article by title/chapter/section/article.
+    /// Realiza recuperación documental CNV de artículos; la evidencia no constituye una conclusión legal.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_article",
@@ -119,7 +119,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves recent mock CNV resolutions.
+    /// Realiza recuperación documental CNV de resoluciones recientes para revisión legal humana.
     /// </summary>
     [McpServerTool(
         Name = "get_recent_cnv_resolutions",
@@ -148,7 +148,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Performs an evidence-based CNV compliance analysis.
+    /// Usa recuperación documental CNV como ayuda de revisión, sin determinar cumplimiento ni aplicabilidad.
     /// </summary>
     [McpServerTool(
         Name = "analyze_text_against_cnv",

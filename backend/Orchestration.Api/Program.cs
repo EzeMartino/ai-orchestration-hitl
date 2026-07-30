@@ -184,9 +184,6 @@ builder.Services
 // Legal agent and regulatory knowledge source configuration.
 // CNV MCP capability selection is bootstrap-scoped; restart after config changes.
 builder.Services.AddRegulatoryKnowledgeSource(builder.Configuration, builder.Environment);
-builder.Services.AddScoped<CnvRegulatoryHitEnricher>();
-
-builder.Services.AddSingleton<Orchestration.Application.Agents.Legal.Cnv.ILegalCnvQueryStrategy, Orchestration.Application.Agents.Legal.Cnv.FinancialAnalysisLegalCnvQueryStrategy>();
 
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();

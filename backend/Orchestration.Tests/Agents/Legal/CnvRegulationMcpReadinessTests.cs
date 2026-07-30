@@ -58,6 +58,27 @@ public sealed class CnvRegulationMcpReadinessTests
         probe.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task HealthCheck_Should_be_healthy_when_enabled_probe_completes_with_zero_hits()
+    {
+        var probe = new RecordingProbe();
+        var healthCheck = new CnvRegulationMcpHealthCheck(
+            Options.Create(new CnvRegulationMcpOptions
+            {
+                Enabled = true,
+                Args = ["run"]
+            }),
+            probe);
+
+        var result = await healthCheck.CheckHealthAsync(
+            new HealthCheckContext(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(HealthStatus.Healthy);
+        result.Description.Should().Be("CNV MCP readiness probe completed.");
+        probe.CallCount.Should().Be(1);
+    }
+
     [Theory]
     [InlineData(typeof(TimeoutException))]
     [InlineData(typeof(IOException))]
@@ -88,18 +109,44 @@ public sealed class CnvRegulationMcpReadinessTests
         await action.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    [Fact]
-    public async Task StartupService_Should_fail_required_startup_without_leaking_probe_details()
+    [Theory]
+    [InlineData(typeof(TimeoutException), "timeout detail")]
+    [InlineData(typeof(IOException), "transport detail")]
+    [InlineData(typeof(InvalidOperationException), "database detail")]
+    public async Task StartupService_Should_fail_required_startup_without_leaking_probe_details(
+        Type exceptionType,
+        string sensitiveDetail)
     {
         var startup = new CnvRegulationMcpStartupService(
             Options.Create(new CnvRegulationMcpOptions { Enabled = true, Required = true, Args = ["run"] }),
-            new RecordingProbe(new IOException("transport detail")));
+            new RecordingProbe(
+                (Exception)Activator.CreateInstance(exceptionType, sensitiveDetail)!));
 
         var action = () => startup.StartAsync(CancellationToken.None);
 
         var failure = await action.Should().ThrowAsync<InvalidOperationException>();
         failure.Which.Message.Should().Be("CNV MCP readiness probe failed.");
-        failure.Which.Message.Should().NotContain("transport detail");
+        failure.Which.Message.Should().NotContain(sensitiveDetail);
+        failure.Which.InnerException.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task StartupService_Should_propagate_caller_cancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var startup = new CnvRegulationMcpStartupService(
+            Options.Create(new CnvRegulationMcpOptions
+            {
+                Enabled = true,
+                Required = true,
+                Args = ["run"]
+            }),
+            new RecordingProbe());
+
+        var action = () => startup.StartAsync(cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
