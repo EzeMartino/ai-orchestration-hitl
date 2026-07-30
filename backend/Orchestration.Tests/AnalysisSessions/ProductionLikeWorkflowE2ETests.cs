@@ -694,7 +694,7 @@ public sealed class ProductionLikeWorkflowE2ETests
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
         var activityPublisher = new PersistingActivityEventPublisher(dbContext);
-        var userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var userId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var session = AnalysisSession.Create(userId);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -807,7 +807,7 @@ public sealed class ProductionLikeWorkflowE2ETests
             new FakeProductionPythonFinancialAnalysisService(),
             new FakeProductionCnvRegulationMcpClient(),
             ToolCallingExecutionMode.PlanDriven);
-        var userId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var userId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var first = AnalysisSession.Create(userId);
         var second = AnalysisSession.Create(userId);
         dbContext.AnalysisSessions.AddRange(first, second);
@@ -1186,8 +1186,8 @@ public sealed class ProductionLikeWorkflowE2ETests
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
-            new(ClaimTypes.Name, "admin@ezemartino.com")
+            new(ClaimTypes.NameIdentifier, "11111111-1111-1111-1111-111111111111"),
+            new(ClaimTypes.Name, "fixture-user@example.test")
         };
         var identity = new ClaimsIdentity(claims, "TestAuthType");
         controller.ControllerContext = new ControllerContext

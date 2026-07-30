@@ -225,7 +225,19 @@ builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 builder.Services.AddIdentityApiEndpoints<IdentityUser<Guid>>()
     .AddEntityFrameworkStores<OrchestrationDbContext>();
-builder.Services.AddHostedService<IdentityDataSeeder>();
+builder.Services
+    .AddOptions<IdentityBootstrapOptions>()
+    .Bind(builder.Configuration.GetSection(IdentityBootstrapOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    IValidateOptions<IdentityBootstrapOptions>,
+    IdentityBootstrapOptionsValidator>();
+builder.Services.AddSingleton<
+    IOrchestrationDatabaseMigrator,
+    OrchestrationDatabaseMigrator>();
+builder.Services.AddHostedService<DatabaseMigrationHostedService>();
+builder.Services.AddPersistentDataProtection();
+builder.Services.AddHostedService<IdentityBootstrapHostedService>();
 
 
 builder.Services.AddCors(options =>
@@ -241,6 +253,13 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+if (args.Contains("--migrate-only", StringComparer.OrdinalIgnoreCase))
+{
+    await app.Services.GetRequiredService<IOrchestrationDatabaseMigrator>()
+        .MigrateAsync(CancellationToken.None);
+    return;
+}
 
 app.MapDefaultEndpoints();
 

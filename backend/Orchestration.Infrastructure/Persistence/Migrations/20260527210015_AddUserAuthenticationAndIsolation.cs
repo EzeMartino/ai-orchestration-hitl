@@ -57,10 +57,6 @@ namespace Orchestration.Infrastructure.Persistence.Migrations
                     table.PrimaryKey("PK_AspNetUsers", x => x.Id);
                 });
 
-            // Custom seed migration step
-            migrationBuilder.Sql("INSERT INTO \"AspNetUsers\" (\"Id\", \"UserName\", \"NormalizedUserName\", \"Email\", \"NormalizedEmail\", \"EmailConfirmed\", \"PasswordHash\", \"SecurityStamp\", \"ConcurrencyStamp\", \"PhoneNumberConfirmed\", \"TwoFactorEnabled\", \"LockoutEnabled\", \"AccessFailedCount\") VALUES ('00000000-0000-0000-0000-000000000001', 'admin@ezemartino.com', 'ADMIN@EZEMARTINO.COM', 'admin@ezemartino.com', 'ADMIN@EZEMARTINO.COM', true, 'AQAAAAIAAYagAAAAEIKh2o5e/K4t8N2h8f8Xb5nZ45zE...', 'SECRETSTAMP', 'CONCURRENCYSTAMP', false, false, false, 0) ON CONFLICT DO NOTHING;");
-            migrationBuilder.Sql("UPDATE \"AnalysisSessions\" SET \"UserId\" = '00000000-0000-0000-0000-000000000001' WHERE \"UserId\" IS NULL OR \"UserId\" = '00000000-0000-0000-0000-000000000000';");
-
             migrationBuilder.AlterColumn<Guid>(
                 name: "UserId",
                 table: "AnalysisSessions",
