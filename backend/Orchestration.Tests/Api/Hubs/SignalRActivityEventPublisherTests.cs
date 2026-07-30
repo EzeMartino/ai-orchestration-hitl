@@ -20,7 +20,8 @@ public sealed class SignalRActivityEventPublisherTests
         var ownerId = Guid.NewGuid();
         var unrelatedUserId = Guid.NewGuid();
         var session = AnalysisSession.Create(ownerId);
-        dbContext.AnalysisSessions.Add(session);
+        var unrelatedSession = AnalysisSession.Create(unrelatedUserId);
+        dbContext.AnalysisSessions.AddRange(unrelatedSession, session);
         await dbContext.SaveChangesAsync();
 
         var hubContext = new RecordingHubContext();
@@ -44,6 +45,7 @@ public sealed class SignalRActivityEventPublisherTests
         Assert.Same(activityEvent, Assert.Single(ownerMessage.Arguments));
         Assert.Empty(hubContext.Clients.MessagesForUser(unrelatedUserId.ToString()));
         Assert.Equal([ownerId.ToString()], hubContext.Clients.RequestedUsers);
+        Assert.DoesNotContain(unrelatedUserId.ToString(), hubContext.Clients.RequestedUsers);
         Assert.Equal(0, hubContext.Clients.AllAccessCount);
         Assert.Equal(0, hubContext.Clients.GroupAccessCount);
         Assert.Equal(0, hubContext.GroupsAccessCount);
