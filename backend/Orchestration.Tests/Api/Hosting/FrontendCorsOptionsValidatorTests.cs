@@ -27,6 +27,28 @@ public sealed class FrontendCorsOptionsValidatorTests
         origins.Should().Equal("http://localhost:5173", "https://localhost:5173");
     }
 
+    [Fact]
+    public void Validate_DevelopmentWithExplicitLocalhostHttpOrigin_Succeeds()
+    {
+        var result = CreateValidator("Development").Validate(null, new FrontendCorsOptions
+        {
+            AllowedOrigins = ["http://localhost:5173"]
+        });
+
+        result.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_DevelopmentWithExplicitNonLocalHttpOrigin_Fails()
+    {
+        var result = CreateValidator("Development").Validate(null, new FrontendCorsOptions
+        {
+            AllowedOrigins = ["http://frontend.example.com"]
+        });
+
+        result.Failed.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("http://frontend.example.com")]
     [InlineData("https://*.example.com")]
