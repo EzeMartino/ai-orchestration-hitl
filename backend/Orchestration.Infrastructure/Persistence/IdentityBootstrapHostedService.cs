@@ -48,13 +48,31 @@ public sealed class IdentityBootstrapHostedService(
                 continue;
             }
 
+            missingUsers.Add(preparedUser);
+        }
+
+        var preparedIds = new HashSet<Guid>();
+        foreach (var preparedUser in missingUsers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!preparedIds.Add(preparedUser.User.Id)
+                || await userManager.FindByIdAsync(
+                    preparedUser.User.Id.ToString()) is not null)
+            {
+                throw CreateBootstrapException(
+                    preparedUser.Index,
+                    [new IdentityError { Code = "DuplicateUserId" }]);
+            }
+        }
+
+        foreach (var preparedUser in missingUsers)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             var errors = await ValidateUserAsync(userManager, preparedUser);
             if (errors.Count > 0)
             {
                 throw CreateBootstrapException(preparedUser.Index, errors);
             }
-
-            missingUsers.Add(preparedUser);
         }
 
         foreach (var preparedUser in missingUsers)

@@ -24,14 +24,23 @@ public sealed class IdentityBootstrapOptionsValidator(
         }
 
         var normalizedEmails = new HashSet<string>(StringComparer.Ordinal);
+        var explicitIds = new HashSet<Guid>();
         for (var index = 0; index < options.Users.Count; index++)
         {
             var user = options.Users[index];
 
-            if (user.Id == Guid.Empty)
+            if (user.Id is Guid explicitId)
             {
-                failures.Add(
-                    $"Identity bootstrap user at index {index} has an empty explicit ID.");
+                if (explicitId == Guid.Empty)
+                {
+                    failures.Add(
+                        $"Identity bootstrap user at index {index} has an empty explicit ID.");
+                }
+                else if (!explicitIds.Add(explicitId))
+                {
+                    failures.Add(
+                        $"Identity bootstrap user at index {index} duplicates another configured explicit ID.");
+                }
             }
 
             if (string.IsNullOrWhiteSpace(user.Email)

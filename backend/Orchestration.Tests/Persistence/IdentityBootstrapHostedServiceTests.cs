@@ -157,6 +157,105 @@ public sealed class IdentityBootstrapHostedServiceTests
         (await dbContext.Users.CountAsync()).Should().Be(0);
     }
 
+    [Fact]
+    public async Task StartAsync_DuplicateExplicitIds_CreatesNoAccounts()
+    {
+        var duplicateId = Guid.NewGuid();
+        var options = EnabledOptions(
+            new IdentityBootstrapUserOptions
+            {
+                Id = duplicateId,
+                Email = "first-duplicate@example.test",
+                Password = "First-Bootstrap9!"
+            },
+            new IdentityBootstrapUserOptions
+            {
+                Id = duplicateId,
+                Email = "second-duplicate@example.test",
+                Password = "Second-Bootstrap9!"
+            });
+        await using var provider = CreateProvider(options);
+
+        var action = () => StartAsync(provider);
+
+        var exception = await action.Should().ThrowAsync<OptionsValidationException>();
+        exception.Which.Message.Should()
+            .Contain("Identity bootstrap user at index 1 duplicates another configured explicit ID.");
+        exception.Which.Message.Should().NotContain("first-duplicate@example.test");
+        exception.Which.Message.Should().NotContain("second-duplicate@example.test");
+        exception.Which.Message.Should().NotContain("First-Bootstrap9!");
+        exception.Which.Message.Should().NotContain("Second-Bootstrap9!");
+        using var scope = provider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<OrchestrationDbContext>();
+        (await dbContext.Users.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task StartAsync_ExplicitIdOwnedByDifferentEmail_FailsBeforeAnyCreation()
+    {
+        var persistedId = Guid.NewGuid();
+        const string persistedEmail = "persisted-owner@example.test";
+        const string persistedPassword = "Persisted-Secret9!";
+        const string firstEmail = "first-missing@example.test";
+        const string firstPassword = "First-Missing9!";
+        const string collidingEmail = "colliding-missing@example.test";
+        const string collidingPassword = "Colliding-Missing9!";
+        var options = EnabledOptions(
+            new IdentityBootstrapUserOptions
+            {
+                Id = Guid.NewGuid(),
+                Email = firstEmail,
+                Password = firstPassword
+            },
+            new IdentityBootstrapUserOptions
+            {
+                Id = persistedId,
+                Email = collidingEmail,
+                Password = collidingPassword
+            });
+        await using var provider = CreateProvider(options);
+
+        using (var setupScope = provider.CreateScope())
+        {
+            var userManager = setupScope.ServiceProvider
+                .GetRequiredService<UserManager<IdentityUser<Guid>>>();
+            var persistedUser = new IdentityUser<Guid>
+            {
+                Id = persistedId,
+                UserName = persistedEmail,
+                Email = persistedEmail
+            };
+            var createResult = await userManager.CreateAsync(
+                persistedUser,
+                persistedPassword);
+            createResult.Succeeded.Should().BeTrue();
+        }
+
+        var action = () => StartAsync(provider);
+
+        var exception = await action.Should().ThrowAsync<InvalidOperationException>();
+        exception.Which.Message.Should()
+            .Be("Identity bootstrap failed for configured user index 1: DuplicateUserId");
+        exception.Which.Message.Should().NotContain(firstEmail);
+        exception.Which.Message.Should().NotContain(firstPassword);
+        exception.Which.Message.Should().NotContain(collidingEmail);
+        exception.Which.Message.Should().NotContain(collidingPassword);
+        exception.Which.Message.Should().NotContain(persistedEmail);
+        exception.Which.Message.Should().NotContain(persistedPassword);
+
+        using var verificationScope = provider.CreateScope();
+        var verificationManager = verificationScope.ServiceProvider
+            .GetRequiredService<UserManager<IdentityUser<Guid>>>();
+        (await verificationManager.FindByEmailAsync(firstEmail)).Should().BeNull();
+        (await verificationManager.FindByEmailAsync(collidingEmail)).Should().BeNull();
+        var persistedUserAfterFailure = await verificationManager
+            .FindByEmailAsync(persistedEmail);
+        persistedUserAfterFailure.Should().NotBeNull();
+        (await verificationManager.CheckPasswordAsync(
+            persistedUserAfterFailure!,
+            persistedPassword)).Should().BeTrue();
+    }
+
     private static async Task StartAsync(ServiceProvider provider)
     {
         var service = provider.GetRequiredService<IdentityBootstrapHostedService>();

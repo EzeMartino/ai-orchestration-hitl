@@ -106,6 +106,36 @@ public sealed class IdentityBootstrapOptionsValidatorTests
     }
 
     [Fact]
+    public void Validate_DuplicateExplicitNonEmptyIds_FailsWithoutSecrets()
+    {
+        var duplicateId = Guid.NewGuid();
+        const string firstEmail = "first-id-owner@example.test";
+        const string secondEmail = "second-id-owner@example.test";
+        const string firstPassword = "First-Bootstrap9!";
+        const string secondPassword = "Second-Bootstrap9!";
+        var options = EnabledOptions(
+            ValidUser(
+                email: firstEmail,
+                password: firstPassword,
+                id: duplicateId),
+            ValidUser(
+                email: secondEmail,
+                password: secondPassword,
+                id: duplicateId));
+
+        var result = _validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.Failures.Should().ContainSingle()
+            .Which.Should()
+            .Be("Identity bootstrap user at index 1 duplicates another configured explicit ID.");
+        string.Join(" ", result.Failures!).Should().NotContain(firstEmail);
+        string.Join(" ", result.Failures!).Should().NotContain(secondEmail);
+        string.Join(" ", result.Failures!).Should().NotContain(firstPassword);
+        string.Join(" ", result.Failures!).Should().NotContain(secondPassword);
+    }
+
+    [Fact]
     public void Validate_FailureMessages_NeverContainConfiguredPassword()
     {
         const string configuredPassword = "configured-password-secret";
