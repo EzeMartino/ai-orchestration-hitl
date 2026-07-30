@@ -65,6 +65,26 @@ public sealed class PostgresConnectionStringNormalizerTests
     }
 
     [Theory]
+    [InlineData("postgresql://%20:password@dpg.internal/orchestration")]
+    [InlineData("postgresql://user:%20@dpg.internal/orchestration")]
+    public void Normalize_ShouldRejectWhitespaceOnlyDecodedCredentials(string value)
+    {
+        var action = () => PostgresConnectionStringNormalizer.Normalize(value);
+
+        action.Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData("postgresql://user:password@dpg.internal/orchestration?sslmode=require")]
+    [InlineData("postgresql://user:password@dpg.internal/orchestration#fragment")]
+    public void Normalize_ShouldRejectUriQueryOrFragment(string value)
+    {
+        var action = () => PostgresConnectionStringNormalizer.Normalize(value);
+
+        action.Should().Throw<InvalidOperationException>();
+    }
+
+    [Theory]
     [InlineData("postgresql://user:password@/orchestration")]
     [InlineData("postgresql://:password@dpg.internal/orchestration")]
     [InlineData("postgresql://user:@dpg.internal/orchestration")]
@@ -86,5 +106,16 @@ public sealed class PostgresConnectionStringNormalizerTests
         var exception = action.Should().Throw<InvalidOperationException>().Which;
         exception.ToString().Should().NotContain(source);
         exception.ToString().Should().NotContain("super-secret-password");
+    }
+
+    [Fact]
+    public void Normalize_ShouldNotExposeMalformedKeywordValueSource_WhenValidationFails()
+    {
+        const string source = "Host=localhost;Password=keyword-sentinel-secret;UnsupportedKeyword=value";
+        var action = () => PostgresConnectionStringNormalizer.Normalize(source);
+
+        var exception = action.Should().Throw<InvalidOperationException>().Which;
+        exception.ToString().Should().NotContain(source);
+        exception.ToString().Should().NotContain("keyword-sentinel-secret");
     }
 }

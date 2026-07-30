@@ -43,12 +43,20 @@ public static class PostgresConnectionStringNormalizer
     private static string NormalizeUri(Uri uri)
     {
         var credentials = uri.UserInfo.Split(':', 2);
+        var username = credentials.Length == 2
+            ? Uri.UnescapeDataString(credentials[0])
+            : string.Empty;
+        var password = credentials.Length == 2
+            ? Uri.UnescapeDataString(credentials[1])
+            : string.Empty;
         var database = Uri.UnescapeDataString(uri.AbsolutePath.Trim('/'));
 
-        if (string.IsNullOrWhiteSpace(uri.Host)
+        if (!string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || string.IsNullOrWhiteSpace(uri.Host)
             || credentials.Length != 2
-            || string.IsNullOrWhiteSpace(credentials[0])
-            || string.IsNullOrWhiteSpace(credentials[1])
+            || string.IsNullOrWhiteSpace(username)
+            || string.IsNullOrWhiteSpace(password)
             || string.IsNullOrWhiteSpace(database)
             || database.Contains('/', StringComparison.Ordinal))
         {
@@ -66,8 +74,8 @@ public static class PostgresConnectionStringNormalizer
             Host = uri.Host,
             Port = port,
             Database = database,
-            Username = Uri.UnescapeDataString(credentials[0]),
-            Password = Uri.UnescapeDataString(credentials[1])
+            Username = username,
+            Password = password
         }.ConnectionString;
     }
 
