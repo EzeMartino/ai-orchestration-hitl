@@ -181,29 +181,12 @@ builder.Services
     .WithVirtualEnvironment(pythonVirtualEnvironment)
     .WithPipInstaller(pythonLockFile);
 
-// Legal agent and regulatory knowledge source configuration
-builder.Services
-    .AddOptions<CnvRegulationMcpOptions>()
-    .Bind(builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName))
-    .ValidateOnStart();
-builder.Services.AddSingleton<IValidateOptions<CnvRegulationMcpOptions>, CnvRegulationMcpOptionsValidator>();
-builder.Services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+// Legal agent and regulatory knowledge source configuration.
+// CNV MCP capability selection is bootstrap-scoped; restart after config changes.
+builder.Services.AddRegulatoryKnowledgeSource(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<CnvRegulatoryHitEnricher>();
 
-var cnvMcpOptions = builder.Configuration
-    .GetSection(CnvRegulationMcpOptions.SectionName)
-    .Get<CnvRegulationMcpOptions>() ?? new CnvRegulationMcpOptions();
-
 builder.Services.AddSingleton<Orchestration.Application.Agents.Legal.Cnv.ILegalCnvQueryStrategy, Orchestration.Application.Agents.Legal.Cnv.FinancialAnalysisLegalCnvQueryStrategy>();
-
-if (cnvMcpOptions.Enabled)
-{
-    builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();
-}
-else
-{
-    builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
-}
 
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
@@ -238,6 +221,7 @@ builder.Services.AddSingleton<
     IOrchestrationDatabaseMigrator,
     OrchestrationDatabaseMigrator>();
 builder.Services.AddHostedService<DatabaseMigrationHostedService>();
+builder.Services.AddHostedService<CnvRegulationMcpStartupService>();
 builder.Services.AddPersistentDataProtection();
 builder.Services.AddHostedService<IdentityBootstrapHostedService>();
 builder.Services.AddProductionHosting(builder.Configuration, builder.Environment);

@@ -56,6 +56,21 @@ public sealed class CnvRegulationToolsRegistrationTests
     }
 
     [Fact]
+    public void CnvRegulationTools_PostgresCapableToolDescriptions_ShouldDescribeDocumentaryRetrievalWithoutMockWording()
+    {
+        var descriptions = typeof(CnvRegulationTools)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Select(method => method.GetCustomAttribute<DescriptionAttribute>())
+            .Where(description => description is not null)
+            .Select(description => description!.Description)
+            .ToArray();
+
+        descriptions.Should().OnlyContain(description =>
+            description.Contains("recuperación documental CNV", StringComparison.Ordinal) &&
+            !description.Contains("mock", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void AddCnvRegulationMcpServices_ShouldRegisterApplicationInterfaces()
     {
         var services = new ServiceCollection();

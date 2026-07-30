@@ -22,7 +22,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Searches mock CNV regulatory material and returns traceable placeholder citations.")]
+    [Description("Realiza recuperación documental CNV y devuelve citas recuperadas para revisión legal humana.")]
     public static Task<SearchRegulationResponse> SearchCnvRegulationAsync(
         IRegulationSearchService searchService,
         [Description("Natural language query or keywords to search for.")] string query,
@@ -32,7 +32,7 @@ public static class CnvRegulationTools
         [Description("Optional source filter, such as CNV or Infoleg.")] string? source = null,
         [Description("Optional document type filter.")] string? documentType = null,
         [Description("Optional resolution number filter, such as 622/2013.")] string? resolutionNumber = null,
-        [Description("Optional status filter, such as candidate or mock.")] string? status = null,
+        [Description("Optional status filter, such as candidate or vigente.")] string? status = null,
         [Description("Optional requires-review filter.")] bool? requiresReview = null,
         [Description("Whether to include duplicate chunks.")] bool includeDuplicates = false,
         [Description("Whether to include non-searchable wrapper-like documents.")] bool includeNonSearchable = false,
@@ -69,7 +69,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves repository-backed CNV regulatory document metadata, content, citations, and retrieval warnings.")]
+    [Description("Realiza recuperación documental CNV de metadatos, contenido, citas y advertencias; no determina aplicabilidad legal.")]
     public static Task<GetRegulationDocumentResponse> GetCnvDocumentAsync(
         IRegulationDocumentService documentService,
         [Description("Document identifier, for example cnv-nt-2013.")] string documentId,
@@ -96,7 +96,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves a structured repository-backed CNV regulatory article response with citation and confidence.")]
+    [Description("Realiza recuperación documental CNV estructurada de artículos con cita y confianza; requiere revisión legal humana.")]
     public static Task<GetRegulationArticleResponse> GetCnvArticleAsync(
         IRegulationArticleService articleService,
         [Description("Article label, for example Articulo 4.")] string article,
@@ -129,7 +129,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves recent mock CNV resolution metadata from in-memory placeholder data.")]
+    [Description("Realiza recuperación documental CNV de metadatos de resoluciones recientes para revisión legal humana.")]
     public static Task<GetRecentResolutionsResponse> GetRecentCnvResolutionsAsync(
         IRecentResolutionService recentResolutionService,
         [Description("Lookback window in days.")] int days = 30,
@@ -158,7 +158,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Runs an evidence-based regulatory review aid against supplied text and returns findings with citations.")]
+    [Description("Usa recuperación documental CNV como ayuda de revisión y devuelve hallazgos con citas, sin conclusión legal.")]
     public static Task<AnalyzeTextAgainstCnvResponse> AnalyzeTextAgainstCnvAsync(
         IComplianceAnalysisService complianceAnalysisService,
         [Description("Text to analyze against CNV regulatory checks.")] string text,

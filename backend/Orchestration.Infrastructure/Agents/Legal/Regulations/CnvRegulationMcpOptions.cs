@@ -6,6 +6,8 @@ public sealed class CnvRegulationMcpOptions
 
     public bool Enabled { get; init; }
 
+    public bool Required { get; init; }
+
     public string Command { get; init; } = "dotnet";
 
     public string[] Args { get; init; } = [];

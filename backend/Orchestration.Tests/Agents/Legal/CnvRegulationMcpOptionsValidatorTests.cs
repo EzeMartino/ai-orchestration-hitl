@@ -35,6 +35,40 @@ public sealed class CnvRegulationMcpOptionsValidatorTests
         result.Failed.Should().BeFalse();
     }
 
+    [Fact]
+    public void Validate_Should_reject_required_when_mcp_is_disabled()
+    {
+        var result = _validator.Validate(Options.DefaultName, new CnvRegulationMcpOptions
+        {
+            Required = true,
+            Enabled = false
+        });
+
+        result.Failed.Should().BeTrue();
+        result.Failures.Should().Contain("Required cannot be true when Enabled is false.");
+    }
+
+    [Theory]
+    [MemberData(nameof(EnabledInvalidConfigurations))]
+    public void Validate_Should_require_a_runnable_configuration_when_enabled(
+        CnvRegulationMcpOptions options,
+        string expectedFailure)
+    {
+        var result = _validator.Validate(Options.DefaultName, options);
+
+        result.Failed.Should().BeTrue();
+        result.Failures.Should().Contain(expectedFailure);
+    }
+
+    public static IEnumerable<object[]> EnabledInvalidConfigurations()
+    {
+        yield return [new CnvRegulationMcpOptions { Enabled = true, Command = " ", Args = ["run"] }, "Command must be configured when Enabled is true."];
+        yield return [new CnvRegulationMcpOptions { Enabled = true, Args = null! }, "Args must contain at least one value when Enabled is true."];
+        yield return [new CnvRegulationMcpOptions { Enabled = true, Args = [] }, "Args must contain at least one value when Enabled is true."];
+        yield return [new CnvRegulationMcpOptions { Enabled = true, Args = ["run"], ConnectionTimeoutSeconds = 0 }, "ConnectionTimeoutSeconds must be greater than zero when Enabled is true."];
+        yield return [new CnvRegulationMcpOptions { Enabled = true, Args = ["run"], ToolCallTimeoutSeconds = 0 }, "ToolCallTimeoutSeconds must be greater than zero when Enabled is true."];
+    }
+
     [Theory]
     [InlineData(-1, 12_000, 6_000, "MaxEnrichedHits must be between 0 and 2 (inclusive).")]
     [InlineData(3, 12_000, 6_000, "MaxEnrichedHits must be between 0 and 2 (inclusive).")]
