@@ -50,7 +50,7 @@ public sealed class PostgresConnectionStringNormalizerTests
     [Fact]
     public void Normalize_ShouldPassThroughNpgsqlKeywordValueConnectionString()
     {
-        const string connectionString = "Host=localhost;Port=5432;Database=orchestration;Username=user;Password=password";
+        const string connectionString = "Host=localhost;Port=5432;Database=orchestration;Username=user;Password=p://a";
 
         PostgresConnectionStringNormalizer.Normalize(connectionString).Should().Be(connectionString);
     }

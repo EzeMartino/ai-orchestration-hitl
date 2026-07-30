@@ -31,9 +31,18 @@ public sealed class PostgresConnectionStringNormalizerTests
     }
 
     [Fact]
+    public void Normalize_ShouldDecodeDatabaseName()
+    {
+        var result = PostgresConnectionStringNormalizer.Normalize(
+            "postgresql://user:password@dpg.internal/my%2Ddatabase");
+
+        new NpgsqlConnectionStringBuilder(result).Database.Should().Be("my-database");
+    }
+
+    [Fact]
     public void Normalize_ShouldPassThroughNpgsqlKeywordValueConnectionString()
     {
-        const string connectionString = "Host=localhost;Database=orchestration;Username=user;Password=password";
+        const string connectionString = "Host=localhost;Database=orchestration;Username=user;Password=p://a";
 
         PostgresConnectionStringNormalizer.Normalize(connectionString).Should().Be(connectionString);
     }
@@ -41,6 +50,9 @@ public sealed class PostgresConnectionStringNormalizerTests
     [Theory]
     [InlineData("mysql://user:password@db.internal/orchestration")]
     [InlineData("postgresql://user:password@/orchestration")]
+    [InlineData("postgresql://:password@db.internal/orchestration")]
+    [InlineData("postgresql://user:@db.internal/orchestration")]
+    [InlineData("postgresql://user:password@db.internal/")]
     [InlineData("postgresql://user@db.internal/orchestration")]
     public void Normalize_ShouldRejectUnsupportedOrMalformedUriWithoutExposingSource(string source)
     {

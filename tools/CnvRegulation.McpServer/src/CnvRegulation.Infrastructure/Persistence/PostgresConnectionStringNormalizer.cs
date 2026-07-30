@@ -15,19 +15,15 @@ public static class PostgresConnectionStringNormalizer
                 throw InvalidConnectionString();
             }
 
-            if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            if (StartsWithUriScheme(value))
             {
-                if (!IsPostgresScheme(uri.Scheme))
+                if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+                    || !IsPostgresScheme(uri.Scheme))
                 {
                     throw InvalidConnectionString();
                 }
 
                 return NormalizeUri(uri);
-            }
-
-            if (value.Contains("://", StringComparison.Ordinal))
-            {
-                throw InvalidConnectionString();
             }
 
             _ = new NpgsqlConnectionStringBuilder(value);
@@ -78,6 +74,26 @@ public static class PostgresConnectionStringNormalizer
     private static bool IsPostgresScheme(string scheme) =>
         string.Equals(scheme, "postgres", StringComparison.OrdinalIgnoreCase)
         || string.Equals(scheme, "postgresql", StringComparison.OrdinalIgnoreCase);
+
+    private static bool StartsWithUriScheme(string value)
+    {
+        var separatorIndex = value.IndexOf("://", StringComparison.Ordinal);
+        if (separatorIndex <= 0 || !char.IsLetter(value[0]))
+        {
+            return false;
+        }
+
+        for (var index = 1; index < separatorIndex; index++)
+        {
+            if (!char.IsLetterOrDigit(value[index])
+                && value[index] is not '+' and not '-' and not '.')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static InvalidOperationException InvalidConnectionString() =>
         new(InvalidConnectionStringMessage);
