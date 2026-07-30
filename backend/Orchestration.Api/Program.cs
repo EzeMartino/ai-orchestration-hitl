@@ -1,6 +1,7 @@
 using CSnakes.Runtime;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
+using Orchestration.Api.Hosting;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
@@ -239,19 +240,7 @@ builder.Services.AddSingleton<
 builder.Services.AddHostedService<DatabaseMigrationHostedService>();
 builder.Services.AddPersistentDataProtection();
 builder.Services.AddHostedService<IdentityBootstrapHostedService>();
-
-
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Frontend", policy =>
-    {
-        policy
-            .WithOrigins("http://localhost:5173")
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
+builder.Services.AddProductionHosting(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
@@ -264,15 +253,10 @@ if (args.Contains("--migrate-only", StringComparer.OrdinalIgnoreCase))
 
 app.MapDefaultEndpoints();
 
+app.UseProductionHosting();
+
 app.UseSwagger();
 app.UseSwaggerUI();
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
-
-app.UseCors("Frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
