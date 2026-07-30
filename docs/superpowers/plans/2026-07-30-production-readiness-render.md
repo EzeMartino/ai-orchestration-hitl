@@ -1525,7 +1525,7 @@ Expected: all non-opt-in tests PASS; integration skips are named and justified.
 Run:
 
 ```powershell
-python -m pytest python-agents/data_agent/tests
+python-agents/data_agent/.venv/Scripts/python.exe -m unittest discover -s python-agents/tests -p "test_*.py"
 npm --prefix frontend ci
 npm --prefix frontend test
 npm --prefix frontend run build
