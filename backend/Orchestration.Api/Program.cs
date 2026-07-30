@@ -225,6 +225,7 @@ builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 builder.Services.AddIdentityApiEndpoints<IdentityUser<Guid>>()
     .AddEntityFrameworkStores<OrchestrationDbContext>();
+builder.Services.AddActivityHubAuthentication();
 builder.Services
     .AddOptions<IdentityBootstrapOptions>()
     .Bind(builder.Configuration.GetSection(IdentityBootstrapOptions.SectionName))
