@@ -8,6 +8,7 @@ using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Shared;
 using System.Text.Json.Nodes;
 
@@ -504,7 +505,13 @@ namespace Orchestration.Application.AnalysisSessions
                     engine = plannerResult.LegalResult.Engine,
                     summary = plannerResult.LegalResult.Summary,
                     warnings = plannerResult.LegalResult.Warnings,
-                    queryStrategy = ProjectLegalQueryStrategy(plannerResult.LegalResult.QueryStrategy),
+                    queryStrategy = ProjectLegalQueryStrategy(
+                        plannerResult.LegalResult.QueryStrategy,
+                        plannerResult.LegalResult.EvidenceEnrichments
+                    ),
+                    evidenceEnrichments = ProjectRegulatoryEvidenceEnrichments(
+                        plannerResult.LegalResult.EvidenceEnrichments
+                    ),
                     evidenceAssessment = plannerResult.LegalResult.EvidenceAssessment is null
                         ? null
                         : new
@@ -564,6 +571,77 @@ namespace Orchestration.Application.AnalysisSessions
             );
         }
 
+        private static object? ProjectRegulatoryEvidenceEnrichments(
+            IReadOnlyList<RegulatoryEvidenceEnrichment>? enrichments)
+        {
+            return enrichments?.Select(item => new
+            {
+                enrichmentId = item.EnrichmentId,
+                documentId = item.DocumentId,
+                chunkId = item.ChunkId,
+                rank = item.Rank,
+                score = item.Score,
+                original = new
+                {
+                    snippet = item.Original.Snippet,
+                    citation = ProjectRegulatoryEvidenceCitation(item.Original.Citation)
+                },
+                document = item.Document is null
+                    ? null
+                    : new
+                    {
+                        id = item.Document.Id,
+                        source = item.Document.Source,
+                        documentType = item.Document.DocumentType,
+                        resolutionNumber = item.Document.ResolutionNumber,
+                        title = item.Document.Title,
+                        publicationDate = item.Document.PublicationDate,
+                        effectiveDate = item.Document.EffectiveDate,
+                        url = item.Document.Url,
+                        status = item.Document.Status,
+                        requiresReview = item.Document.RequiresReview,
+                        retrievedAt = item.Document.RetrievedAt,
+                        text = item.Document.Text,
+                        originalTextLength = item.Document.OriginalTextLength,
+                        isTruncated = item.Document.IsTruncated,
+                        metadata = item.Document.Metadata,
+                        citations = item.Document.Citations
+                            .Select(ProjectRegulatoryEvidenceCitation)
+                            .ToList()
+                    },
+                article = item.Article is null
+                    ? null
+                    : new
+                    {
+                        citation = ProjectRegulatoryEvidenceCitation(item.Article.Citation),
+                        text = item.Article.Text,
+                        confidence = item.Article.Confidence,
+                        originalTextLength = item.Article.OriginalTextLength,
+                        isTruncated = item.Article.IsTruncated
+                    },
+                status = item.Status,
+                limitations = item.Limitations
+            }).ToList();
+        }
+
+        private static object ProjectRegulatoryEvidenceCitation(
+            RegulatoryEvidenceCitation citation)
+        {
+            return new
+            {
+                source = citation.Source,
+                documentType = citation.DocumentType,
+                resolutionNumber = citation.ResolutionNumber,
+                title = citation.Title,
+                chapter = citation.Chapter,
+                section = citation.Section,
+                article = citation.Article,
+                publicationDate = citation.PublicationDate,
+                url = citation.Url,
+                quotedText = citation.QuotedText
+            };
+        }
+
         private static string ResolveFinancialEvidenceSeverity(
             RiskEvidenceItem evidence,
             IReadOnlyList<FinancialRiskSignal> signals)
@@ -578,7 +656,8 @@ namespace Orchestration.Application.AnalysisSessions
         }
 
         private static object? ProjectLegalQueryStrategy(
-            object? queryStrategy)
+            object? queryStrategy,
+            IReadOnlyList<RegulatoryEvidenceEnrichment>? evidenceEnrichments)
         {
             if (queryStrategy is not LegalQueryStrategyAudit audit)
             {
@@ -608,7 +687,52 @@ namespace Orchestration.Application.AnalysisSessions
                     executionStatus = query.ExecutionStatus,
                     resultCount = query.ResultCount,
                     citedEvidenceCount = query.CitedEvidenceCount
-                })
+                }),
+                enrichments = audit.Enrichments?.Select(item =>
+                {
+                    var enrichment = evidenceEnrichments?.FirstOrDefault(candidate =>
+                        string.Equals(
+                            candidate.EnrichmentId,
+                            item.EnrichmentId,
+                            StringComparison.Ordinal
+                        )
+                    );
+
+                    return new
+                    {
+                        enrichmentId = item.EnrichmentId,
+                        rank = item.Rank,
+                        candidateKey = item.CandidateKey,
+                        score = item.Score,
+                        contributingQueryIndices = item.ContributingQueryIndices,
+                        document = ProjectLegalEnrichmentStage(
+                            item.Document,
+                            enrichment?.Document?.Text.Length
+                        ),
+                        article = ProjectLegalEnrichmentStage(
+                            item.Article,
+                            enrichment?.Article?.Text.Length
+                        ),
+                        finalStatus = item.Status,
+                        limitationCodes = item.LimitationCodes
+                    };
+                }).ToList()
+            };
+        }
+
+        private static object ProjectLegalEnrichmentStage(
+            LegalCnvEnrichmentStageAudit stage,
+            int? storedTextLength)
+        {
+            return new
+            {
+                selected = stage.Selected,
+                attempted = stage.Attempted,
+                fromCache = stage.FromCache,
+                status = stage.Status,
+                originalTextLength = stage.OriginalTextLength,
+                storedTextLength,
+                isTruncated = stage.IsTruncated
             };
         }
 

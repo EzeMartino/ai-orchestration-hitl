@@ -1,5 +1,6 @@
 using CSnakes.Runtime;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
@@ -180,10 +181,13 @@ builder.Services
     .WithPipInstaller(pythonLockFile);
 
 // Legal agent and regulatory knowledge source configuration
-builder.Services.Configure<CnvRegulationMcpOptions>(
-    builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName)
-);
+builder.Services
+    .AddOptions<CnvRegulationMcpOptions>()
+    .Bind(builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<CnvRegulationMcpOptions>, CnvRegulationMcpOptionsValidator>();
 builder.Services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
+builder.Services.AddScoped<CnvRegulatoryHitEnricher>();
 
 var cnvMcpOptions = builder.Configuration
     .GetSection(CnvRegulationMcpOptions.SectionName)

@@ -101,7 +101,9 @@ public sealed class PostgresRegulationRepositoryIntegrationTests
             new GetRegulationArticleRequest { Article = "Articulo 98765" },
             CancellationToken.None);
 
-        response.Citation.Source.Should().Be("Infoleg");
+        response.Found.Should().BeTrue();
+        response.Citation.Should().NotBeNull();
+        response.Citation!.Source.Should().Be("Infoleg");
         response.Citation.ResolutionNumber.Should().Be("622/2013");
         response.Citation.Article.Should().Be("Articulo 98765");
         response.Warnings.Should().Contain(["candidate source", "requires review"]);

@@ -63,7 +63,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         LegalQueryStrategyAudit? QueryStrategy = null,
         LegalAnalysisReviewResult? LegalReview = null,
         bool RequiresHumanReview = false,
-        RegulatoryEvidenceAssessment? EvidenceAssessment = null);
+        RegulatoryEvidenceAssessment? EvidenceAssessment = null,
+        IReadOnlyList<RegulatoryEvidenceEnrichment?>? EvidenceEnrichments = null);
 
     public DataAgentResult? TryMapDataResult(
         IReadOnlyList<ToolExecutionResult> executedCalls)
@@ -406,9 +407,22 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         if (root.ValueKind != JsonValueKind.Object ||
             !TryGetUniquePropertyIgnoreCase(
                 root,
+                "evidenceEnrichments",
+                out var enrichments,
+                out var hasEnrichments) ||
+            !TryGetUniquePropertyIgnoreCase(
+                root,
                 "queryStrategy",
                 out var strategy,
                 out var hasStrategy))
+        {
+            return false;
+        }
+
+        if (hasEnrichments &&
+            enrichments.ValueKind != JsonValueKind.Null &&
+            (enrichments.ValueKind != JsonValueKind.Array ||
+             HasCaseEquivalentDuplicates(enrichments)))
         {
             return false;
         }
@@ -419,6 +433,7 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
         }
 
         if (strategy.ValueKind != JsonValueKind.Object ||
+            HasCaseEquivalentDuplicates(strategy) ||
             !TryGetUniquePropertyIgnoreCase(
                 strategy,
                 "financialAnalysisStatus",
@@ -484,7 +499,13 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             !TrySnapshotLegalReview(payload.LegalReview, out var legalReview) ||
             !TrySnapshotEvidenceAssessment(
                 payload.EvidenceAssessment,
-                out var evidenceAssessment))
+                out var evidenceAssessment) ||
+            !RegulatoryEvidenceEnrichmentMapper.TrySnapshotEnrichments(
+                payload.EvidenceEnrichments,
+                out var evidenceEnrichments) ||
+            !RegulatoryEvidenceEnrichmentMapper.AreAligned(
+                evidenceEnrichments,
+                queryStrategy))
         {
             return null;
         }
@@ -499,7 +520,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             queryStrategy,
             legalReview,
             payload.RequiresHumanReview,
-            evidenceAssessment
+            evidenceAssessment,
+            evidenceEnrichments
         );
     }
 
@@ -538,8 +560,20 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             .OrderBy(engine => engine, StringComparer.Ordinal)
             .ToArray();
         var legalReview = MergeLegalReviews(results);
+        var evidenceEnrichments =
+            RegulatoryEvidenceEnrichmentMapper.MergeEnrichments(results);
+        var queryStrategy = MergeQueryStrategies(results, evidenceEnrichments);
+        if (evidenceEnrichments is not null &&
+            queryStrategy?.Enrichments is null)
+        {
+            return null;
+        }
+
         var requiresHumanReview = results.Any(result => result.RequiresHumanReview) ||
-            evidenceAssessment?.RequiresHumanReview == true;
+            evidenceAssessment?.RequiresHumanReview == true ||
+            evidenceEnrichments?.Any(enrichment =>
+                enrichment.Status !=
+                    RegulatoryEvidenceEnrichmentStatuses.Verified) == true;
 
         if (evidenceAssessment is not null)
         {
@@ -554,10 +588,11 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
                 Engine: string.Join(" + ", engines),
                 Evidence: Array.AsReadOnly(evidence),
                 Warnings: Array.AsReadOnly(warnings),
-                QueryStrategy: MergeQueryStrategies(results),
+                QueryStrategy: queryStrategy,
                 LegalReview: legalReview,
                 RequiresHumanReview: requiresHumanReview,
-                EvidenceAssessment: evidenceAssessment);
+                EvidenceAssessment: evidenceAssessment,
+                EvidenceEnrichments: evidenceEnrichments);
         }
 
         var highestRisk = results
@@ -573,9 +608,10 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             Engine: string.Join(" + ", engines),
             Evidence: Array.AsReadOnly(evidence),
             Warnings: Array.AsReadOnly(warnings),
-            QueryStrategy: MergeQueryStrategies(results),
+            QueryStrategy: queryStrategy,
             LegalReview: legalReview,
-            RequiresHumanReview: requiresHumanReview);
+            RequiresHumanReview: requiresHumanReview,
+            EvidenceEnrichments: evidenceEnrichments);
     }
 
     private static LegalAnalysisReviewResult? MergeLegalReviews(
@@ -709,7 +745,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
     };
 
     private static LegalQueryStrategyAudit? MergeQueryStrategies(
-        IReadOnlyList<LegalAgentResult> results)
+        IReadOnlyList<LegalAgentResult> results,
+        IReadOnlyList<RegulatoryEvidenceEnrichment>? mergedEnrichments)
     {
         var strategies = results
             .Select(result => result.QueryStrategy as LegalQueryStrategyAudit)
@@ -719,7 +756,21 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             return null;
         }
 
-        var present = strategies.Cast<LegalQueryStrategyAudit>().ToArray();
+        var present = strategies
+            .Cast<LegalQueryStrategyAudit>()
+            .OrderBy(
+                strategy => JsonSerializer.Serialize(strategy, JsonOptions),
+                StringComparer.Ordinal)
+            .ToArray();
+        var queryOffset = 0;
+        var strategyContexts = new List<(LegalQueryStrategyAudit Strategy, int QueryOffset)>(
+            present.Length);
+        foreach (var strategy in present)
+        {
+            strategyContexts.Add((strategy, queryOffset));
+            queryOffset += strategy.Queries.Count;
+        }
+
         var queries = present.SelectMany(strategy => strategy.Queries).ToArray();
         var total = queries.Length;
         var mergedQueries = queries.Select((query, index) => new LegalCnvQueryAudit(
@@ -764,9 +815,18 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             FailedStages: Array.AsReadOnly(present
                 .SelectMany(strategy => strategy.FailedStages)
                 .GroupBy(stage => stage.Operation, StringComparer.Ordinal)
-                .Select(group => group.First())
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .Select(group => group
+                    .OrderBy(
+                        stage => stage.FailureCode,
+                        StringComparer.Ordinal)
+                    .First())
                 .ToArray()),
-            Queries: Array.AsReadOnly(mergedQueries));
+            Queries: Array.AsReadOnly(mergedQueries),
+            Enrichments: RegulatoryEvidenceEnrichmentMapper.MergeAudits(
+                strategyContexts,
+                mergedEnrichments,
+                results));
     }
 
     private static bool TrySnapshotEvidenceAssessment(
@@ -831,6 +891,14 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             return false;
         }
 
+        if (!RegulatoryEvidenceEnrichmentMapper.TrySnapshotAudits(
+                strategy.Enrichments,
+                strategy.Queries.Count,
+                out var enrichmentAudits))
+        {
+            return false;
+        }
+
         var failedOperations = new HashSet<string>(StringComparer.Ordinal);
         var failedStages = new List<LegalDataStageFailureAudit>(
             strategy.FailedStages.Count);
@@ -879,7 +947,8 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             strategy.DataToolStatus,
             strategy.FinancialAnalysisStatus,
             Array.AsReadOnly(failedStages.ToArray()),
-            Array.AsReadOnly(queries.ToArray()));
+            Array.AsReadOnly(queries.ToArray()),
+            enrichmentAudits);
         return true;
     }
 

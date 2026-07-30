@@ -5,7 +5,7 @@ using CnvRegulation.Infrastructure.Chunking;
 namespace CnvRegulation.Infrastructure.InMemory;
 
 /// <summary>
-/// In-memory article implementation for locally ingested chunks and mock fallback data.
+/// In-memory article implementation for repository-backed CNV chunks.
 /// </summary>
 public sealed class InMemoryRegulationArticleService(
     IRegulationChunkRepository chunkRepository,
@@ -36,6 +36,7 @@ public sealed class InMemoryRegulationArticleService(
 
             return new GetRegulationArticleResponse
             {
+                Found = true,
                 Text = chunk.Text,
                 Citation = new CnvRegulation.Domain.RegulationCitation
                 {
@@ -55,27 +56,13 @@ public sealed class InMemoryRegulationArticleService(
             };
         }
 
-        var article = string.IsNullOrWhiteSpace(request.Article)
-            ? "Articulo mock"
-            : request.Article.Trim();
-        var title = string.IsNullOrWhiteSpace(request.Title)
-            ? "Normas CNV N.T. 2013"
-            : request.Title.Trim();
-        var text = $"Mock regulatory text for {article}. This placeholder does not represent official CNV text.";
-
         return new GetRegulationArticleResponse
         {
-            Text = text,
-            Citation = MockRegulationData.CreateCitation(
-                title,
-                "Normas CNV",
-                null,
-                request.Chapter,
-                request.Section,
-                article,
-                text),
-            Confidence = 0.56,
-            Warnings = [MockRegulationData.MockWarning]
+            Found = false,
+            Text = null,
+            Citation = null,
+            Confidence = 0,
+            Warnings = [$"No se encontró el artículo regulatorio '{request.Article?.Trim()}'."]
         };
     }
 

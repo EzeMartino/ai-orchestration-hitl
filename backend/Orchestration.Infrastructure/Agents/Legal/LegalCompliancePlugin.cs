@@ -81,7 +81,8 @@ public sealed class LegalCompliancePlugin(
             QueryStrategy: review.QueryStrategy,
             LegalReview: review.LegalReview,
             RequiresHumanReview: review.RequiresHumanReview,
-            EvidenceAssessment: review.EvidenceAssessment
+            EvidenceAssessment: review.EvidenceAssessment,
+            EvidenceEnrichments: review.EvidenceEnrichments
         );
     }
 

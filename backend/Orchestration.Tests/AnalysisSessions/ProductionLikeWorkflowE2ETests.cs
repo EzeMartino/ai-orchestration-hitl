@@ -24,6 +24,7 @@ using Orchestration.Application.Agents.Shared;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner;
 using Orchestration.Application.Agents.Planner.Reasoning;
 using Orchestration.Application.Agents.Planner.ToolCalling;
@@ -49,6 +50,14 @@ public sealed class ProductionLikeWorkflowE2ETests
     private const string UncitedCnvTitle = "Uncited test result";
     private const string UncitedCnvSnippet =
         "Uncited result should not become strong legal support.";
+    private const string VerifiedOriginalSnippet =
+        "Fragmento original del resultado de búsqueda CNV para verificación E2E.";
+    private const string UnavailableOriginalSnippet =
+        "Fragmento original cuyo contexto canónico no estará disponible.";
+    private static readonly string VerifiedCanonicalDocumentText =
+        "CONTEXTO-CANONICO-DOCUMENTO-" + new string('D', 96);
+    private static readonly string VerifiedCanonicalArticleText =
+        "CONTEXTO-CANONICO-ARTICULO-" + new string('A', 72);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [Fact]
@@ -276,6 +285,260 @@ public sealed class ProductionLikeWorkflowE2ETests
             .ToListAsync();
         persistedEvents.Select(evt => evt.Type).Should().Contain("analysis_completed");
         persistedEvents.Count.Should().Be(activityPublisher.PublishedEvents.Count);
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_CnvEnrichment_ShouldPersistBoundedCanonicalContextAndUnchangedLegalPolicy()
+    {
+        const int documentLimit = 48;
+        const int articleLimit = 36;
+
+        await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var cnvClient = new FakeProductionCnvRegulationMcpClient(
+            canonicalOutcome: CnvCanonicalFixtureOutcome.PartialAndUnavailable);
+        PlannerAgentResult? plannerResult = null;
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            cnvClient,
+            plannerResultObserver: result => plannerResult = result,
+            maxEnrichedHits: 2,
+            maxDocumentContextCharacters: documentLimit,
+            maxArticleContextCharacters: articleLimit);
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        var startResult = await controller.StartSession(session.Id, CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        plannerResult.Should().NotBeNull();
+        var legalResult = plannerResult!.LegalResult;
+        legalResult.HasComplianceRisk.Should().BeFalse();
+        legalResult.RiskLevel.Should().Be("NotEstablished");
+        legalResult.RequiresHumanReview.Should().BeTrue();
+        legalResult.EvidenceAssessment.Should().NotBeNull();
+        legalResult.EvidenceAssessment!.Applicability.Should().Be("NotEstablished");
+        legalResult.EvidenceAssessment.Relevance.Should().Be("Strong");
+        legalResult.EvidenceAssessment.Severity.Should().Be("Warning");
+        legalResult.EvidenceAssessment.RequiresHumanReview.Should().BeTrue();
+
+        legalResult.EvidenceEnrichments.Should().NotBeNull();
+        var enrichments = legalResult.EvidenceEnrichments!;
+        enrichments.Select(item => item.Status).Should().Equal(
+            RegulatoryEvidenceEnrichmentStatuses.Partial,
+            RegulatoryEvidenceEnrichmentStatuses.Unavailable);
+        var partial = enrichments[0];
+        partial.Original.Snippet.Should().Be(VerifiedOriginalSnippet);
+        partial.Document.Should().NotBeNull();
+        partial.Document!.Text.Should().Be(VerifiedCanonicalDocumentText[..documentLimit]);
+        partial.Document.OriginalTextLength.Should().Be(VerifiedCanonicalDocumentText.Length);
+        partial.Document.IsTruncated.Should().BeTrue();
+        partial.Article.Should().BeNull();
+        partial.Limitations.Should().Contain(
+            "El contexto canónico del documento CNV fue truncado por límites de tamaño.",
+            "No se pudo verificar el contexto canónico del artículo CNV porque la consulta agotó el tiempo de espera.");
+
+        var unavailable = enrichments[1];
+        unavailable.Original.Snippet.Should().Be(UnavailableOriginalSnippet);
+        unavailable.Document.Should().BeNull();
+        unavailable.Article.Should().BeNull();
+        unavailable.Limitations.Should().Contain(
+            "No se pudo verificar el contexto canónico del documento CNV porque no fue encontrado.",
+            "No se pudo verificar el contexto canónico del artículo CNV porque no fue encontrado.");
+
+        var firstRetrieval = cnvClient.Operations.FindIndex(operation =>
+            operation.StartsWith("document:", StringComparison.Ordinal) ||
+            operation.StartsWith("article:", StringComparison.Ordinal));
+        var lastSearchCompletion = cnvClient.Operations.FindLastIndex(operation =>
+            operation.StartsWith("search:completed:", StringComparison.Ordinal));
+        firstRetrieval.Should().BeGreaterThan(lastSearchCompletion);
+        cnvClient.Operations.Count(operation =>
+            operation.StartsWith("document:", StringComparison.Ordinal)).Should().Be(2);
+        cnvClient.Operations.Count(operation =>
+            operation.StartsWith("article:", StringComparison.Ordinal)).Should().Be(2);
+
+        dbContext.ChangeTracker.Clear();
+        var storedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        using var storedContext = JsonDocument.Parse(storedSession.ContextJson);
+        var compliance = storedContext.RootElement.GetProperty("compliance");
+        compliance.GetProperty("riskDetected").GetBoolean().Should().BeFalse();
+        compliance.GetProperty("riskLevel").GetString().Should().Be("NotEstablished");
+        compliance.GetProperty("requiresHumanReview").GetBoolean().Should().BeTrue();
+        compliance.GetProperty("evidenceAssessment")
+            .GetProperty("applicability").GetString().Should().Be("NotEstablished");
+
+        var persistedEnrichments = compliance.GetProperty("evidenceEnrichments")
+            .EnumerateArray()
+            .ToArray();
+        persistedEnrichments.Should().HaveCount(2);
+        var persistedPartial = persistedEnrichments[0];
+        persistedPartial.GetProperty("status").GetString()
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Partial);
+        persistedPartial.GetProperty("original").GetProperty("snippet")
+            .GetString().Should().Be(VerifiedOriginalSnippet);
+        persistedPartial.GetProperty("document").GetProperty("text")
+            .GetString().Should().Be(VerifiedCanonicalDocumentText[..documentLimit]);
+        persistedPartial.GetProperty("document").GetProperty("originalTextLength")
+            .GetInt32().Should().Be(VerifiedCanonicalDocumentText.Length);
+        persistedPartial.GetProperty("document").GetProperty("isTruncated")
+            .GetBoolean().Should().BeTrue();
+        persistedPartial.GetProperty("article").ValueKind.Should().Be(JsonValueKind.Null);
+        persistedPartial.GetProperty("original").GetProperty("snippet").GetString()
+            .Should().NotBe(persistedPartial.GetProperty("document").GetProperty("text").GetString());
+
+        var persistedUnavailable = persistedEnrichments[1];
+        persistedUnavailable.GetProperty("status").GetString()
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Unavailable);
+        persistedUnavailable.GetProperty("limitations").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain(
+                "No se pudo verificar el contexto canónico del documento CNV porque no fue encontrado.",
+                "No se pudo verificar el contexto canónico del artículo CNV porque no fue encontrado.");
+
+        var queryStrategy = compliance.GetProperty("queryStrategy");
+        var enrichmentAudits = queryStrategy.GetProperty("enrichments")
+            .EnumerateArray()
+            .ToArray();
+        enrichmentAudits.Should().HaveCount(2);
+        enrichmentAudits[0].GetProperty("rank").GetInt32().Should().Be(1);
+        enrichmentAudits[0].GetProperty("contributingQueryIndices")
+            .GetArrayLength().Should().Be(cnvClient.ReceivedRequests.Count);
+        enrichmentAudits[0].GetProperty("document").GetProperty("selected")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[0].GetProperty("document").GetProperty("attempted")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[0].GetProperty("document").GetProperty("fromCache")
+            .GetBoolean().Should().BeFalse();
+        enrichmentAudits[0].GetProperty("document").GetProperty("status")
+            .GetString().Should().Be(LegalCnvEnrichmentStageStatuses.Succeeded);
+        enrichmentAudits[0].GetProperty("document").GetProperty("originalTextLength")
+            .GetInt32().Should().Be(VerifiedCanonicalDocumentText.Length);
+        enrichmentAudits[0].GetProperty("document").GetProperty("storedTextLength")
+            .GetInt32().Should().Be(documentLimit);
+        enrichmentAudits[0].GetProperty("document").GetProperty("isTruncated")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[0].GetProperty("article").GetProperty("status")
+            .GetString().Should().Be(LegalCnvEnrichmentStageStatuses.TimedOut);
+        enrichmentAudits[0].GetProperty("article").GetProperty("selected")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[0].GetProperty("article").GetProperty("attempted")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[0].GetProperty("article").GetProperty("fromCache")
+            .GetBoolean().Should().BeFalse();
+        enrichmentAudits[0].GetProperty("article").GetProperty("originalTextLength")
+            .ValueKind.Should().Be(JsonValueKind.Null);
+        enrichmentAudits[0].GetProperty("article").GetProperty("storedTextLength")
+            .ValueKind.Should().Be(JsonValueKind.Null);
+        enrichmentAudits[0].GetProperty("article").GetProperty("isTruncated")
+            .GetBoolean().Should().BeFalse();
+        enrichmentAudits[0].GetProperty("limitationCodes").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain("document_truncated", "article_timed_out");
+        enrichmentAudits[1].GetProperty("document").GetProperty("status")
+            .GetString().Should().Be(LegalCnvEnrichmentStageStatuses.Missing);
+        enrichmentAudits[1].GetProperty("document").GetProperty("attempted")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[1].GetProperty("document").GetProperty("fromCache")
+            .GetBoolean().Should().BeFalse();
+        enrichmentAudits[1].GetProperty("article").GetProperty("status")
+            .GetString().Should().Be(LegalCnvEnrichmentStageStatuses.Missing);
+        enrichmentAudits[1].GetProperty("article").GetProperty("attempted")
+            .GetBoolean().Should().BeTrue();
+        enrichmentAudits[1].GetProperty("article").GetProperty("fromCache")
+            .GetBoolean().Should().BeFalse();
+        enrichmentAudits[1].GetProperty("limitationCodes").EnumerateArray()
+            .Select(item => item.GetString())
+            .Should().Contain("document_missing", "article_missing");
+        var queryStrategyJson = queryStrategy.GetRawText();
+        queryStrategyJson.Should().NotContain(VerifiedOriginalSnippet);
+        queryStrategyJson.Should().NotContain(VerifiedCanonicalDocumentText[..documentLimit]);
+        queryStrategyJson.Should().NotContain("https://");
+
+        activityPublisher.PublishedEvents.Should().ContainSingle(activity =>
+            activity.Type == "legal_cnv_enrichment_completed");
+    }
+
+    [Fact]
+    public async Task ProductionLikeWorkflow_PlanDrivenMultiCallCnvEnrichment_ShouldAggregateDeterministicallyInEitherResultOrder()
+    {
+        var forward = await RunIntegratedPlannerMultiCallEnrichmentWorkflowAsync(
+            reverseLegalResults: false);
+        var reversed = await RunIntegratedPlannerMultiCallEnrichmentWorkflowAsync(
+            reverseLegalResults: true);
+
+        forward.LegalInvocationCount.Should().Be(2);
+        reversed.LegalInvocationCount.Should().Be(2);
+        forward.ProposalInvocationCount.Should().Be(1);
+        reversed.ProposalInvocationCount.Should().Be(1);
+        forward.NormalizerReceivedCallCount.Should().Be(2);
+        reversed.NormalizerReceivedCallCount.Should().Be(2);
+        forward.ValidatorReceivedCallCount.Should().Be(2);
+        reversed.ValidatorReceivedCallCount.Should().Be(2);
+        AssertTwoLegalCallsExecuted(forward.PlannerResult);
+        AssertTwoLegalCallsExecuted(reversed.PlannerResult);
+        AssertTwoLegalCallsPersisted(forward.ToolPlanJson);
+        AssertTwoLegalCallsPersisted(reversed.ToolPlanJson);
+
+        var forwardLegal = forward.PlannerResult.LegalResult;
+        var reversedLegal = reversed.PlannerResult.LegalResult;
+        forwardLegal.HasComplianceRisk.Should().BeFalse();
+        forwardLegal.RiskLevel.Should().Be("NotEstablished");
+        forwardLegal.RequiresHumanReview.Should().BeTrue();
+        forwardLegal.EvidenceAssessment!.Applicability.Should().Be("NotEstablished");
+        forwardLegal.EvidenceAssessment.Severity.Should().Be("Warning");
+        forwardLegal.EvidenceEnrichments.Should().BeEquivalentTo(
+            reversedLegal.EvidenceEnrichments,
+            options => options.WithStrictOrdering());
+        ((LegalQueryStrategyAudit)forwardLegal.QueryStrategy!).Should().BeEquivalentTo(
+            (LegalQueryStrategyAudit)reversedLegal.QueryStrategy!,
+            options => options.WithStrictOrdering());
+        forward.EvidenceEnrichmentsJson.Should().Be(reversed.EvidenceEnrichmentsJson);
+        forward.EnrichmentAuditJson.Should().Be(reversed.EnrichmentAuditJson);
+
+        forwardLegal.EvidenceEnrichments.Should().ContainSingle();
+        var merged = forwardLegal.EvidenceEnrichments![0];
+        merged.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        merged.Article.Should().NotBeNull();
+        merged.Article!.Text.Should().Be(VerifiedCanonicalArticleText[..36]);
+        merged.Limitations.Should().Contain(
+            "No se pudo verificar el contexto canónico del artículo CNV porque la consulta agotó el tiempo de espera.",
+            "El contexto canónico del artículo CNV fue truncado por límites de tamaño.");
+
+        var queryStrategy = (LegalQueryStrategyAudit)forwardLegal.QueryStrategy!;
+        queryStrategy.Queries.Should().HaveCount(2);
+        queryStrategy.Enrichments.Should().ContainSingle();
+        var mergedAudit = queryStrategy.Enrichments![0];
+        mergedAudit.Status.Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        mergedAudit.ContributingQueryIndices.Should().Equal(1, 2);
+        mergedAudit.Article.Status.Should().Be(LegalCnvEnrichmentStageStatuses.Succeeded);
+        mergedAudit.LimitationCodes.Should().Contain(
+            "article_timed_out",
+            "article_truncated");
+
+        using var persistedEvidence = JsonDocument.Parse(forward.EvidenceEnrichmentsJson);
+        persistedEvidence.RootElement.GetArrayLength().Should().Be(1);
+        persistedEvidence.RootElement[0].GetProperty("status").GetString()
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        persistedEvidence.RootElement[0].GetProperty("article").GetProperty("text")
+            .GetString().Should().Be(VerifiedCanonicalArticleText[..36]);
+
+        using var persistedAudit = JsonDocument.Parse(forward.EnrichmentAuditJson);
+        persistedAudit.RootElement.GetArrayLength().Should().Be(1);
+        persistedAudit.RootElement[0].GetProperty("contributingQueryIndices")
+            .EnumerateArray().Select(item => item.GetInt32()).Should().Equal(1, 2);
+        persistedAudit.RootElement[0].GetProperty("limitationCodes")
+            .EnumerateArray().Select(item => item.GetString()).Should().Contain(
+                "article_timed_out",
+                "article_truncated");
     }
 
     [Fact]
@@ -691,6 +954,107 @@ public sealed class ProductionLikeWorkflowE2ETests
         persistedEvents.Select(evt => evt.Type).Should().NotContain("analysis_completed");
     }
 
+    private static async Task<PlannerMultiCallWorkflowSnapshot>
+        RunIntegratedPlannerMultiCallEnrichmentWorkflowAsync(
+            bool reverseLegalResults)
+    {
+        await using var dbContext =
+            StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
+        var activityPublisher = new PersistingActivityEventPublisher(dbContext);
+        var proposalService = new TwoLegalCallsProposalService();
+        var normalizer = new PreserveTwoLegalCallsNormalizer();
+        var validator = new ApproveTwoLegalCallsValidator();
+        var legalAgent = new SequencedEnrichmentLegalAgent(reverseLegalResults);
+        PlannerAgentResult? plannerResult = null;
+        var controller = CreateController(
+            dbContext,
+            activityPublisher,
+            new FakeProductionPythonFinancialAnalysisService(),
+            new FakeProductionCnvRegulationMcpClient(noEvidence: true),
+            ToolCallingExecutionMode.PlanDriven,
+            proposalService,
+            plannerResultObserver: result => plannerResult = result,
+            legalAgentOverride: legalAgent,
+            toolPlanNormalizer: normalizer,
+            toolPlanValidator: validator);
+
+        await controller.CreateSession(CancellationToken.None);
+        var session = await dbContext.AnalysisSessions.SingleAsync();
+        await controller.SaveFinancialMetrics(
+            session.Id,
+            CreateStructuredMetricsInput(),
+            CancellationToken.None);
+
+        var startResult = await controller.StartSession(
+            session.Id,
+            CancellationToken.None);
+
+        startResult.Should().BeOfType<OkObjectResult>();
+        plannerResult.Should().NotBeNull();
+        dbContext.ChangeTracker.Clear();
+        var storedSession = await dbContext.AnalysisSessions
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == session.Id);
+        using var storedContext = JsonDocument.Parse(storedSession.ContextJson);
+        var compliance = storedContext.RootElement.GetProperty("compliance");
+
+        return new PlannerMultiCallWorkflowSnapshot(
+            plannerResult!,
+            legalAgent.InvocationCount,
+            proposalService.InvocationCount,
+            normalizer.ReceivedCallCount,
+            validator.ReceivedCallCount,
+            compliance.GetProperty("evidenceEnrichments").GetRawText(),
+            compliance.GetProperty("queryStrategy")
+                .GetProperty("enrichments").GetRawText(),
+            storedContext.RootElement.GetProperty("toolPlan").GetRawText());
+    }
+
+    private static void AssertTwoLegalCallsExecuted(
+        PlannerAgentResult plannerResult)
+    {
+        plannerResult.ToolPlan.ProposedCalls.Should().HaveCount(2)
+            .And.OnlyContain(call =>
+                call.ToolName == PlannerToolCatalog.SearchCnvRegulationName);
+        plannerResult.ToolPlan.ApprovedCalls.Should().HaveCount(2)
+            .And.OnlyContain(call =>
+                call.ToolName == PlannerToolCatalog.SearchCnvRegulationName);
+        plannerResult.ToolPlan.RejectedCalls.Should().BeEmpty();
+        plannerResult.ToolPlan.ExecutedCalls.Should().HaveCount(2)
+            .And.OnlyContain(call =>
+                call.ToolName == PlannerToolCatalog.SearchCnvRegulationName &&
+                call.Status == ToolExecutionStatus.Executed &&
+                call.Succeeded);
+    }
+
+    private static void AssertTwoLegalCallsPersisted(
+        string toolPlanJson)
+    {
+        using var toolPlan = JsonDocument.Parse(toolPlanJson);
+        toolPlan.RootElement.GetProperty("proposedCalls").GetArrayLength().Should().Be(2);
+        toolPlan.RootElement.GetProperty("approvedCalls").GetArrayLength().Should().Be(2);
+        toolPlan.RootElement.GetProperty("rejectedCalls").GetArrayLength().Should().Be(0);
+        var executedCalls = toolPlan.RootElement.GetProperty("executedCalls")
+            .EnumerateArray()
+            .ToArray();
+        executedCalls.Should().HaveCount(2);
+        executedCalls.Should().OnlyContain(call =>
+            call.GetProperty("toolName").GetString() ==
+                PlannerToolCatalog.SearchCnvRegulationName &&
+            call.GetProperty("status").GetString() == "Executed" &&
+            call.GetProperty("succeeded").GetBoolean());
+    }
+
+    private sealed record PlannerMultiCallWorkflowSnapshot(
+        PlannerAgentResult PlannerResult,
+        int LegalInvocationCount,
+        int ProposalInvocationCount,
+        int NormalizerReceivedCallCount,
+        int ValidatorReceivedCallCount,
+        string EvidenceEnrichmentsJson,
+        string EnrichmentAuditJson,
+        string ToolPlanJson);
+
     private static AnalysisSessionsController CreateController(
         OrchestrationDbContext dbContext,
         PersistingActivityEventPublisher activityPublisher,
@@ -701,7 +1065,13 @@ public sealed class ProductionLikeWorkflowE2ETests
         Action<FinancialReportContext>? dataReportObserver = null,
         Action<FinancialReportContext>? legalReportObserver = null,
         Action<AnalysisOrchestratorService>? orchestratorObserver = null,
-        Action<PlannerAgentResult>? plannerResultObserver = null)
+        Action<PlannerAgentResult>? plannerResultObserver = null,
+        int maxEnrichedHits = 0,
+        int maxDocumentContextCharacters = 12_000,
+        int maxArticleContextCharacters = 6_000,
+        ILegalAgent? legalAgentOverride = null,
+        IToolPlanNormalizer? toolPlanNormalizer = null,
+        IToolPlanValidator? toolPlanValidator = null)
     {
         var dataAgentOptions = new DataAgentOptions
         {
@@ -739,24 +1109,31 @@ public sealed class ProductionLikeWorkflowE2ETests
         {
             dataAgent = new ObservingDataAgent(dataAgent, dataReportObserver);
         }
+        var cnvOptions = Options.Create(new CnvRegulationMcpOptions
+        {
+            Enabled = true,
+            Command = "not-used",
+            Args = [],
+            DefaultLimit = 5,
+            MaxEnrichedHits = maxEnrichedHits,
+            MaxDocumentContextCharacters = maxDocumentContextCharacters,
+            MaxArticleContextCharacters = maxArticleContextCharacters
+        });
         var legalSource = new McpRegulatoryKnowledgeSource(
             cnvClient,
-            Options.Create(new CnvRegulationMcpOptions
-            {
-                Enabled = true,
-                Command = "not-used",
-                Args = [],
-                DefaultLimit = 5
-            }),
+            cnvOptions,
+            new CnvRegulatoryHitEnricher(
+                cnvClient,
+                cnvOptions,
+                NullLogger<CnvRegulatoryHitEnricher>.Instance),
             NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             new DeterministicLegalAnalysisReviewService(),
             dbContext,
             new FinancialAnalysisLegalCnvQueryStrategy(),
             activityPublisher
         );
-        ILegalAgent legalAgent = new SemanticKernelLegalAgent(
-            new LegalCompliancePlugin(legalSource)
-        );
+        ILegalAgent legalAgent = legalAgentOverride ??
+            new SemanticKernelLegalAgent(new LegalCompliancePlugin(legalSource));
         if (legalReportObserver is not null)
         {
             legalAgent = new ObservingLegalAgent(legalAgent, legalReportObserver);
@@ -767,8 +1144,8 @@ public sealed class ProductionLikeWorkflowE2ETests
             activityPublisher,
             new DeterministicPlannerReasoningService(),
             proposalService ?? new DeterministicToolPlanProposalService(toolCallingOptions),
-            new ToolPlanNormalizer(),
-            new ToolPlanValidator(toolCallingOptions),
+            toolPlanNormalizer ?? new ToolPlanNormalizer(),
+            toolPlanValidator ?? new ToolPlanValidator(toolCallingOptions),
             new ToolExecutionPolicy(),
             executionMode == ToolCallingExecutionMode.PlanDriven
                 ? new ControlledToolExecutor(
@@ -1604,37 +1981,464 @@ public sealed class ProductionLikeWorkflowE2ETests
         }
     }
 
+    private sealed class TwoLegalCallsProposalService : IToolPlanProposalService
+    {
+        private int _invocationCount;
+
+        public int InvocationCount => Volatile.Read(ref _invocationCount);
+
+        public Task<ToolPlan> ProposeAsync(
+            ToolPlanProposalInput input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref _invocationCount);
+
+            return Task.FromResult(new ToolPlan(
+                ProposedCalls:
+                [
+                    new ProposedToolCall(
+                        PlannerToolCatalog.SearchCnvRegulationName,
+                        new Dictionary<string, string>(),
+                        "Primera revisión legal para agregación E2E."),
+                    new ProposedToolCall(
+                        PlannerToolCatalog.SearchCnvRegulationName,
+                        new Dictionary<string, string>(),
+                        "Segunda revisión legal para agregación E2E.")
+                ],
+                ProposalSource: ToolPlanProposalSource.Deterministic));
+        }
+    }
+
+    /// <summary>
+    /// Acceptance-only seam. The production normalizer intentionally deduplicates
+    /// identical no-argument Legal calls, while defensive result aggregation must
+    /// still be proven through the complete Planner execution path.
+    /// </summary>
+    private sealed class PreserveTwoLegalCallsNormalizer : IToolPlanNormalizer
+    {
+        public int ReceivedCallCount { get; private set; }
+
+        public ToolPlan Normalize(
+            ToolPlan plan)
+        {
+            EnsureCanonicalTwoLegalCallPlan(plan);
+            ReceivedCallCount = plan.ProposedCalls.Count;
+
+            return plan;
+        }
+    }
+
+    /// <summary>
+    /// Acceptance-only seam paired with <see cref="PreserveTwoLegalCallsNormalizer"/>.
+    /// Production validation deliberately allows one satisfaction-stage call; this
+    /// fixture approves exactly two otherwise-valid canonical Legal calls so the
+    /// real policy, executor, mapper, orchestrator, and persistence can be exercised.
+    /// </summary>
+    private sealed class ApproveTwoLegalCallsValidator : IToolPlanValidator
+    {
+        public int ReceivedCallCount { get; private set; }
+
+        public ToolValidationResult Validate(
+            ToolPlan plan)
+        {
+            EnsureCanonicalTwoLegalCallPlan(plan);
+            ReceivedCallCount = plan.ProposedCalls.Count;
+
+            return new ToolValidationResult(
+                IsValid: true,
+                ApprovedCalls: plan.ProposedCalls.Select(call =>
+                    new ApprovedToolCall(
+                        call.ToolName,
+                        call.Arguments,
+                        call.Reason)).ToArray(),
+                RejectedCalls: []);
+        }
+    }
+
+    private static void EnsureCanonicalTwoLegalCallPlan(
+        ToolPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.ProposedCalls.Count != 2 ||
+            plan.ProposedCalls.Any(call =>
+                call.ToolName != PlannerToolCatalog.SearchCnvRegulationName ||
+                call.Arguments.Count != 0 ||
+                string.IsNullOrWhiteSpace(call.Reason)))
+        {
+            throw new InvalidOperationException(
+                "The multi-call acceptance fixture requires exactly two canonical no-argument Legal calls.");
+        }
+    }
+
+    private sealed class SequencedEnrichmentLegalAgent : ILegalAgent
+    {
+        private readonly IReadOnlyList<LegalAgentResult> _results;
+        private int _invocationCount;
+
+        public SequencedEnrichmentLegalAgent(
+            bool reverseResults)
+        {
+            var partial = CreateSequencedLegalResult(verified: false);
+            var verified = CreateSequencedLegalResult(verified: true);
+            _results = reverseResults
+                ? [verified, partial]
+                : [partial, verified];
+        }
+
+        public int InvocationCount => Volatile.Read(ref _invocationCount);
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken) =>
+            NextAsync(report, cancellationToken);
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            LegalReviewContext context,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return NextAsync(report, cancellationToken);
+        }
+
+        private Task<LegalAgentResult> NextAsync(
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(report);
+            cancellationToken.ThrowIfCancellationRequested();
+            var index = Interlocked.Increment(ref _invocationCount) - 1;
+            if (index >= _results.Count)
+            {
+                throw new InvalidOperationException(
+                    "The multi-call Legal fixture received more than two invocations.");
+            }
+
+            return Task.FromResult(_results[index]);
+        }
+    }
+
+    private static LegalAgentResult CreateSequencedLegalResult(
+        bool verified)
+    {
+        const int documentLimit = 48;
+        const int articleLimit = 36;
+        const string enrichmentId =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var originalCitation = new RegulatoryEvidenceCitation(
+            Source: "CNV test fixture",
+            DocumentType: "test_fixture",
+            ResolutionNumber: "E2E-VERIFIED",
+            Title: "Cita original E2E-VERIFIED",
+            Chapter: "Capítulo E2E",
+            Section: "Sección E2E",
+            Article: "Artículo 1",
+            PublicationDate: "2026-07-21",
+            Url: "https://example.test/cnv/search/cnv-e2e-verified",
+            QuotedText: VerifiedOriginalSnippet);
+        var canonicalCitation = originalCitation with
+        {
+            Title = "Cita canónica E2E-VERIFIED",
+            Url = "https://example.test/cnv/canonical/citation",
+            QuotedText = "Cita canónica del artículo E2E."
+        };
+        var document = new RegulatoryCanonicalDocument(
+            Id: "cnv-e2e-verified",
+            Source: "CNV test fixture",
+            DocumentType: "test_fixture",
+            ResolutionNumber: "E2E-VERIFIED",
+            Title: "Documento canónico CNV E2E",
+            PublicationDate: "2026-07-21",
+            EffectiveDate: "2026-07-22",
+            Url: "https://example.test/cnv/canonical/document",
+            Status: "vigente",
+            RequiresReview: true,
+            RetrievedAt: "2026-07-26T12:00:00Z",
+            Text: VerifiedCanonicalDocumentText[..documentLimit],
+            OriginalTextLength: VerifiedCanonicalDocumentText.Length,
+            IsTruncated: true,
+            Metadata: new Dictionary<string, string>
+            {
+                ["fixture"] = "planner-multi-call"
+            },
+            Citations: [canonicalCitation]);
+        var article = verified
+            ? new RegulatoryCanonicalArticle(
+                Citation: canonicalCitation,
+                Text: VerifiedCanonicalArticleText[..articleLimit],
+                Confidence: 0.97,
+                OriginalTextLength: VerifiedCanonicalArticleText.Length,
+                IsTruncated: true)
+            : null;
+        IReadOnlyList<string> limitations = verified
+            ?
+            [
+                "El contexto canónico del documento CNV fue truncado por límites de tamaño.",
+                "El contexto canónico del artículo CNV fue truncado por límites de tamaño."
+            ]
+            :
+            [
+                "El contexto canónico del documento CNV fue truncado por límites de tamaño.",
+                "No se pudo verificar el contexto canónico del artículo CNV porque la consulta agotó el tiempo de espera."
+            ];
+        var status = verified
+            ? RegulatoryEvidenceEnrichmentStatuses.Verified
+            : RegulatoryEvidenceEnrichmentStatuses.Partial;
+        var enrichment = new RegulatoryEvidenceEnrichment(
+            EnrichmentId: enrichmentId,
+            DocumentId: "cnv-e2e-verified",
+            ChunkId: "chunk-plan-multi-1",
+            Rank: 1,
+            Score: 0.91,
+            Original: new RegulatoryOriginalEvidence(
+                VerifiedOriginalSnippet,
+                originalCitation),
+            Document: document,
+            Article: article,
+            Status: status,
+            Limitations: limitations);
+        var enrichmentAudit = new LegalCnvEnrichmentAudit(
+            EnrichmentId: enrichmentId,
+            Rank: 1,
+            CandidateKey: "CNV-E2E-VERIFIED|ARTICULO1",
+            Score: 0.91,
+            ContributingQueryIndices: [1],
+            Document: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: true,
+                FromCache: false,
+                Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+                OriginalTextLength: VerifiedCanonicalDocumentText.Length,
+                IsTruncated: true),
+            Article: new LegalCnvEnrichmentStageAudit(
+                Selected: true,
+                Attempted: true,
+                FromCache: false,
+                Status: verified
+                    ? LegalCnvEnrichmentStageStatuses.Succeeded
+                    : LegalCnvEnrichmentStageStatuses.TimedOut,
+                OriginalTextLength: verified
+                    ? VerifiedCanonicalArticleText.Length
+                    : null,
+                IsTruncated: verified),
+            Status: status,
+            LimitationCodes: verified
+                ? ["document_truncated", "article_truncated"]
+                : ["document_truncated", "article_timed_out"]);
+        var queryStrategy = new LegalQueryStrategyAudit(
+            StrategyVersion: "planner-multi-call-e2e-v1",
+            Source: LegalCnvQuerySources.Fallback,
+            FallbackReason: LegalCnvFallbackReasons.NoSpecificSignals,
+            DataToolStatus: LegalDataToolStatuses.Absent,
+            FinancialAnalysisStatus: null,
+            FailedStages: [],
+            Queries:
+            [
+                new LegalCnvQueryAudit(
+                    Index: 1,
+                    Total: 1,
+                    Query: verified
+                        ? "consulta canónica verificada"
+                        : "consulta canónica parcial",
+                    RegulationArea: "Agentes",
+                    Reason: "Verificar agregación plan-driven de contexto CNV.",
+                    RelatedFinancialSignals: ["liquidez"],
+                    ExecutionStatus: LegalCnvQueryExecutionStatuses.Succeeded,
+                    ResultCount: 1,
+                    CitedEvidenceCount: 1)
+            ],
+            Enrichments: [enrichmentAudit]);
+        var assessment = new RegulatoryEvidenceAssessment(
+            EvidenceFound: true,
+            Relevance: "Strong",
+            Applicability: "NotEstablished",
+            EvidenceQuality: "Strong",
+            Severity: "Warning",
+            RequiresHumanReview: true,
+            Reasons:
+            [
+                "La evidencia recuperada requiere evaluación humana."
+            ]);
+
+        return new LegalAgentResult(
+            HasComplianceRisk: false,
+            RiskLevel: "NotEstablished",
+            Summary: verified
+                ? "Contexto canónico verificado para revisión humana."
+                : "Contexto canónico parcial para revisión humana.",
+            Engine: "Scripted Legal multi-call fixture",
+            Evidence:
+            [
+                new LegalEvidence(
+                    Regulation: "TEST-CNV-MULTI-001",
+                    Section: "Artículo 1",
+                    Finding: verified
+                        ? "Evidencia canónica verificada."
+                        : "Evidencia canónica parcial.",
+                    Source: "CNV test fixture")
+            ],
+            Warnings: limitations,
+            QueryStrategy: queryStrategy,
+            LegalReview: null,
+            RequiresHumanReview: true,
+            EvidenceAssessment: assessment,
+            EvidenceEnrichments: [enrichment]);
+    }
+
+    private enum CnvCanonicalFixtureOutcome
+    {
+        None,
+        PartialAndUnavailable
+    }
+
     private sealed class FakeProductionCnvRegulationMcpClient : ICnvRegulationMcpClient
     {
         private readonly bool _noEvidence;
+        private readonly CnvCanonicalFixtureOutcome _canonicalOutcome;
 
-        public FakeProductionCnvRegulationMcpClient(bool noEvidence = false)
+        public FakeProductionCnvRegulationMcpClient(
+            bool noEvidence = false,
+            CnvCanonicalFixtureOutcome canonicalOutcome = CnvCanonicalFixtureOutcome.None)
         {
             _noEvidence = noEvidence;
+            _canonicalOutcome = canonicalOutcome;
         }
 
         public List<CnvRegulationSearchRequest> ReceivedRequests { get; } = [];
+        public List<string> Operations { get; } = [];
 
         public bool IsConnected => true;
         public int ColdStartCount => 0;
         public int ResetCount => 0;
         public string? LastError => null;
 
+        public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+            CnvRegulationDocumentRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Operations.Add($"document:{request.DocumentId}");
+
+            if (_canonicalOutcome == CnvCanonicalFixtureOutcome.None)
+            {
+                return Task.FromResult(
+                    new CnvRegulationDocumentResponse(false, null, [], []));
+            }
+
+            if (request.DocumentId == "cnv-e2e-verified")
+            {
+                return Task.FromResult(new CnvRegulationDocumentResponse(
+                    Found: true,
+                    Document: new CnvRegulationDocument(
+                        Id: "cnv-e2e-verified",
+                        Source: "CNV test fixture",
+                        DocumentType: "test_fixture",
+                        ResolutionNumber: "E2E-VERIFIED",
+                        Title: "Documento canónico CNV E2E",
+                        PublicationDate: "2026-07-21",
+                        EffectiveDate: "2026-07-22",
+                        Url: "https://example.test/cnv/canonical/document",
+                        Status: "vigente",
+                        RequiresReview: true,
+                        RetrievedAt: "2026-07-26T12:00:00Z",
+                        Metadata: new Dictionary<string, string>
+                        {
+                            ["fixture"] = "bounded-canonical-context"
+                        },
+                        Text: VerifiedCanonicalDocumentText),
+                    Citations:
+                    [
+                        CreateCanonicalCitation(
+                            article: "Artículo 1",
+                            quotedText: "Cita canónica del documento E2E.")
+                    ],
+                    Warnings: []));
+            }
+
+            return Task.FromResult(
+                new CnvRegulationDocumentResponse(false, null, [], []));
+        }
+
+        public Task<CnvRegulationArticleResponse> GetArticleAsync(
+            CnvRegulationArticleRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Operations.Add($"article:{request.Article}");
+
+            if (_canonicalOutcome == CnvCanonicalFixtureOutcome.None)
+            {
+                return Task.FromResult(
+                    new CnvRegulationArticleResponse(false, null, null, 0, []));
+            }
+
+            if (request.Article == "Artículo 1")
+            {
+                if (_canonicalOutcome == CnvCanonicalFixtureOutcome.PartialAndUnavailable)
+                {
+                    throw new TimeoutException("Deterministic fake CNV article timeout.");
+                }
+
+                return Task.FromResult(new CnvRegulationArticleResponse(
+                    Found: true,
+                    Text: VerifiedCanonicalArticleText,
+                    Citation: CreateCanonicalCitation(
+                        article: "Artículo 1",
+                        quotedText: "Cita canónica del artículo E2E."),
+                    Confidence: 0.97,
+                    Warnings: []));
+            }
+
+            return Task.FromResult(
+                new CnvRegulationArticleResponse(false, null, null, 0, []));
+        }
+
         public Task<CnvRegulationSearchResponse> SearchAsync(
             CnvRegulationSearchRequest request,
             CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ReceivedRequests.Add(request);
+            Operations.Add($"search:started:{request.Query}");
 
             if (_noEvidence)
             {
+                Operations.Add($"search:completed:{request.Query}");
                 return Task.FromResult(new CnvRegulationSearchResponse(
                     Query: request.Query,
                     Results: [],
                     Warnings: []));
             }
 
-            return Task.FromResult(new CnvRegulationSearchResponse(
+            if (_canonicalOutcome != CnvCanonicalFixtureOutcome.None)
+            {
+                IReadOnlyList<CnvRegulationSearchResult> results =
+                [
+                    CreateCanonicalSearchResult(
+                        documentId: "cnv-e2e-verified",
+                        chunkId: "chunk-canonical-1",
+                        article: "Artículo 1",
+                        resolutionNumber: "E2E-VERIFIED",
+                        snippet: VerifiedOriginalSnippet,
+                        score: 0.91),
+                    CreateCanonicalSearchResult(
+                        documentId: "cnv-e2e-unavailable",
+                        chunkId: "chunk-canonical-2",
+                        article: "Artículo 2",
+                        resolutionNumber: "E2E-UNAVAILABLE",
+                        snippet: UnavailableOriginalSnippet,
+                        score: 0.82)
+                ];
+                Operations.Add($"search:completed:{request.Query}");
+                return Task.FromResult(new CnvRegulationSearchResponse(
+                    Query: request.Query,
+                    Results: results,
+                    Warnings: []));
+            }
+
+            var response = new CnvRegulationSearchResponse(
                 Query: request.Query,
                 Results:
                 [
@@ -1680,7 +2484,61 @@ public sealed class ProductionLikeWorkflowE2ETests
                     )
                 ],
                 Warnings: []
-            ));
+            );
+            Operations.Add($"search:completed:{request.Query}");
+            return Task.FromResult(response);
+        }
+
+        private static CnvRegulationSearchResult CreateCanonicalSearchResult(
+            string documentId,
+            string chunkId,
+            string article,
+            string resolutionNumber,
+            string snippet,
+            double score)
+        {
+            return new CnvRegulationSearchResult(
+                DocumentId: documentId,
+                ChunkId: chunkId,
+                Title: $"Resultado CNV {resolutionNumber}",
+                Chapter: "Capítulo E2E",
+                Section: "Sección E2E",
+                Article: article,
+                Source: "CNV test fixture",
+                Url: $"https://example.test/cnv/search/{documentId}",
+                Snippet: snippet,
+                Score: score,
+                Citations:
+                [
+                    new CnvRegulationCitation(
+                        Source: "CNV test fixture",
+                        DocumentType: "test_fixture",
+                        ResolutionNumber: resolutionNumber,
+                        Title: $"Cita original {resolutionNumber}",
+                        Chapter: "Capítulo E2E",
+                        Section: "Sección E2E",
+                        Article: article,
+                        PublicationDate: "2026-07-21",
+                        Url: $"https://example.test/cnv/search/{documentId}",
+                        QuotedText: snippet)
+                ]);
+        }
+
+        private static CnvRegulationCitation CreateCanonicalCitation(
+            string article,
+            string quotedText)
+        {
+            return new CnvRegulationCitation(
+                Source: "CNV test fixture",
+                DocumentType: "test_fixture",
+                ResolutionNumber: "E2E-VERIFIED",
+                Title: "Cita canónica E2E-VERIFIED",
+                Chapter: "Capítulo E2E",
+                Section: "Sección E2E",
+                Article: article,
+                PublicationDate: "2026-07-21",
+                Url: "https://example.test/cnv/canonical/citation",
+                QuotedText: quotedText);
         }
     }
 
@@ -1737,6 +2595,16 @@ public sealed class ProductionLikeWorkflowE2ETests
             _observer(report);
 
             return _inner.ReviewAsync(report, cancellationToken);
+        }
+
+        public Task<LegalAgentResult> ReviewAsync(
+            FinancialReportContext report,
+            LegalReviewContext context,
+            CancellationToken cancellationToken)
+        {
+            _observer(report);
+
+            return _inner.ReviewAsync(report, context, cancellationToken);
         }
     }
 

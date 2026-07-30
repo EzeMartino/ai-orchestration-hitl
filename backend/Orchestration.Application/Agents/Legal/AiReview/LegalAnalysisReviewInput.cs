@@ -17,5 +17,6 @@ public sealed record LegalAnalysisReviewInput(
     IReadOnlyList<string> FinancialWarnings,
     IReadOnlyList<string> FinancialLimitations,
     IReadOnlyList<LegalEvidenceReference> CnvEvidence,
-    RegulatoryEvidenceAssessment? EvidenceAssessment = null
+    RegulatoryEvidenceAssessment? EvidenceAssessment = null,
+    IReadOnlyList<RegulatoryEvidenceEnrichment>? EvidenceEnrichments = null
 );

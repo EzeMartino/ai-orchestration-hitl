@@ -8,17 +8,22 @@ namespace CnvRegulation.Application.Contracts;
 public sealed class GetRegulationArticleResponse
 {
     /// <summary>
-    /// Gets the article text or mock placeholder text.
+    /// Gets whether the requested article was found in the configured repository.
     /// </summary>
-    public required string Text { get; init; }
+    public required bool Found { get; init; }
 
     /// <summary>
-    /// Gets the citation for the returned text.
+    /// Gets the article text when found.
     /// </summary>
-    public required RegulationCitation Citation { get; init; }
+    public string? Text { get; init; }
 
     /// <summary>
-    /// Gets the mock confidence score.
+    /// Gets the citation for the returned text when found.
+    /// </summary>
+    public RegulationCitation? Citation { get; init; }
+
+    /// <summary>
+    /// Gets the confidence score for the returned article.
     /// </summary>
     public double Confidence { get; init; }
 

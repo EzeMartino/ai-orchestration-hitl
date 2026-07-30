@@ -59,7 +59,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a mock CNV document by identifier.
+    /// Retrieves a repository-backed CNV regulatory document by identifier.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_document",
@@ -69,7 +69,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves mock CNV document metadata, placeholder content, citations, and warnings.")]
+    [Description("Retrieves repository-backed CNV regulatory document metadata, content, citations, and retrieval warnings.")]
     public static Task<GetRegulationDocumentResponse> GetCnvDocumentAsync(
         IRegulationDocumentService documentService,
         [Description("Document identifier, for example cnv-nt-2013.")] string documentId,
@@ -86,7 +86,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a mock CNV article by title/chapter/section/article.
+    /// Retrieves a repository-backed CNV regulatory article by title/chapter/section/article.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_article",
@@ -96,7 +96,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves a structured mock CNV article response with citation and confidence.")]
+    [Description("Retrieves a structured repository-backed CNV regulatory article response with citation and confidence.")]
     public static Task<GetRegulationArticleResponse> GetCnvArticleAsync(
         IRegulationArticleService articleService,
         [Description("Article label, for example Articulo 4.")] string article,

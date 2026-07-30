@@ -3,10 +3,21 @@ import {
   formatLegalAssessmentValue,
   formatLegalRiskLevel,
 } from "../utils/legalEvidenceAssessment";
+import {
+  formatRegulatoryEnrichmentStatus,
+  formatRegulatoryEnrichmentSummary,
+  getSafeRegulatoryEvidenceUrl,
+  normalizeRegulatoryEvidenceEnrichments,
+} from "../utils/regulatoryEvidenceEnrichment";
 
 interface CompliancePanelProps {
   compliance?: ComplianceContext;
 }
+
+const longRegulatoryContentStyle = {
+  overflowWrap: "anywhere",
+  whiteSpace: "pre-wrap",
+} as const;
 
 export function CompliancePanel({ compliance }: CompliancePanelProps) {
   if (!compliance) {
@@ -20,6 +31,7 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
 
   const legalReview = compliance.legalReview;
   const evidenceAssessment = compliance.evidenceAssessment;
+  const evidenceEnrichments = normalizeRegulatoryEvidenceEnrichments(compliance.evidenceEnrichments);
 
   return (
     <section className="compliancePanel">
@@ -97,6 +109,402 @@ export function CompliancePanel({ compliance }: CompliancePanelProps) {
               </ul>
             </div>
           )}
+        </section>
+      )}
+
+      {evidenceEnrichments.length > 0 && (
+        <section aria-labelledby="regulatory-context-verification-title">
+          <h3 id="regulatory-context-verification-title">
+            Verificación de contexto regulatorio
+          </h3>
+          <p>
+            La verificación documental aporta contexto regulatorio, pero no determina aplicabilidad, incumplimiento ni asesoramiento legal.
+          </p>
+
+          {evidenceEnrichments.map((item) => {
+            const originalCitationUrl = getSafeRegulatoryEvidenceUrl(
+              item.original.citation.url,
+            );
+            const canonicalDocumentUrl = getSafeRegulatoryEvidenceUrl(
+              item.document?.url,
+            );
+            const canonicalArticleUrl = getSafeRegulatoryEvidenceUrl(
+              item.article?.citation.url,
+            );
+
+            return (
+              <article
+                key={item.enrichmentId}
+                style={longRegulatoryContentStyle}
+              >
+                <h4>
+                  Resultado {item.rank}:{" "}
+                  {formatRegulatoryEnrichmentStatus(item.status)}
+                </h4>
+                <p>
+                  <b>Fragmento original:</b> {item.original.snippet}
+                </p>
+                <div>
+                  <b>Cita original:</b>
+                  <dl>
+                    <div>
+                      <dt>Título</dt>
+                      <dd>{item.original.citation.title}</dd>
+                    </div>
+                    <div>
+                      <dt>Fuente</dt>
+                      <dd>{item.original.citation.source}</dd>
+                    </div>
+                    {item.original.citation.documentType && (
+                      <div>
+                        <dt>Tipo de documento</dt>
+                        <dd>{item.original.citation.documentType}</dd>
+                      </div>
+                    )}
+                    {item.original.citation.resolutionNumber && (
+                      <div>
+                        <dt>Número de resolución</dt>
+                        <dd>{item.original.citation.resolutionNumber}</dd>
+                      </div>
+                    )}
+                    {item.original.citation.chapter && (
+                      <div>
+                        <dt>Capítulo</dt>
+                        <dd>{item.original.citation.chapter}</dd>
+                      </div>
+                    )}
+                    {item.original.citation.section && (
+                      <div>
+                        <dt>Sección</dt>
+                        <dd>{item.original.citation.section}</dd>
+                      </div>
+                    )}
+                    {item.original.citation.article && (
+                      <div>
+                        <dt>Artículo</dt>
+                        <dd>{item.original.citation.article}</dd>
+                      </div>
+                    )}
+                    {item.original.citation.publicationDate && (
+                      <div>
+                        <dt>Fecha de publicación</dt>
+                        <dd>{item.original.citation.publicationDate}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {item.original.citation.quotedText && (
+                    <p>
+                      <b>Texto citado original:</b>{" "}
+                      {item.original.citation.quotedText}
+                    </p>
+                  )}
+                  {originalCitationUrl && (
+                    <p>
+                      <a
+                        href={originalCitationUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Abrir cita original: {item.original.citation.title}
+                      </a>
+                    </p>
+                  )}
+                </div>
+
+                {(item.document || item.article) && (
+                  <details>
+                    <summary>{formatRegulatoryEnrichmentSummary(item.status)}</summary>
+
+                    {item.document && (
+                      <section>
+                        <h5>Documento canónico: {item.document.title}</h5>
+                        <dl>
+                          <div>
+                            <dt>Identificador</dt>
+                            <dd>{item.document.id}</dd>
+                          </div>
+                          <div>
+                            <dt>Fuente</dt>
+                            <dd>{item.document.source}</dd>
+                          </div>
+                          <div>
+                            <dt>Tipo de documento</dt>
+                            <dd>{item.document.documentType}</dd>
+                          </div>
+                          {item.document.resolutionNumber && (
+                            <div>
+                              <dt>Número de resolución</dt>
+                              <dd>{item.document.resolutionNumber}</dd>
+                            </div>
+                          )}
+                          {item.document.publicationDate && (
+                            <div>
+                              <dt>Fecha de publicación</dt>
+                              <dd>{item.document.publicationDate}</dd>
+                            </div>
+                          )}
+                          {item.document.effectiveDate && (
+                            <div>
+                              <dt>Fecha de vigencia</dt>
+                              <dd>{item.document.effectiveDate}</dd>
+                            </div>
+                          )}
+                          <div>
+                            <dt>Estado documental</dt>
+                            <dd>{item.document.status}</dd>
+                          </div>
+                          <div>
+                            <dt>Revisión indicada por la fuente</dt>
+                            <dd>
+                              {item.document.requiresReview ? "Sí" : "No"}
+                            </dd>
+                          </div>
+                          {item.document.retrievedAt && (
+                            <div>
+                              <dt>Fecha de recuperación</dt>
+                              <dd>{item.document.retrievedAt}</dd>
+                            </div>
+                          )}
+                          <div>
+                            <dt>Longitud original</dt>
+                            <dd>
+                              {item.document.originalTextLength} caracteres
+                            </dd>
+                          </div>
+                        </dl>
+
+                        {Object.keys(item.document.metadata).length > 0 && (
+                          <div>
+                            <b>Metadatos del documento:</b>
+                            <dl>
+                              {Object.entries(item.document.metadata).map(
+                                ([name, value]) => (
+                                  <div
+                                    key={`${item.enrichmentId}-metadata-${name}`}
+                                  >
+                                    <dt>{name}</dt>
+                                    <dd>{value}</dd>
+                                  </div>
+                                ),
+                              )}
+                            </dl>
+                          </div>
+                        )}
+
+                        <p>{item.document.text}</p>
+
+                        {canonicalDocumentUrl && (
+                          <p>
+                            <a
+                              href={canonicalDocumentUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Abrir documento canónico: {item.document.title}
+                            </a>
+                          </p>
+                        )}
+
+                        {item.document.citations.length > 0 && (
+                          <div>
+                            <b>Citas del documento canónico:</b>
+                            <ul>
+                              {item.document.citations.map(
+                                (citation, index) => {
+                                  const citationUrl =
+                                    getSafeRegulatoryEvidenceUrl(citation.url);
+
+                                  return (
+                                    <li
+                                      key={`${item.enrichmentId}-document-citation-${index}`}
+                                    >
+                                      <dl>
+                                        <div>
+                                          <dt>Título</dt>
+                                          <dd>{citation.title}</dd>
+                                        </div>
+                                        <div>
+                                          <dt>Fuente</dt>
+                                          <dd>{citation.source}</dd>
+                                        </div>
+                                        {citation.documentType && (
+                                          <div>
+                                            <dt>Tipo de documento</dt>
+                                            <dd>{citation.documentType}</dd>
+                                          </div>
+                                        )}
+                                        {citation.resolutionNumber && (
+                                          <div>
+                                            <dt>Número de resolución</dt>
+                                            <dd>{citation.resolutionNumber}</dd>
+                                          </div>
+                                        )}
+                                        {citation.chapter && (
+                                          <div>
+                                            <dt>Capítulo</dt>
+                                            <dd>{citation.chapter}</dd>
+                                          </div>
+                                        )}
+                                        {citation.section && (
+                                          <div>
+                                            <dt>Sección</dt>
+                                            <dd>{citation.section}</dd>
+                                          </div>
+                                        )}
+                                        {citation.article && (
+                                          <div>
+                                            <dt>Artículo</dt>
+                                            <dd>{citation.article}</dd>
+                                          </div>
+                                        )}
+                                        {citation.publicationDate && (
+                                          <div>
+                                            <dt>Fecha de publicación</dt>
+                                            <dd>{citation.publicationDate}</dd>
+                                          </div>
+                                        )}
+                                      </dl>
+                                      {citation.quotedText && (
+                                        <p>
+                                          <b>Texto citado canónico:</b>{" "}
+                                          {citation.quotedText}
+                                        </p>
+                                      )}
+                                      {citationUrl && (
+                                        <p>
+                                          <a
+                                            href={citationUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            Abrir cita canónica:{" "}
+                                            {citation.title}
+                                          </a>
+                                        </p>
+                                      )}
+                                    </li>
+                                  );
+                                },
+                              )}
+                            </ul>
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {item.article && (
+                      <section>
+                        <h5>
+                          Artículo canónico: {item.article.citation.title}
+                          {item.article.citation.article
+                            ? ` — ${item.article.citation.article}`
+                            : ""}
+                        </h5>
+                        <dl>
+                          <div>
+                            <dt>Fuente</dt>
+                            <dd>{item.article.citation.source}</dd>
+                          </div>
+                          {item.article.citation.documentType && (
+                            <div>
+                              <dt>Tipo de documento</dt>
+                              <dd>{item.article.citation.documentType}</dd>
+                            </div>
+                          )}
+                          {item.article.citation.resolutionNumber && (
+                            <div>
+                              <dt>Número de resolución</dt>
+                              <dd>{item.article.citation.resolutionNumber}</dd>
+                            </div>
+                          )}
+                          {item.article.citation.chapter && (
+                            <div>
+                              <dt>Capítulo</dt>
+                              <dd>{item.article.citation.chapter}</dd>
+                            </div>
+                          )}
+                          {item.article.citation.section && (
+                            <div>
+                              <dt>Sección</dt>
+                              <dd>{item.article.citation.section}</dd>
+                            </div>
+                          )}
+                          {item.article.citation.article && (
+                            <div>
+                              <dt>Artículo</dt>
+                              <dd>{item.article.citation.article}</dd>
+                            </div>
+                          )}
+                          {item.article.citation.publicationDate && (
+                            <div>
+                              <dt>Fecha de publicación</dt>
+                              <dd>{item.article.citation.publicationDate}</dd>
+                            </div>
+                          )}
+                          <div>
+                            <dt>Confianza de recuperación</dt>
+                            <dd>
+                              {(item.article.confidence * 100).toFixed(0)}%
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Longitud original</dt>
+                            <dd>
+                              {item.article.originalTextLength} caracteres
+                            </dd>
+                          </div>
+                        </dl>
+                        {item.article.citation.quotedText && (
+                          <p>
+                            <b>Texto citado canónico:</b>{" "}
+                            {item.article.citation.quotedText}
+                          </p>
+                        )}
+                        <p>{item.article.text}</p>
+                        {canonicalArticleUrl && (
+                          <p>
+                            <a
+                              href={canonicalArticleUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Abrir artículo canónico:{" "}
+                              {item.article.citation.title}
+                              {item.article.citation.article
+                                ? ` — ${item.article.citation.article}`
+                                : ""}
+                            </a>
+                          </p>
+                        )}
+                      </section>
+                    )}
+                  </details>
+                )}
+
+                {(item.document?.isTruncated ||
+                  item.article?.isTruncated) && (
+                  <p>
+                    El contexto mostrado fue truncado al límite seguro configurado.
+                  </p>
+                )}
+
+                {item.limitations.length > 0 && (
+                  <div>
+                    <b>Limitaciones de la verificación documental:</b>
+                    <ul>
+                      {item.limitations.map((limitation, index) => (
+                        <li
+                          key={`${item.enrichmentId}-limitation-${index}`}
+                        >
+                          {limitation}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </section>
       )}
 

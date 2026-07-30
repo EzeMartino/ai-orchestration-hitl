@@ -12,5 +12,6 @@ public sealed record RegulatoryReviewResult(
     object? QueryStrategy = null,
     LegalAnalysisReviewResult? LegalReview = null,
     bool RequiresHumanReview = false,
-    RegulatoryEvidenceAssessment? EvidenceAssessment = null
+    RegulatoryEvidenceAssessment? EvidenceAssessment = null,
+    IReadOnlyList<RegulatoryEvidenceEnrichment>? EvidenceEnrichments = null
 );

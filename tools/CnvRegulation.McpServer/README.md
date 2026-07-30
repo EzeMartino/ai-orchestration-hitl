@@ -442,7 +442,7 @@ CAPITULO I
 SECCION I
 ```
 
-When chunks exist, `search_cnv_regulation` returns chunk-level results first, including article-level citations. `get_cnv_article` also checks ingested chunks before using mock fallback data.
+When chunks exist, `search_cnv_regulation` returns chunk-level results first, including article-level citations. `get_cnv_document` and `get_cnv_article` retrieve only repository-backed records: successful responses set `Found=true`; absent records set `Found=false`, return null document/article content and citation fields as applicable, and include an explicit retrieval warning.
 
 ## Local source format
 

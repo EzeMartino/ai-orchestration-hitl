@@ -271,6 +271,258 @@ public class AnalysisOrchestratorContextTests
     }
 
     [Fact]
+    public void BuildAnalysisContext_Should_persist_regulatory_enrichment_and_audit_separately()
+    {
+        const string documentText = "document-canonical-secret-sentinel";
+        const string articleText = "texto canónico acotado";
+        const string sourceTitle = "source-title-secret-sentinel";
+        const string sourceUrl = "https://secret.example/canonical";
+        const string quotedText = "quoted-text-secret-sentinel";
+        var originalCitation = new RegulatoryEvidenceCitation(
+            Source: "CNV-source-secret-sentinel",
+            DocumentType: "Resolución General",
+            ResolutionNumber: "999",
+            Title: sourceTitle,
+            Chapter: "Capítulo I",
+            Section: "Sección II",
+            Article: "Artículo 3",
+            PublicationDate: "2026-07-01",
+            Url: sourceUrl,
+            QuotedText: quotedText
+        );
+        var enrichment = new RegulatoryEvidenceEnrichment(
+            EnrichmentId: "enrichment-1",
+            DocumentId: "document-1",
+            ChunkId: "chunk-1",
+            Rank: 1,
+            Score: 0.91,
+            Original: new RegulatoryOriginalEvidence(
+                Snippet: "snippet original",
+                Citation: originalCitation
+            ),
+            Document: new RegulatoryCanonicalDocument(
+                Id: "document-1",
+                Source: "CNV",
+                DocumentType: "Resolución General",
+                ResolutionNumber: "999",
+                Title: "Documento canónico",
+                PublicationDate: "2026-07-01",
+                EffectiveDate: "2026-07-15",
+                Url: "https://cnv.example/document-1",
+                Status: "vigente",
+                RequiresReview: true,
+                RetrievedAt: "2026-07-26T12:00:00Z",
+                Text: documentText,
+                OriginalTextLength: 140,
+                IsTruncated: true,
+                Metadata: new Dictionary<string, string>
+                {
+                    ["issuer"] = "CNV"
+                },
+                Citations: [originalCitation]
+            ),
+            Article: new RegulatoryCanonicalArticle(
+                Citation: originalCitation,
+                Text: articleText,
+                Confidence: 0.88,
+                OriginalTextLength: 80,
+                IsTruncated: true
+            ),
+            Status: RegulatoryEvidenceEnrichmentStatuses.Verified,
+            Limitations: ["El contexto fue acotado."]
+        );
+        var queryStrategy = new LegalQueryStrategyAudit(
+            StrategyVersion: "financial_analysis_v2",
+            Source: "contextual",
+            FallbackReason: null,
+            DataToolStatus: LegalDataToolStatuses.Executed,
+            FinancialAnalysisStatus: FinancialAnalysisExecutionStatus.Succeeded,
+            FailedStages: [],
+            Queries: [],
+            Enrichments:
+            [
+                new LegalCnvEnrichmentAudit(
+                    EnrichmentId: "enrichment-1",
+                    Rank: 1,
+                    CandidateKey: "document-1|article-3",
+                    Score: 0.91,
+                    ContributingQueryIndices: [2, 1],
+                    Document: new LegalCnvEnrichmentStageAudit(
+                        Selected: true,
+                        Attempted: true,
+                        FromCache: false,
+                        Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+                        OriginalTextLength: 140,
+                        IsTruncated: true
+                    ),
+                    Article: new LegalCnvEnrichmentStageAudit(
+                        Selected: true,
+                        Attempted: true,
+                        FromCache: false,
+                        Status: LegalCnvEnrichmentStageStatuses.Succeeded,
+                        OriginalTextLength: 80,
+                        IsTruncated: true
+                    ),
+                    Status: RegulatoryEvidenceEnrichmentStatuses.Verified,
+                    LimitationCodes: ["DOCUMENT_TRUNCATED", "ARTICLE_TRUNCATED"]
+                )
+            ]
+        );
+        var plannerResult = CreatePlannerResult(ToolPlanAuditResult.Empty);
+        plannerResult = plannerResult with
+        {
+            LegalResult = plannerResult.LegalResult with
+            {
+                QueryStrategy = queryStrategy,
+                EvidenceEnrichments = [enrichment]
+            }
+        };
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        var compliance = document.RootElement.GetProperty("compliance");
+        var persistedEnrichment = compliance.GetProperty("evidenceEnrichments")[0];
+        persistedEnrichment.GetProperty("enrichmentId").GetString().Should().Be("enrichment-1");
+        persistedEnrichment.GetProperty("documentId").GetString().Should().Be("document-1");
+        persistedEnrichment.GetProperty("chunkId").GetString().Should().Be("chunk-1");
+        persistedEnrichment.GetProperty("rank").GetInt32().Should().Be(1);
+        persistedEnrichment.GetProperty("score").GetDouble().Should().Be(0.91);
+        persistedEnrichment.GetProperty("status").GetString()
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        persistedEnrichment.GetProperty("limitations")[0].GetString()
+            .Should().Be("El contexto fue acotado.");
+        persistedEnrichment.GetProperty("original").GetProperty("snippet").GetString()
+            .Should().Be("snippet original");
+        var persistedOriginalCitation = persistedEnrichment.GetProperty("original")
+            .GetProperty("citation");
+        persistedOriginalCitation.GetProperty("source").GetString()
+            .Should().Be("CNV-source-secret-sentinel");
+        persistedOriginalCitation.GetProperty("documentType").GetString()
+            .Should().Be("Resolución General");
+        persistedOriginalCitation.GetProperty("resolutionNumber").GetString()
+            .Should().Be("999");
+        persistedOriginalCitation.GetProperty("title").GetString().Should().Be(sourceTitle);
+        persistedOriginalCitation.GetProperty("chapter").GetString().Should().Be("Capítulo I");
+        persistedOriginalCitation.GetProperty("section").GetString().Should().Be("Sección II");
+        persistedOriginalCitation.GetProperty("article").GetString().Should().Be("Artículo 3");
+        persistedOriginalCitation.GetProperty("publicationDate").GetString()
+            .Should().Be("2026-07-01");
+        persistedOriginalCitation.GetProperty("url").GetString().Should().Be(sourceUrl);
+        persistedOriginalCitation.GetProperty("quotedText").GetString().Should().Be(quotedText);
+        var persistedDocument = persistedEnrichment.GetProperty("document");
+        persistedDocument.GetProperty("id").GetString().Should().Be("document-1");
+        persistedDocument.GetProperty("source").GetString().Should().Be("CNV");
+        persistedDocument.GetProperty("documentType").GetString()
+            .Should().Be("Resolución General");
+        persistedDocument.GetProperty("resolutionNumber").GetString().Should().Be("999");
+        persistedDocument.GetProperty("title").GetString().Should().Be("Documento canónico");
+        persistedDocument.GetProperty("publicationDate").GetString()
+            .Should().Be("2026-07-01");
+        persistedDocument.GetProperty("effectiveDate").GetString()
+            .Should().Be("2026-07-15");
+        persistedDocument.GetProperty("url").GetString()
+            .Should().Be("https://cnv.example/document-1");
+        persistedDocument.GetProperty("status").GetString().Should().Be("vigente");
+        persistedDocument.GetProperty("requiresReview").GetBoolean().Should().BeTrue();
+        persistedDocument.GetProperty("retrievedAt").GetString()
+            .Should().Be("2026-07-26T12:00:00Z");
+        persistedDocument.GetProperty("text").GetString().Should().Be(documentText);
+        persistedDocument.GetProperty("originalTextLength").GetInt32().Should().Be(140);
+        persistedDocument.GetProperty("isTruncated").GetBoolean().Should().BeTrue();
+        persistedDocument.GetProperty("metadata").GetProperty("issuer").GetString()
+            .Should().Be("CNV");
+        persistedDocument.GetProperty("citations")[0].GetProperty("quotedText").GetString()
+            .Should().Be(quotedText);
+        var persistedArticle = persistedEnrichment.GetProperty("article");
+        persistedArticle.GetProperty("citation").GetProperty("article").GetString()
+            .Should().Be("Artículo 3");
+        persistedArticle.GetProperty("text").GetString().Should().Be(articleText);
+        persistedArticle.GetProperty("confidence").GetDouble().Should().Be(0.88);
+        persistedArticle.GetProperty("originalTextLength").GetInt32().Should().Be(80);
+        persistedArticle.GetProperty("isTruncated").GetBoolean().Should().BeTrue();
+        persistedEnrichment.TryGetProperty("audit", out _).Should().BeFalse();
+
+        var persistedAudit = compliance.GetProperty("queryStrategy")
+            .GetProperty("enrichments")[0];
+        persistedAudit.GetProperty("enrichmentId").GetString().Should().Be("enrichment-1");
+        persistedAudit.GetProperty("candidateKey").GetString()
+            .Should().Be("document-1|article-3");
+        persistedAudit.GetProperty("rank").GetInt32().Should().Be(1);
+        persistedAudit.GetProperty("score").GetDouble().Should().Be(0.91);
+        persistedAudit.GetProperty("contributingQueryIndices").EnumerateArray()
+            .Select(item => item.GetInt32()).Should().Equal(2, 1);
+        persistedAudit.GetProperty("finalStatus").GetString()
+            .Should().Be(RegulatoryEvidenceEnrichmentStatuses.Verified);
+        persistedAudit.GetProperty("limitationCodes").EnumerateArray()
+            .Select(item => item.GetString()).Should()
+            .Equal("DOCUMENT_TRUNCATED", "ARTICLE_TRUNCATED");
+        var documentAudit = persistedAudit.GetProperty("document");
+        documentAudit.GetProperty("selected").GetBoolean().Should().BeTrue();
+        documentAudit.GetProperty("attempted").GetBoolean().Should().BeTrue();
+        documentAudit.GetProperty("fromCache").GetBoolean().Should().BeFalse();
+        documentAudit.GetProperty("status").GetString()
+            .Should().Be(LegalCnvEnrichmentStageStatuses.Succeeded);
+        documentAudit.GetProperty("originalTextLength").GetInt32().Should().Be(140);
+        documentAudit.GetProperty("storedTextLength").GetInt32()
+            .Should().Be(documentText.Length);
+        documentAudit.GetProperty("isTruncated").GetBoolean().Should().BeTrue();
+        var articleAudit = persistedAudit.GetProperty("article");
+        articleAudit.GetProperty("storedTextLength").GetInt32()
+            .Should().Be(articleText.Length);
+
+        var auditJson = persistedAudit.GetRawText();
+        auditJson.Should().NotContain("snippet original");
+        auditJson.Should().NotContain(documentText);
+        auditJson.Should().NotContain(articleText);
+        auditJson.Should().NotContain(sourceTitle);
+        auditJson.Should().NotContain(sourceUrl);
+        auditJson.Should().NotContain(quotedText);
+        auditJson.Should().NotContain("CNV-source-secret-sentinel");
+        auditJson.Should().NotContain("\"snippet\"");
+        auditJson.Should().NotContain("\"text\"");
+        auditJson.Should().NotContain("\"quotedText\"");
+        auditJson.Should().NotContain("\"title\"");
+        auditJson.Should().NotContain("\"url\"");
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_keep_null_enrichments_compatible_with_legacy_results()
+    {
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(
+            CreatePlannerResult(ToolPlanAuditResult.Empty)
+        );
+
+        using var document = JsonDocument.Parse(contextJson);
+        var compliance = document.RootElement.GetProperty("compliance");
+
+        if (compliance.TryGetProperty("evidenceEnrichments", out var enrichments))
+        {
+            enrichments.ValueKind.Should().Be(JsonValueKind.Null);
+        }
+    }
+
+    [Fact]
+    public void BuildAnalysisContext_Should_preserve_an_explicit_empty_enrichment_collection()
+    {
+        var plannerResult = CreatePlannerResult(ToolPlanAuditResult.Empty);
+        plannerResult = plannerResult with
+        {
+            LegalResult = plannerResult.LegalResult with
+            {
+                EvidenceEnrichments = []
+            }
+        };
+
+        var contextJson = AnalysisOrchestratorService.BuildAnalysisContext(plannerResult);
+
+        using var document = JsonDocument.Parse(contextJson);
+        document.RootElement.GetProperty("compliance")
+            .GetProperty("evidenceEnrichments")
+            .GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
     public void BuildAnalysisContext_Should_map_tool_plan_calls_without_output_json()
     {
         var toolPlan = new ToolPlanAuditResult(

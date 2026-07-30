@@ -16,6 +16,16 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
 
     public List<string> ReceivedQueries { get; } = [];
 
+    public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+        CnvRegulationDocumentRequest request,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new CnvRegulationDocumentResponse(false, null, [], []));
+
+    public Task<CnvRegulationArticleResponse> GetArticleAsync(
+        CnvRegulationArticleRequest request,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new CnvRegulationArticleResponse(false, null, null, 0, []));
+
     public Task<CnvRegulationSearchResponse> SearchAsync(
         CnvRegulationSearchRequest request,
         CancellationToken cancellationToken)
@@ -81,13 +91,19 @@ public sealed class FallbackCnvRegulationMcpClient : ICnvRegulationMcpClient
                 Enabled = true,
                 Command = "dotnet",
                 Args = [],
-                DefaultLimit = 5
+                DefaultLimit = 5,
+                MaxEnrichedHits = 0
             }
         );
+        var enricher = new CnvRegulatoryHitEnricher(
+            client,
+            options,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CnvRegulatoryHitEnricher>.Instance);
 
         var source = new McpRegulatoryKnowledgeSource(
             client,
             options,
+            enricher,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<McpRegulatoryKnowledgeSource>.Instance,
             new DeterministicLegalAnalysisReviewService()
         );

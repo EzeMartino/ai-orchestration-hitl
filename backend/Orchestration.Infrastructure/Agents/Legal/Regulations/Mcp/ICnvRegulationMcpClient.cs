@@ -7,6 +7,16 @@ public interface ICnvRegulationMcpClient
         CancellationToken cancellationToken
     );
 
+    Task<CnvRegulationDocumentResponse> GetDocumentAsync(
+        CnvRegulationDocumentRequest request,
+        CancellationToken cancellationToken
+    );
+
+    Task<CnvRegulationArticleResponse> GetArticleAsync(
+        CnvRegulationArticleRequest request,
+        CancellationToken cancellationToken
+    );
+
     bool IsConnected { get; }
     int ColdStartCount { get; }
     int ResetCount { get; }
