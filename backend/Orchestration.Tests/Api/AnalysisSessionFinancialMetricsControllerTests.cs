@@ -59,7 +59,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetrics_Should_return_ok_and_persist_context_for_valid_metrics()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -90,7 +90,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetrics_Should_return_ok_with_invalid_result_for_invalid_financial_input()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -131,7 +131,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetrics_Should_return_bad_request_for_null_body()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -149,7 +149,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsCsv_Should_return_ok_and_persist_context_for_valid_csv()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -182,7 +182,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsCsv_Should_return_invalid_result_without_persisting_for_invalid_csv()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -224,7 +224,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsCsv_Should_return_bad_request_for_null_body()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -242,7 +242,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task GetFinancialMetrics_Should_return_context_for_session()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -273,7 +273,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task GetFinancialMetrics_ShouldReadMetricsAndSummaryFromOneCombinedSnapshot()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var inner = StructuredFinancialMetricsSessionServiceTests.CreateService(dbContext);
@@ -319,7 +319,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_persist_valid_json_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -386,7 +386,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Malformed_json_summary_timestamp_Should_return_stable_invalid_issue()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -425,7 +425,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         string timestampJson)
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -461,7 +461,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_use_form_metadata_as_json_fallback()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -516,7 +516,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_invalid_json()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -538,7 +538,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_invalid_financial_json()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -609,7 +609,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_accepted_for_pdf_when_ingestion_accepts()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var saveResult = CreateValidSaveResult(session.Id);
@@ -657,7 +657,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         response.ReportSummary.Should().Be(ApiReportSummary);
         ingestion.LastRequest.Should().NotBeNull();
         ingestion.LastRequest!.SessionId.Should().Be(session.Id);
-        ingestion.LastRequest.UserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        ingestion.LastRequest.UserId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         ingestion.LastRequest.DocumentId.Should().Be("form-pdf-document");
         ingestion.LastRequest.ReportSummary.Should().BeEquivalentTo(ApiReportSummaryInput);
     }
@@ -666,7 +666,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_review_required_for_pdf_when_ingestion_requires_review()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var draft = CreateDraft(session.Id);
@@ -711,7 +711,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_failed_for_pdf_when_ingestion_fails()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
@@ -755,7 +755,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_ingestion_rejects_invalid_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
@@ -784,7 +784,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_pass_pdf_bytes_and_metadata_to_ingestion_service()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         byte[] pdfBytes = [0x25, 0x50, 0x44, 0x46, 0x00, 0x80, 0xff, 0x0a];
@@ -828,7 +828,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_review_required_for_pdf_without_metrics()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
@@ -876,7 +876,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_when_pdf_ocr_is_not_configured()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var ingestion = new FakeStructuredFinancialMetricsPdfIngestionService(
@@ -904,7 +904,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_persist_valid_csv_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var csvParser = new CapturingStructuredFinancialMetricsCsvParser();
@@ -953,7 +953,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Malformed_form_summary_timestamp_Should_return_stable_invalid_issue()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -983,7 +983,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_require_document_id_for_csv()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1011,7 +1011,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_invalid_csv_header()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1042,7 +1042,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_invalid_result_for_invalid_csv_decimal()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1072,7 +1072,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_missing_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1093,7 +1093,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_empty_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1114,7 +1114,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_whitespace_file()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1135,7 +1135,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_unsupported_extension()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1156,7 +1156,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_return_bad_request_for_file_that_exceeds_size_limit()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(
@@ -1184,7 +1184,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task SaveFinancialMetricsFile_Should_accept_uppercase_extension_and_ignore_path_segments()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var controller = CreateController(dbContext);
@@ -1234,7 +1234,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task GetFinancialMetricsReview_Should_return_pending_draft_for_current_user()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var draft = CreateDraft(session.Id);
@@ -1249,14 +1249,14 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
         var response = result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().Be(draft);
         draftService.LastSessionId.Should().Be(session.Id);
-        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastUserId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
     }
 
     [Fact]
     public async Task GetFinancialMetricsReview_Should_return_not_found_for_another_users_draft()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var draftService = new FakeFinancialMetricsExtractionDraftService
@@ -1274,7 +1274,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task UpdateFinancialMetricsReview_Should_use_route_session_and_current_user()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
@@ -1297,7 +1297,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             .Which.Value.Should().Be(draft);
         draftService.LastDraftId.Should().Be(draftId);
         draftService.LastSessionId.Should().Be(session.Id);
-        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastUserId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         draftService.LastUpdateRequest.Should().BeSameAs(request);
     }
 
@@ -1305,7 +1305,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task ConfirmFinancialMetricsReview_Should_return_ok_with_service_result()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         session.SetContext("""{"structuredFinancialMetrics":{"documentId":"existing","metrics":[]}}""");
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1332,7 +1332,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
             .Which.Value.Should().Be(identity);
         draftService.LastDraftId.Should().Be(draftId);
         draftService.LastSessionId.Should().Be(session.Id);
-        draftService.LastUserId.Should().Be(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        draftService.LastUserId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         draftService.LastConfirmRequest.Should().BeSameAs(confirmRequest);
     }
 
@@ -1340,7 +1340,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task DiscardFinancialMetricsReview_Should_leave_existing_context_unchanged()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         session.SetContext("""{"structuredFinancialMetrics":{"documentId":"existing","metrics":[]}}""");
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1370,7 +1370,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task Terminal_review_actions_Should_return_ok_when_service_reports_success()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var draftId = Guid.Parse("00000000-0000-0000-0000-000000000099");
@@ -1404,7 +1404,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task ConfirmFinancialMetricsReview_Should_return_conflict_with_validation_issues_when_confirmation_is_invalid()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var validationIssue = new FinancialMetricsValidationIssue(
@@ -1440,7 +1440,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task GetStartPreflight_Should_return_blocked_result_when_required_metrics_are_missing()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1468,7 +1468,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task StartSession_Should_return_conflict_when_required_metrics_are_missing()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1511,7 +1511,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     {
         await using var dbContext = CreateDbContext();
         var session = AnalysisSession.Create(
-            Guid.Parse("00000000-0000-0000-0000-000000000001"));
+            Guid.Parse("11111111-1111-1111-1111-111111111111"));
         session.SetContext(contextJson);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1553,7 +1553,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task StartSession_Should_start_when_required_metrics_are_attached()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -1584,7 +1584,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task StartSession_Should_not_pass_request_cancellation_to_orchestrator_after_preflight()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
         var publisher = new FakeActivityEventPublisher();
@@ -1617,7 +1617,7 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
     public async Task StartSession_Should_allow_demo_mode_without_session_metrics()
     {
         await using var dbContext = CreateDbContext();
-        var session = AnalysisSession.Create(Guid.Parse("00000000-0000-0000-0000-000000000001"));
+        var session = AnalysisSession.Create(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         TestFinancialReport.SetPersistedContext(session);
         dbContext.AnalysisSessions.Add(session);
         await dbContext.SaveChangesAsync();
@@ -1693,8 +1693,8 @@ public sealed class AnalysisSessionFinancialMetricsControllerTests
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
-            new(ClaimTypes.Name, "admin@ezemartino.com")
+            new(ClaimTypes.NameIdentifier, "11111111-1111-1111-1111-111111111111"),
+            new(ClaimTypes.Name, "fixture-user@example.test")
         };
         var identity = new ClaimsIdentity(claims, "TestAuthType");
         controller.ControllerContext = new ControllerContext

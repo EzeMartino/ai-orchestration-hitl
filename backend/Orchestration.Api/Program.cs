@@ -1,6 +1,7 @@
 using CSnakes.Runtime;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
+using Orchestration.Api.Hosting;
 using Orchestration.Api.Hubs;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Agents.Data;
@@ -180,29 +181,9 @@ builder.Services
     .WithVirtualEnvironment(pythonVirtualEnvironment)
     .WithPipInstaller(pythonLockFile);
 
-// Legal agent and regulatory knowledge source configuration
-builder.Services
-    .AddOptions<CnvRegulationMcpOptions>()
-    .Bind(builder.Configuration.GetSection(CnvRegulationMcpOptions.SectionName))
-    .ValidateOnStart();
-builder.Services.AddSingleton<IValidateOptions<CnvRegulationMcpOptions>, CnvRegulationMcpOptionsValidator>();
-builder.Services.AddSingleton<ICnvRegulationMcpClient, CnvRegulationStdioMcpClient>();
-builder.Services.AddScoped<CnvRegulatoryHitEnricher>();
-
-var cnvMcpOptions = builder.Configuration
-    .GetSection(CnvRegulationMcpOptions.SectionName)
-    .Get<CnvRegulationMcpOptions>() ?? new CnvRegulationMcpOptions();
-
-builder.Services.AddSingleton<Orchestration.Application.Agents.Legal.Cnv.ILegalCnvQueryStrategy, Orchestration.Application.Agents.Legal.Cnv.FinancialAnalysisLegalCnvQueryStrategy>();
-
-if (cnvMcpOptions.Enabled)
-{
-    builder.Services.AddScoped<IRegulatoryKnowledgeSource, McpRegulatoryKnowledgeSource>();
-}
-else
-{
-    builder.Services.AddScoped<IRegulatoryKnowledgeSource, MockRegulatoryKnowledgeSource>();
-}
+// Legal agent and regulatory knowledge source configuration.
+// CNV MCP capability selection is bootstrap-scoped; restart after config changes.
+builder.Services.AddRegulatoryKnowledgeSource(builder.Configuration, builder.Environment);
 
 builder.Services.AddScoped<LegalCompliancePlugin>();
 builder.Services.AddScoped<ILegalAgent, SemanticKernelLegalAgent>();
@@ -210,6 +191,14 @@ builder.Services.AddLegalAgentAiReview(builder.Configuration);
 
 
 // Persistence configuration
+var orchestrationConnectionString = builder.Configuration.GetConnectionString("orchestrationdb");
+if (string.IsNullOrWhiteSpace(orchestrationConnectionString))
+{
+    throw new InvalidOperationException("The orchestration database connection is not configured.");
+}
+
+builder.Configuration["ConnectionStrings:orchestrationdb"] =
+    PostgresConnectionStringNormalizer.Normalize(orchestrationConnectionString);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
@@ -217,34 +206,38 @@ builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 builder.Services.AddIdentityApiEndpoints<IdentityUser<Guid>>()
     .AddEntityFrameworkStores<OrchestrationDbContext>();
-builder.Services.AddHostedService<IdentityDataSeeder>();
-
-
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Frontend", policy =>
-    {
-        policy
-            .WithOrigins("http://localhost:5173")
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
+builder.Services.AddActivityHubAuthentication();
+builder.Services
+    .AddOptions<IdentityBootstrapOptions>()
+    .Bind(builder.Configuration.GetSection(IdentityBootstrapOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    IValidateOptions<IdentityBootstrapOptions>,
+    IdentityBootstrapOptionsValidator>();
+builder.Services.AddSingleton<
+    IOrchestrationDatabaseMigrator,
+    OrchestrationDatabaseMigrator>();
+builder.Services.AddHostedService<DatabaseMigrationHostedService>();
+builder.Services.AddHostedService<CnvRegulationMcpStartupService>();
+builder.Services.AddPersistentDataProtection();
+builder.Services.AddHostedService<IdentityBootstrapHostedService>();
+builder.Services.AddProductionHosting(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
+if (args.Contains("--migrate-only", StringComparer.OrdinalIgnoreCase))
+{
+    await app.Services.GetRequiredService<IOrchestrationDatabaseMigrator>()
+        .MigrateAsync(CancellationToken.None);
+    return;
+}
+
 app.MapDefaultEndpoints();
+
+app.UseProductionHosting();
 
 app.UseSwagger();
 app.UseSwaggerUI();
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
-
-app.UseCors("Frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();

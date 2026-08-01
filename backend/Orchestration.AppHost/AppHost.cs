@@ -9,6 +9,14 @@ var llmServiceId = builder.Configuration["Llm:ServiceId"];
 var toolCallingEnabled = builder.Configuration["ToolCalling:Enabled"];
 var toolCallingExecutionMode = builder.Configuration["ToolCalling:ExecutionMode"];
 
+var cnvRegulationMcpEnabled = builder.Configuration["Mcp:CnvRegulation:Enabled"];
+var cnvRegulationMcpRequired = builder.Configuration["Mcp:CnvRegulation:Required"];
+var cnvRegulationMcpCommand = builder.Configuration["Mcp:CnvRegulation:Command"];
+var cnvRegulationMcpConnectionTimeoutSeconds =
+    builder.Configuration["Mcp:CnvRegulation:ConnectionTimeoutSeconds"];
+var cnvRegulationMcpToolCallTimeoutSeconds =
+    builder.Configuration["Mcp:CnvRegulation:ToolCallTimeoutSeconds"];
+
 var dataAgentFinancialAnalysisToolsEnabled =
     builder.Configuration["DataAgent:FinancialAnalysisToolsEnabled"];
 var dataAgentUsePythonFinancialAnalysis =
@@ -75,6 +83,29 @@ var cnvRegulationSourcesDirectory = Path.GetFullPath(
         "CnvRegulation.McpServer",
         "data",
         "sources"));
+var cnvRegulationMcpArgs = builder.Configuration
+    .GetSection("Mcp:CnvRegulation:Args")
+    .GetChildren()
+    .Select(section => (
+        Index: section.Key,
+        Value: section.Value ?? string.Empty))
+    .OrderBy(argument =>
+        int.TryParse(argument.Index, out var index) ? index : int.MaxValue)
+    .ThenBy(argument => argument.Index, StringComparer.Ordinal)
+    .ToArray();
+
+if (cnvRegulationMcpArgs.Length == 0)
+{
+    cnvRegulationMcpArgs =
+    [
+        ("0", "run"),
+        ("1", "--project"),
+        ("2", cnvRegulationMcpProject),
+        ("3", "--"),
+        ("4", "--storage"),
+        ("5", "postgres")
+    ];
+}
 
 var cnvRegulationDbMigration = builder
     .AddExecutable(
@@ -123,6 +154,15 @@ var api = builder
     .WithEnvironment("Llm__ServiceId", llmServiceId ?? "planner-reasoning")
     .WithEnvironment("ToolCalling__Enabled", toolCallingEnabled ?? "false")
     .WithEnvironment("ToolCalling__ExecutionMode", toolCallingExecutionMode ?? "Shadow")
+    .WithEnvironment("Mcp__CnvRegulation__Enabled", cnvRegulationMcpEnabled ?? "false")
+    .WithEnvironment("Mcp__CnvRegulation__Required", cnvRegulationMcpRequired ?? "false")
+    .WithEnvironment("Mcp__CnvRegulation__Command", cnvRegulationMcpCommand ?? "dotnet")
+    .WithEnvironment(
+        "Mcp__CnvRegulation__ConnectionTimeoutSeconds",
+        cnvRegulationMcpConnectionTimeoutSeconds ?? "15")
+    .WithEnvironment(
+        "Mcp__CnvRegulation__ToolCallTimeoutSeconds",
+        cnvRegulationMcpToolCallTimeoutSeconds ?? "30")
     .WithEnvironment("DataAgent__FinancialAnalysisToolsEnabled", dataAgentFinancialAnalysisToolsEnabled ?? "false")
     .WithEnvironment("DataAgent__UsePythonFinancialAnalysis", dataAgentUsePythonFinancialAnalysis ?? "true")
     .WithEnvironment("DataAgent__UseLegacyAnomalyDetectionFallback", dataAgentUseLegacyAnomalyDetectionFallback ?? "true")
@@ -147,6 +187,13 @@ var api = builder
     .WaitFor(orchestrationDb)
     .WaitFor(cnvRegulationDb)
     .WaitForCompletion(cnvRegulationDbMigration);
+
+foreach (var argument in cnvRegulationMcpArgs)
+{
+    api.WithEnvironment(
+        $"Mcp__CnvRegulation__Args__{argument.Index}",
+        argument.Value);
+}
 
 var frontendPath = Path.GetFullPath(
     Path.Combine(builder.AppHostDirectory, "..", "..", "frontend"));

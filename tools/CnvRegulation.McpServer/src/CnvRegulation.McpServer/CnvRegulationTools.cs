@@ -12,7 +12,7 @@ namespace CnvRegulation.McpServer;
 public static class CnvRegulationTools
 {
     /// <summary>
-    /// Searches mock CNV regulatory material.
+    /// Consulta el repositorio configurado para recuperación documental CNV; las citas recuperadas requieren revisión legal humana.
     /// </summary>
     [McpServerTool(
         Name = "search_cnv_regulation",
@@ -22,7 +22,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Searches mock CNV regulatory material and returns traceable placeholder citations.")]
+    [Description("Consulta el repositorio configurado para recuperación documental CNV y devuelve citas recuperadas para revisión legal humana.")]
     public static Task<SearchRegulationResponse> SearchCnvRegulationAsync(
         IRegulationSearchService searchService,
         [Description("Natural language query or keywords to search for.")] string query,
@@ -32,7 +32,7 @@ public static class CnvRegulationTools
         [Description("Optional source filter, such as CNV or Infoleg.")] string? source = null,
         [Description("Optional document type filter.")] string? documentType = null,
         [Description("Optional resolution number filter, such as 622/2013.")] string? resolutionNumber = null,
-        [Description("Optional status filter, such as candidate or mock.")] string? status = null,
+        [Description("Optional status filter, such as candidate or vigente.")] string? status = null,
         [Description("Optional requires-review filter.")] bool? requiresReview = null,
         [Description("Whether to include duplicate chunks.")] bool includeDuplicates = false,
         [Description("Whether to include non-searchable wrapper-like documents.")] bool includeNonSearchable = false,
@@ -59,7 +59,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a repository-backed CNV regulatory document by identifier.
+    /// Consulta el repositorio configurado para recuperación documental CNV por identificador sin determinar aplicabilidad legal.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_document",
@@ -69,7 +69,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves repository-backed CNV regulatory document metadata, content, citations, and retrieval warnings.")]
+    [Description("Consulta el repositorio configurado para recuperación documental CNV y devuelve metadatos, contenido, citas y advertencias; no determina aplicabilidad legal.")]
     public static Task<GetRegulationDocumentResponse> GetCnvDocumentAsync(
         IRegulationDocumentService documentService,
         [Description("Document identifier, for example cnv-nt-2013.")] string documentId,
@@ -86,7 +86,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves a repository-backed CNV regulatory article by title/chapter/section/article.
+    /// Consulta el repositorio configurado para recuperación documental CNV de artículos; la evidencia no constituye una conclusión legal.
     /// </summary>
     [McpServerTool(
         Name = "get_cnv_article",
@@ -96,7 +96,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves a structured repository-backed CNV regulatory article response with citation and confidence.")]
+    [Description("Consulta el repositorio configurado para recuperación documental CNV y devuelve artículos con cita y confianza; requiere revisión legal humana.")]
     public static Task<GetRegulationArticleResponse> GetCnvArticleAsync(
         IRegulationArticleService articleService,
         [Description("Article label, for example Articulo 4.")] string article,
@@ -119,7 +119,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Retrieves recent mock CNV resolutions.
+    /// Consulta el repositorio configurado para recuperación documental CNV de resoluciones recientes para revisión legal humana.
     /// </summary>
     [McpServerTool(
         Name = "get_recent_cnv_resolutions",
@@ -129,7 +129,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Retrieves recent mock CNV resolution metadata from in-memory placeholder data.")]
+    [Description("Consulta el repositorio configurado para recuperación documental CNV y devuelve metadatos de resoluciones recientes para revisión legal humana.")]
     public static Task<GetRecentResolutionsResponse> GetRecentCnvResolutionsAsync(
         IRecentResolutionService recentResolutionService,
         [Description("Lookback window in days.")] int days = 30,
@@ -148,7 +148,7 @@ public static class CnvRegulationTools
     }
 
     /// <summary>
-    /// Performs an evidence-based CNV compliance analysis.
+    /// Usa el repositorio configurado para recuperación documental CNV como ayuda de revisión, sin determinar cumplimiento ni aplicabilidad.
     /// </summary>
     [McpServerTool(
         Name = "analyze_text_against_cnv",
@@ -158,7 +158,7 @@ public static class CnvRegulationTools
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true)]
-    [Description("Runs an evidence-based regulatory review aid against supplied text and returns findings with citations.")]
+    [Description("Usa el repositorio configurado para recuperación documental CNV como ayuda de revisión y devuelve hallazgos con citas, sin conclusión legal.")]
     public static Task<AnalyzeTextAgainstCnvResponse> AnalyzeTextAgainstCnvAsync(
         IComplianceAnalysisService complianceAnalysisService,
         [Description("Text to analyze against CNV regulatory checks.")] string text,

@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Orchestration.Application.Activity;
-using Orchestration.Domain.Activity;
 using Orchestration.Application.Persistence;
+using Orchestration.Domain.Activity;
 
 namespace Orchestration.Api.Hubs;
 
@@ -9,13 +10,16 @@ public sealed class SignalRActivityEventPublisher : IActivityEventPublisher
 {
     private readonly IHubContext<ActivityHub> _hubContext;
     private readonly IOrchestrationDbContext _dbContext;
+    private readonly ILogger<SignalRActivityEventPublisher> _logger;
 
     public SignalRActivityEventPublisher(
         IHubContext<ActivityHub> hubContext,
-        IOrchestrationDbContext dbContext)
+        IOrchestrationDbContext dbContext,
+        ILogger<SignalRActivityEventPublisher> logger)
     {
         _hubContext = hubContext;
         _dbContext = dbContext;
+        _logger = logger;
     }
 
     public async Task PublishAsync(
@@ -34,10 +38,24 @@ public sealed class SignalRActivityEventPublisher : IActivityEventPublisher
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        await _hubContext.Clients.All.SendAsync(
-            "activityEventReceived",
-            activityEvent,
-            cancellationToken
-        );
+        var ownerId = await _dbContext.AnalysisSessions
+            .Where(session => session.Id == activityEvent.SessionId)
+            .Select(session => (Guid?)session.UserId)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (ownerId is null)
+        {
+            _logger.LogWarning(
+                "Realtime activity delivery skipped because session ownership was not found.");
+            return;
+        }
+
+        await _hubContext.Clients
+            .User(ownerId.Value.ToString())
+            .SendAsync(
+                "activityEventReceived",
+                activityEvent,
+                cancellationToken
+            );
     }
 }

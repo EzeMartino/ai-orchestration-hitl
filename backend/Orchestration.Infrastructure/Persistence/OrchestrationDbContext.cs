@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -8,7 +9,10 @@ using Orchestration.Domain.FinancialMetricsExtraction;
 
 namespace Orchestration.Infrastructure.Persistence;
 
-public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, IdentityRole<Guid>, Guid>, IOrchestrationDbContext
+public class OrchestrationDbContext :
+    IdentityDbContext<IdentityUser<Guid>, IdentityRole<Guid>, Guid>,
+    IOrchestrationDbContext,
+    IDataProtectionKeyContext
 {
     public OrchestrationDbContext(DbContextOptions<OrchestrationDbContext> options)
         : base(options)
@@ -19,6 +23,7 @@ public class OrchestrationDbContext : IdentityDbContext<IdentityUser<Guid>, Iden
     public DbSet<ActivityEventLog> ActivityEvents => Set<ActivityEventLog>();
     public DbSet<FinancialMetricsExtractionDraft> FinancialMetricsExtractionDrafts =>
         Set<FinancialMetricsExtractionDraft>();
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     public void ClearTrackedChanges()
     {

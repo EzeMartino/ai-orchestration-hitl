@@ -9,6 +9,19 @@ namespace Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 
 public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyncDisposable
 {
+    private const string ToolCallFailure = "MCP tool call failed.";
+    private const string TransportOrProtocolFailure =
+        "MCP transport or protocol failure.";
+    private const string ConnectionFailure = "MCP connection failed.";
+    private const string ToolResponseFailure =
+        "La herramienta MCP devolvió un error.";
+    private const string InvalidResponseFailure =
+        "La herramienta MCP devolvió una respuesta no válida.";
+    private const string ToolCallFailureCategory = "tool_call";
+    private const string TimeoutFailureCategory = "timeout";
+    private const string ToolResponseFailureCategory = "tool_error";
+    private const string InvalidResponseFailureCategory = "invalid_response";
+
     private readonly CnvRegulationMcpOptions _options;
     private readonly ILogger<CnvRegulationStdioMcpClient> _logger;
     private readonly Func<string, IReadOnlyDictionary<string, object?>, CancellationToken, Task<CallToolResult>>? _toolCallOverride;
@@ -74,10 +87,8 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
             "search_cnv_regulation",
             arguments,
             cancellationToken,
-            () => new CnvRegulationSearchResponse(
-                request.Query,
-                [],
-                ["La herramienta MCP devolvió una respuesta vacía o no válida."]));
+            () => CnvRegulationMcpResponseContract.CreateInvalidSearchResponse(
+                request.Query));
     }
 
     public Task<CnvRegulationDocumentResponse> GetDocumentAsync(
@@ -167,40 +178,45 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
                 timeoutCts.IsCancellationRequested
                 && !cancellationToken.IsCancellationRequested)
             {
-                LogToolCallFailure(ex, toolCallStart);
-                await ResetConnectionAsync("Tool call timed out", ex);
+                var timeoutMessage =
+                    $"La herramienta MCP '{toolName}' excedió el tiempo de espera configurado.";
+                LogToolCallFailure(
+                    timeoutMessage,
+                    TimeoutFailureCategory,
+                    toolCallStart);
+                await ResetConnectionAsync(timeoutMessage);
 
-                var timeoutException = new TimeoutException(
-                    $"La herramienta MCP '{toolName}' excedió el tiempo de espera configurado.",
-                    ex);
-                _lastError = timeoutException.Message;
+                var timeoutException = new TimeoutException(timeoutMessage, ex);
+                _lastError = timeoutMessage;
                 throw timeoutException;
+            }
+            catch (OperationCanceledException) when (
+                cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                LogToolCallFailure(ex, toolCallStart);
+                LogToolCallFailure(
+                    ToolCallFailure,
+                    ToolCallFailureCategory,
+                    toolCallStart);
 
                 if (IsTransportOrProtocolError(ex))
                 {
-                    await ResetConnectionAsync("Transport or protocol error", ex);
+                    await ResetConnectionAsync(TransportOrProtocolFailure);
                 }
 
                 throw;
             }
 
-            var toolCallElapsed = Stopwatch.GetElapsedTime(toolCallStart);
-            var totalElapsed = Stopwatch.GetElapsedTime(startTimestamp);
-            _logger.LogInformation(
-                "MCP tool call succeeded. query_count={QueryCount}, mcp_tool_call_ms={McpToolCallMs:F2}, total_duration_ms={TotalDurationMs:F2}",
-                _queryCount,
-                toolCallElapsed.TotalMilliseconds,
-                totalElapsed.TotalMilliseconds);
-
             if (result.IsError == true)
             {
-                var errorMessage = GetToolErrorMessage(result);
-                _lastError = errorMessage;
-                throw new InvalidOperationException(errorMessage);
+                LogToolCallFailure(
+                    ToolResponseFailure,
+                    ToolResponseFailureCategory,
+                    toolCallStart);
+                throw new InvalidOperationException(ToolResponseFailure);
             }
 
             try
@@ -211,18 +227,27 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
                     if (nullResponseFactory == null)
                     {
                         throw new InvalidOperationException(
-                            "La herramienta MCP devolvió una respuesta vacía o no válida.");
+                            CnvRegulationMcpResponseContract.InvalidStructuredContentWarning);
                     }
 
                     response = nullResponseFactory();
+                    LogToolCallFailure(
+                        InvalidResponseFailure,
+                        InvalidResponseFailureCategory,
+                        toolCallStart);
+                    return response;
                 }
 
                 _lastError = null;
+                LogToolCallSuccess(toolCallStart, startTimestamp);
                 return response;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _lastError = ex.Message;
+                LogToolCallFailure(
+                    InvalidResponseFailure,
+                    InvalidResponseFailureCategory,
+                    toolCallStart);
                 throw;
             }
         }
@@ -232,13 +257,27 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
         }
     }
 
-    private void LogToolCallFailure(Exception ex, long toolCallStart)
+    private void LogToolCallSuccess(long toolCallStart, long startTimestamp)
+    {
+        var toolCallElapsed = Stopwatch.GetElapsedTime(toolCallStart);
+        var totalElapsed = Stopwatch.GetElapsedTime(startTimestamp);
+        _logger.LogInformation(
+            "MCP tool call succeeded. query_count={QueryCount}, mcp_tool_call_ms={McpToolCallMs:F2}, total_duration_ms={TotalDurationMs:F2}",
+            _queryCount,
+            toolCallElapsed.TotalMilliseconds,
+            totalElapsed.TotalMilliseconds);
+    }
+
+    private void LogToolCallFailure(
+        string lastError,
+        string failureCategory,
+        long toolCallStart)
     {
         var toolCallDuration = Stopwatch.GetElapsedTime(toolCallStart);
-        _lastError = ex.Message;
+        _lastError = lastError;
         _logger.LogError(
-            ex,
-            "MCP tool call failed after {ToolCallMs} ms.",
+            "MCP tool call failed. failure_category={FailureCategory}, mcp_tool_call_ms={McpToolCallMs:F2}",
+            failureCategory,
             toolCallDuration.TotalMilliseconds);
     }
 
@@ -290,12 +329,17 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
                 elapsed.TotalMilliseconds
             );
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested)
+        {
+            await CleanupConnectionAsync();
+            throw;
+        }
+        catch (Exception)
         {
             var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
-            _lastError = ex.Message;
+            _lastError = ConnectionFailure;
             _logger.LogError(
-                ex,
                 "Failed to connect to MCP CNV regulation server. duration_ms={DurationMs:F2}",
                 elapsed.TotalMilliseconds
             );
@@ -304,14 +348,13 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
         }
     }
 
-    private async Task ResetConnectionAsync(string reason, Exception? ex = null)
+    private async Task ResetConnectionAsync(string reason)
     {
         _resetCount++;
-        _lastError = ex?.Message ?? reason;
+        _lastError = reason;
 
         // Structured log for reset reason
         _logger.LogWarning(
-            ex,
             "Resetting MCP client connection. reset_reason={ResetReason}",
             reason
         );
@@ -327,9 +370,9 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
             {
                 await _client.DisposeAsync();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogDebug(ex, "Error disposing MCP client during cleanup.");
+                _logger.LogDebug("Error disposing MCP client during cleanup.");
             }
             _client = null;
         }
@@ -391,9 +434,7 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
 
         if (!LooksLikeJson(text))
         {
-            throw new InvalidOperationException(
-                $"La herramienta MCP devolvió contenido de texto que no es JSON: {text}"
-            );
+            throw new InvalidOperationException(InvalidResponseFailure);
         }
 
         return JsonSerializer.Deserialize<TResponse>(
@@ -412,24 +453,10 @@ public sealed class CnvRegulationStdioMcpClient : ICnvRegulationMcpClient, IAsyn
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException(
-                "La herramienta MCP no devolvió contenido de texto."
-            );
+            throw new InvalidOperationException(InvalidResponseFailure);
         }
 
         return text;
-    }
-
-    private static string GetToolErrorMessage(CallToolResult result)
-    {
-        try
-        {
-            return $"La herramienta MCP devolvió un error: {ExtractText(result)}";
-        }
-        catch (InvalidOperationException ex)
-        {
-            return $"La herramienta MCP devolvió un error, pero no se pudo leer su contenido de texto: {ex.Message}";
-        }
     }
 
     private static bool LooksLikeJson(string value)

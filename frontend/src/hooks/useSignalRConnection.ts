@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import * as signalR from "@microsoft/signalr";
 import type { ActivityEvent } from "../types/domain.types";
 import { apiBaseUrl } from "../services/api";
+import { createActivityHubConnectionOptions } from "../services/signalR";
 
-export function useSignalRConnection(onActivityEvent: (event: ActivityEvent) => void) {
+export function useSignalRConnection(
+  accessToken: string,
+  onActivityEvent: (event: ActivityEvent) => void,
+) {
   const [connectionStatus, setConnectionStatus] = useState("Disconnected");
 
   useEffect(() => {
     let isDisposed = false;
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`${apiBaseUrl}/hubs/activity`)
+      .withUrl(`${apiBaseUrl}/hubs/activity`, createActivityHubConnectionOptions(accessToken))
       .withAutomaticReconnect()
       .build();
 
@@ -58,7 +62,7 @@ export function useSignalRConnection(onActivityEvent: (event: ActivityEvent) => 
       connection.off("activityEventReceived", handleActivityEvent);
       void connection.stop();
     };
-  }, [onActivityEvent]);
+  }, [accessToken, onActivityEvent]);
 
   return connectionStatus;
 }

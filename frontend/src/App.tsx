@@ -132,7 +132,7 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
     discardFinancialMetricsReview,
   } = useAnalysisSession();
 
-  const connectionStatus = useSignalRConnection(addActivityEvent);
+  const connectionStatus = useSignalRConnection(token, addActivityEvent);
 
   const latestEvent = events[0];
   const analysisContext = parseAnomalyContext(session?.contextJson);
