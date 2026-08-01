@@ -1,0 +1,101 @@
+services:
+  - type: web
+    name: ai-orchestration-hitl-api
+    runtime: docker
+    plan: standard
+    region: oregon
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    preDeployCommand: >-
+      dotnet Orchestration.Api.dll --migrate-only &&
+      /app/mcp/CnvRegulation.McpServer migrate-db
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: RenderProxy__Enabled
+        value: "true"
+      - key: Cors__AllowedOrigins__0
+        sync: false
+      - key: ConnectionStrings__orchestrationdb
+        fromDatabase:
+          name: ai-orchestration-hitl-app-db
+          property: connectionString
+      - key: CNV_REGULATION_DB_CONNECTION_STRING
+        fromDatabase:
+          name: ai-orchestration-hitl-cnv-db
+          property: connectionString
+      - key: Mcp__CnvRegulation__Required
+        value: "true"
+      - key: Mcp__CnvRegulation__Enabled
+        value: "true"
+      - key: Mcp__CnvRegulation__Command
+        value: /app/mcp/CnvRegulation.McpServer
+      - key: Mcp__CnvRegulation__Args__0
+        value: --storage
+      - key: Mcp__CnvRegulation__Args__1
+        value: postgres
+      - key: ToolCalling__Enabled
+        value: "true"
+      - key: ToolCalling__ExecutionMode
+        value: PlanDriven
+      - key: ToolCalling__AllowedTools__0
+        value: data.analyze_transactions
+      - key: ToolCalling__AllowedTools__1
+        value: legal.search_cnv_regulation
+      - key: DataAgent__FinancialAnalysisToolsEnabled
+        value: "true"
+      - key: DataAgent__UsePythonFinancialAnalysis
+        value: "true"
+      - key: DataAgent__UseFixtureMetricsFallback
+        value: "false"
+      - key: DataAgent__RequireSessionFinancialMetrics
+        value: "true"
+      - key: DataAgent__AiReviewEnabled
+        value: "false"
+      - key: FinancialMetricsExtraction__MaxConcurrentConversions
+        value: "1"
+      - key: StructuredFinancialMetricsPdfExtraction__TesseractLanguage
+        value: eng+spa
+      - key: Llm__Enabled
+        value: "false"
+      - key: LegalAgent__AiReviewEnabled
+        value: "false"
+      - key: IdentityBootstrap__Enabled
+        value: "false"
+
+  - type: web
+    name: ai-orchestration-hitl
+    runtime: static
+    buildCommand: npm ci && npm run build
+    rootDir: frontend
+    staticPublishPath: ./dist
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+
+databases:
+  - name: ai-orchestration-hitl-app-db
+    plan: basic-256mb
+    region: oregon
+    ipAllowList: []
+  - name: ai-orchestration-hitl-cnv-db
+    plan: basic-256mb
+    region: oregon
+    ipAllowList: []
