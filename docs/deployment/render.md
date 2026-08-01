@@ -43,6 +43,8 @@ An independent approver must record the archive's immutable artifact reference, 
 
 Use Render's authenticated SSH access for the paid API service and connect to the running instance for the exact successful deploy identifier recorded in step 5. The SSH shell runs as the image's non-root runtime user and inherits that service instance's exact `CNV_REGULATION_DB_CONNECTION_STRING`; do not replace or re-enter the database URI.
 
+The deployed image is verified to give that runtime user (UID `1654`, home `/home/app`) an executable `/bin/sh` shell and an owned `/home/app/.ssh` directory with mode `0700`, as required for Render SSH access. The image creates only the directory; it contains no SSH key material.
+
 Render one-off jobs snapshot base-service configuration and do not provide this runbook's required session-only environment overrides or writable mount. They are not used here. Using a one-off job would require a separately designed and approved solution with an independently packaged gate script and temporary service environment.
 
 In the authenticated SSH Bash session, disable tracing/history, create only the known writable temporary path, and install cleanup before entering any session-only values. Enter the secret or pre-signed URL with `read -rsp`, which neither echoes it nor places the value in shell history. Enter the independently authorized digests from the separate change record; do not calculate them from values in this session.
@@ -240,7 +242,7 @@ Do not proceed unless the staged file counts are nonzero and the verified digest
 
 Run the commands exactly in this order from the same authenticated SSH session and inherited, fingerprint-confirmed connection environment:
 
-```powershell
+```bash
 /app/mcp/CnvRegulation.McpServer ingest --storage postgres --source-directory /tmp/confirmed/cnv-gate/sources || exit 1
 /app/mcp/CnvRegulation.McpServer inspect-coverage --storage postgres || exit 1
 /app/mcp/CnvRegulation.McpServer validate-search-quality --storage postgres --mode full_text --queries /tmp/confirmed/cnv-gate/search-quality/cnv.search-quality.json || exit 1
