@@ -13,6 +13,13 @@ public sealed class CnvRegulationMcpOptionsValidator : IValidateOptions<CnvRegul
             failures.Add("Required cannot be true when Enabled is false.");
         }
 
+        if (options.Required && options.Enabled &&
+            !HasExactlyOnePostgresStoragePair(options.Args))
+        {
+            failures.Add(
+                "Required CNV MCP must configure exactly one '--storage postgres' argument pair.");
+        }
+
         if (options.Enabled || options.Required)
         {
             if (string.IsNullOrWhiteSpace(options.Command))
@@ -55,5 +62,30 @@ public sealed class CnvRegulationMcpOptionsValidator : IValidateOptions<CnvRegul
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
+    }
+
+    private static bool HasExactlyOnePostgresStoragePair(string[]? args)
+    {
+        if (args is null ||
+            args.Any(argument =>
+                string.Equals(argument, "--use-postgres", StringComparison.OrdinalIgnoreCase) ||
+                argument.StartsWith("--storage=", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var storageOptionIndexes = args
+            .Select((argument, index) => (argument, index))
+            .Where(item =>
+                string.Equals(item.argument, "--storage", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.index)
+            .ToArray();
+
+        return storageOptionIndexes.Length == 1 &&
+               storageOptionIndexes[0] + 1 < args.Length &&
+               string.Equals(
+                   args[storageOptionIndexes[0] + 1],
+                   "postgres",
+                   StringComparison.OrdinalIgnoreCase);
     }
 }

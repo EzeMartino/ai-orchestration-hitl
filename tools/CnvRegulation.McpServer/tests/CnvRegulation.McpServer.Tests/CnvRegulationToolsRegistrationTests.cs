@@ -66,7 +66,9 @@ public sealed class CnvRegulationToolsRegistrationTests
             .ToArray();
 
         descriptions.Should().OnlyContain(description =>
-            description.Contains("recuperación documental CNV", StringComparison.Ordinal) &&
+            description.Contains(
+                "repositorio configurado para recuperación documental CNV",
+                StringComparison.Ordinal) &&
             !description.Contains("mock", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -82,7 +84,9 @@ public sealed class CnvRegulationToolsRegistrationTests
         var source = File.ReadAllText(sourcePath);
 
         source.ToLowerInvariant().Should().NotContain("mock");
-        source.Split("recuperación documental CNV", StringSplitOptions.None)
+        source.Split(
+                "repositorio configurado para recuperación documental CNV",
+                StringSplitOptions.None)
             .Should().HaveCountGreaterThan(5);
     }
 

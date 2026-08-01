@@ -182,9 +182,12 @@ public class CnvRegulationStdioMcpClientTests
     [Fact]
     public async Task GetDocumentAsync_Should_set_last_error_when_json_is_malformed()
     {
-        await using var client = CreateClient((_, _, _) =>
-            Task.FromResult(TextResult(
-                "{ malformed password=secret-value https://private.example/body")));
+        const string sensitivePayload =
+            "{ malformed password=secret-value https://private.example/body";
+        var logger = new CapturingLogger();
+        await using var client = CreateClient(
+            (_, _, _) => Task.FromResult(TextResult(sensitivePayload)),
+            logger: logger);
 
         var act = () => client.GetDocumentAsync(
             new CnvRegulationDocumentRequest("doc-1"),
@@ -193,14 +196,17 @@ public class CnvRegulationStdioMcpClientTests
         await act.Should().ThrowAsync<JsonException>();
         client.LastError.Should().Be(
             "La herramienta MCP devolvió una respuesta no válida.");
+        AssertSafeFailureTelemetry(logger, "invalid_response", sensitivePayload);
     }
 
     [Fact]
     public async Task SearchAsync_Should_return_legacy_empty_response_when_structured_content_is_null()
     {
         using var nullResponse = JsonDocument.Parse("null");
-        await using var client = CreateClient((_, _, _) =>
-            Task.FromResult(StructuredResult(nullResponse.RootElement)));
+        var logger = new CapturingLogger();
+        await using var client = CreateClient(
+            (_, _, _) => Task.FromResult(StructuredResult(nullResponse.RootElement)),
+            logger: logger);
         var request = new CnvRegulationSearchRequest("fondos", Limit: 5);
 
         var response = await client.SearchAsync(request, CancellationToken.None);
@@ -208,8 +214,10 @@ public class CnvRegulationStdioMcpClientTests
         response.Query.Should().Be(request.Query);
         response.Results.Should().BeEmpty();
         response.Warnings.Should().Equal(
-            "La herramienta MCP devolvió una respuesta vacía o no válida.");
-        client.LastError.Should().BeNull();
+            CnvRegulationMcpResponseContract.InvalidStructuredContentWarning);
+        client.LastError.Should().Be(
+            "La herramienta MCP devolvió una respuesta no válida.");
+        AssertSafeFailureTelemetry(logger, "invalid_response");
     }
 
     [Fact]
@@ -247,11 +255,14 @@ public class CnvRegulationStdioMcpClientTests
     {
         const string sensitiveBody =
             "query=secret-query password=secret-value https://private.example/body";
-        await using var client = CreateClient((_, _, _) => Task.FromResult(new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sensitiveBody }],
-            IsError = true
-        }));
+        var logger = new CapturingLogger();
+        await using var client = CreateClient(
+            (_, _, _) => Task.FromResult(new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = sensitiveBody }],
+                IsError = true
+            }),
+            logger: logger);
 
         var act = () => client.GetArticleAsync(
             new CnvRegulationArticleRequest("Artículo 4"),
@@ -261,6 +272,7 @@ public class CnvRegulationStdioMcpClientTests
             .WithMessage("La herramienta MCP devolvió un error.");
         client.LastError.Should().Be("La herramienta MCP devolvió un error.");
         client.LastError.Should().NotContain(sensitiveBody);
+        AssertSafeFailureTelemetry(logger, "tool_error", sensitiveBody);
     }
 
     [Fact]
@@ -508,6 +520,24 @@ public class CnvRegulationStdioMcpClientTests
 
         throw new FileNotFoundException(
             $"Could not locate repository file '{Path.Combine(segments)}'.");
+    }
+
+    private static void AssertSafeFailureTelemetry(
+        CapturingLogger logger,
+        string expectedCategory,
+        params string[] sensitiveValues)
+    {
+        logger.Entries.Should().NotContain(entry =>
+            entry.Message.Contains("succeeded", StringComparison.OrdinalIgnoreCase));
+        logger.Entries.Should().ContainSingle(entry =>
+            entry.Level == LogLevel.Error &&
+            entry.Message.Contains(
+                $"failure_category={expectedCategory}",
+                StringComparison.Ordinal));
+        logger.Entries.Should().OnlyContain(entry =>
+            entry.Exception == null &&
+            sensitiveValues.All(value =>
+                !entry.Message.Contains(value, StringComparison.Ordinal)));
     }
 
     private sealed class CapturingLogger : ILogger<CnvRegulationStdioMcpClient>

@@ -34,6 +34,31 @@ public sealed class CnvRegulationMcpReadinessTests
     }
 
     [Fact]
+    public async Task ProbeAsync_Should_reject_legacy_invalid_structured_content_response()
+    {
+        var probe = new CnvRegulationMcpProbe(
+            new ProbeClient(InvalidStructuredSearchResponse()));
+
+        var action = () => probe.ProbeAsync(CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("CNV MCP readiness probe received an invalid response.");
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedStructuredSearchResponses))]
+    public async Task ProbeAsync_Should_reject_malformed_nested_structured_content(
+        CnvRegulationSearchResponse response)
+    {
+        var probe = new CnvRegulationMcpProbe(new ProbeClient(response));
+
+        var action = () => probe.ProbeAsync(CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("CNV MCP readiness probe received an invalid response.");
+    }
+
+    [Fact]
     public async Task ProbeAsync_Should_propagate_caller_cancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -96,6 +121,22 @@ public sealed class CnvRegulationMcpReadinessTests
     }
 
     [Fact]
+    public async Task HealthCheck_Should_be_unhealthy_when_search_returns_invalid_structured_content()
+    {
+        var healthCheck = new CnvRegulationMcpHealthCheck(
+            Options.Create(new CnvRegulationMcpOptions { Enabled = true, Args = ["run"] }),
+            new CnvRegulationMcpProbe(
+                new ProbeClient(MalformedNestedSearchResponse())));
+
+        var result = await healthCheck.CheckHealthAsync(
+            new HealthCheckContext(),
+            CancellationToken.None);
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Be("CNV MCP readiness probe failed.");
+    }
+
+    [Fact]
     public async Task HealthCheck_Should_propagate_caller_cancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -118,7 +159,12 @@ public sealed class CnvRegulationMcpReadinessTests
         string sensitiveDetail)
     {
         var startup = new CnvRegulationMcpStartupService(
-            Options.Create(new CnvRegulationMcpOptions { Enabled = true, Required = true, Args = ["run"] }),
+            Options.Create(new CnvRegulationMcpOptions
+            {
+                Enabled = true,
+                Required = true,
+                Args = ["--storage", "postgres"]
+            }),
             new RecordingProbe(
                 (Exception)Activator.CreateInstance(exceptionType, sensitiveDetail)!));
 
@@ -127,6 +173,26 @@ public sealed class CnvRegulationMcpReadinessTests
         var failure = await action.Should().ThrowAsync<InvalidOperationException>();
         failure.Which.Message.Should().Be("CNV MCP readiness probe failed.");
         failure.Which.Message.Should().NotContain(sensitiveDetail);
+        failure.Which.InnerException.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task StartupService_Should_fail_required_startup_when_search_returns_invalid_structured_content()
+    {
+        var startup = new CnvRegulationMcpStartupService(
+            Options.Create(new CnvRegulationMcpOptions
+            {
+                Enabled = true,
+                Required = true,
+                Args = ["--storage", "postgres"]
+            }),
+            new CnvRegulationMcpProbe(
+                new ProbeClient(MalformedNestedSearchResponse())));
+
+        var action = () => startup.StartAsync(CancellationToken.None);
+
+        var failure = await action.Should().ThrowAsync<InvalidOperationException>();
+        failure.Which.Message.Should().Be("CNV MCP readiness probe failed.");
         failure.Which.InnerException.Should().BeNull();
     }
 
@@ -140,7 +206,7 @@ public sealed class CnvRegulationMcpReadinessTests
             {
                 Enabled = true,
                 Required = true,
-                Args = ["run"]
+                Args = ["--storage", "postgres"]
             }),
             new RecordingProbe());
 
@@ -189,6 +255,93 @@ public sealed class CnvRegulationMcpReadinessTests
             return exception is null ? Task.CompletedTask : Task.FromException(exception);
         }
     }
+
+    private static CnvRegulationSearchResponse InvalidStructuredSearchResponse() =>
+        CnvRegulationMcpResponseContract.CreateInvalidSearchResponse("CNV");
+
+    public static IEnumerable<object[]> MalformedStructuredSearchResponses()
+    {
+        var validResponse = ValidStructuredSearchResponse();
+        var validResult = validResponse.Results.Single();
+        var validCitation = validResult.Citations.Single();
+
+        yield return [validResponse with { Query = "otra consulta" }];
+        yield return [validResponse with { Results = [null!] }];
+        yield return [validResponse with { Warnings = [null!] }];
+        yield return [validResponse with { Results = [validResult with { DocumentId = "" }] }];
+        yield return [validResponse with { Results = [validResult with { Title = " " }] }];
+        yield return [validResponse with { Results = [validResult with { Source = "" }] }];
+        yield return [validResponse with { Results = [validResult with { Snippet = "" }] }];
+        yield return [validResponse with { Results = [validResult with { Citations = null! }] }];
+        yield return [validResponse with { Results = [validResult with { Citations = [null!] }] }];
+        yield return
+        [
+            validResponse with
+            {
+                Results =
+                [
+                    validResult with
+                    {
+                        Citations = [validCitation with { Source = "" }]
+                    }
+                ]
+            }
+        ];
+        yield return
+        [
+            validResponse with
+            {
+                Results =
+                [
+                    validResult with
+                    {
+                        Citations = [validCitation with { Title = " " }]
+                    }
+                ]
+            }
+        ];
+    }
+
+    private static CnvRegulationSearchResponse MalformedNestedSearchResponse()
+    {
+        var validResponse = ValidStructuredSearchResponse();
+        var validResult = validResponse.Results.Single();
+        return validResponse with
+        {
+            Results = [validResult with { DocumentId = "" }]
+        };
+    }
+
+    private static CnvRegulationSearchResponse ValidStructuredSearchResponse() =>
+        new(
+            "CNV",
+            [
+                new CnvRegulationSearchResult(
+                    "documento-1",
+                    "fragmento-1",
+                    "Normas CNV",
+                    null,
+                    null,
+                    "Artículo 1",
+                    "CNV",
+                    "https://example.test/norma",
+                    "Texto documental recuperado.",
+                    1,
+                    [
+                        new CnvRegulationCitation(
+                            "CNV",
+                            "Resolución General",
+                            "1/2026",
+                            "Normas CNV",
+                            null,
+                            null,
+                            "Artículo 1",
+                            "2026-01-01",
+                            "https://example.test/norma",
+                            "Texto documental recuperado.")
+                    ])
+            ],
+            []);
 
     private sealed class ProbeClient(CnvRegulationSearchResponse? response = null) : ICnvRegulationMcpClient
     {

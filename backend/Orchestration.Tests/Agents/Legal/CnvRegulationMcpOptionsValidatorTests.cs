@@ -48,6 +48,62 @@ public sealed class CnvRegulationMcpOptionsValidatorTests
         result.Failures.Should().Contain("Required cannot be true when Enabled is false.");
     }
 
+    [Fact]
+    public void Validate_Should_accept_required_mcp_with_one_postgres_storage_pair()
+    {
+        var result = _validator.Validate(Options.DefaultName, new CnvRegulationMcpOptions
+        {
+            Required = true,
+            Enabled = true,
+            Args = ["--STORAGE", "PoStGrEs"]
+        });
+
+        result.Failed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_Should_not_require_postgres_storage_when_enabled_mcp_is_optional()
+    {
+        var result = _validator.Validate(Options.DefaultName, new CnvRegulationMcpOptions
+        {
+            Required = false,
+            Enabled = true,
+            Args = ["run"]
+        });
+
+        result.Failed.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(RequiredInvalidStorageConfigurations))]
+    public void Validate_Should_require_exactly_one_effective_postgres_storage_pair_when_required(
+        string[] args)
+    {
+        var result = _validator.Validate(Options.DefaultName, new CnvRegulationMcpOptions
+        {
+            Required = true,
+            Enabled = true,
+            Args = args
+        });
+
+        result.Failed.Should().BeTrue();
+        result.Failures.Should().Contain(
+            "Required CNV MCP must configure exactly one '--storage postgres' argument pair.");
+    }
+
+    public static IEnumerable<object[]> RequiredInvalidStorageConfigurations()
+    {
+        yield return [new[] { "run" }];
+        yield return [new[] { "--storage", "in_memory" }];
+        yield return [new[] { "--storage" }];
+        yield return [new[] { "--storage", "--other", "value" }];
+        yield return [new[] { "--storage=postgres" }];
+        yield return [new[] { "--use-postgres", "--storage", "postgres" }];
+        yield return [new[] { "--storage", "postgres", "--storage", "postgres" }];
+        yield return [new[] { "--storage", "postgres", "--storage", "in_memory" }];
+        yield return [new[] { "--storage", "in_memory", "--storage", "postgres" }];
+    }
+
     [Theory]
     [MemberData(nameof(EnabledInvalidConfigurations))]
     public void Validate_Should_require_a_runnable_configuration_when_enabled(

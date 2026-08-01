@@ -33,7 +33,8 @@ public sealed class RegulatoryKnowledgeServiceCollectionExtensionsTests
             {
                 ["Mcp:CnvRegulation:Enabled"] = enabled.ToString(),
                 ["Mcp:CnvRegulation:Required"] = required.ToString(),
-                ["Mcp:CnvRegulation:Args:0"] = "run"
+                ["Mcp:CnvRegulation:Args:0"] = "--storage",
+                ["Mcp:CnvRegulation:Args:1"] = "postgres"
             })
             .Build();
 
@@ -79,7 +80,8 @@ public sealed class RegulatoryKnowledgeServiceCollectionExtensionsTests
             {
                 ["Mcp:CnvRegulation:Enabled"] = "true",
                 ["Mcp:CnvRegulation:Required"] = "true",
-                ["Mcp:CnvRegulation:Args:0"] = "run"
+                ["Mcp:CnvRegulation:Args:0"] = "--storage",
+                ["Mcp:CnvRegulation:Args:1"] = "postgres"
             })
             .Build();
         services.AddLogging();
