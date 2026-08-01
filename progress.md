@@ -69,3 +69,86 @@ docker run --rm --entrypoint /bin/sh ai-orchestration-hitl:local -c "test $(id -
 - Quality GREEN: `.dockerignore` excludes source bytecode/cache, local Python tooling, and local appsettings variants. With the harmless probe still present on the host, final-image scans found no probe marker, `appsettings.Local.json`, `appsettings.*.local.json`, `.env`, source `__pycache__`, or source `.pyc`; the probe was then removed before commit. Exact cache targets `python/build` and `install/lib/python3.12/test` are absent and the cache has zero `.o` files. `/app/python/data_agent/.venv/bin/python` and `python3.12` are executable; native/project imports (`ssl`, `sqlite3`, `numpy`, `onnxruntime`, `PIL`, `pypdf`, `financial_analysis`) pass with `PYTHONPATH=/app/python/data_agent`, and `pip check` reports no broken requirements. The import test uses `PYTHONDONTWRITEBYTECODE=1` so it does not create transient bytecode in its writable container layer.
 - Measured final image size changed from `425225473` to `376993122` bytes (reduction `48232351` bytes, about 46.0 MiB). This is measured image reduction; cache proof is path-specific rather than an inaccurate blanket claim that no runtime build-related files exist.
 - MCP cache correctness: restore now uses `-r linux-x64`; the rebuilt self-contained single-file publish uses `--no-restore` and completed successfully.
+
+## Task 11: Production Isolation and Required MCP Readiness
+
+### TDD RED
+
+Tests were added before the integration packages. This exact command was run:
+
+```powershell
+dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "Category=ProductionIntegration" --verbosity normal
+```
+
+- Exit `1`; elapsed `9.92s`; zero tests ran because compilation stopped first.
+- Expected failure: 8 `CS0234`/`CS0246` errors, exclusively for missing `Microsoft.AspNetCore.SignalR.Client`, `Testcontainers`, `HubConnection`, and `PostgreSqlContainer` symbols.
+- Minimal dependency change: exact non-floating `Microsoft.AspNetCore.SignalR.Client` `10.0.7` and `Testcontainers.PostgreSql` `4.13.0`. Existing `Microsoft.AspNetCore.Mvc.Testing` remained `10.0.7`.
+- Restore: `dotnet restore backend/Orchestration.Tests/Orchestration.Tests.csproj --verbosity minimal` exited `0` in `8.81s`. Existing transitive `Microsoft.OpenApi 2.4.1` `NU1903` remained visible.
+
+### Integration GREEN
+
+The mandated command was rerun exactly:
+
+```powershell
+dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "Category=ProductionIntegration" --verbosity normal
+```
+
+- Initial exit `0`; 2 total, 2 passed, 0 failed; test time `21.0503s`; build time `23.59s`. The final run includes the added timeout/kill-tree proof and is recorded below.
+- Post-self-review rerun of the same exact command, after moving invalid-command startup proof ahead of the CNV stop, also exited `0` with 0 build errors.
+- Focused non-container regression filter covering existing ActivityHub authorization/authentication, SignalR publisher, MCP readiness, and MCP options tests: final run 70 total, 70 passed, 0 failed, 0 skipped in `677ms`.
+- SignalR: Production `WebApplicationFactory`; real API registration/login for unique synthetic users A/B; opaque access tokens were neither decoded nor logged; real Long Polling `HubConnection` clients used the TestServer handler; user A created the session; production DI `IActivityEventPublisher` persisted and sent one matching `task11_isolation_probe`; A received exactly one; B received none in the bounded 2-second window; anonymous handshake failed with HTTP `401`; persisted event endpoint returned the event for A and `404` for B.
+- Required MCP: a real current-platform self-contained MCP executable was published deterministically from the test assembly path; `migrate-db --storage postgres` targeted only the new disposable CNV database; Production API started with `Enabled=true`, `Required=true`, and the real command plus `--storage postgres`; empty migrated corpus returned exact `200 Healthy`; while that CNV target was still healthy, a separate factory with a guaranteed-missing command failed startup with `CNV MCP readiness probe failed.`; stopping the CNV container then produced bounded exact `503 Unhealthy`. No corpus ingestion, persistent target, volume, paid embedding, API key, DSN, password, or opaque token was used or logged.
+
+Passing focused identity-capture runs:
+
+- SignalR app PostgreSQL: ID `6cb7cdd588472bc8dadd7c4f6d942823ed672bdfc886268d8a48cfddc6a39951`; name `/aihitl-task11-app-signalr-10982ddfff564067ba25a6f6c5972f99`; run identity fingerprint `0e8b146744fd121e69d182604b34079c126941d444a8fcc1a5b0df42f54b8ef0`; deleted.
+- Required-MCP app PostgreSQL: ID `49f15da776285cb7f82ae8286c6a97675019bafceb13bcd163f6b77911f1534b`; name `/aihitl-task11-app-mcp-c0718190c50b441a8ca106abae485e99`; run identity fingerprint `aab225025378dd167f2db504915cf429281564054b238c20f45490048016348a`; deleted.
+- Required-MCP CNV PostgreSQL/pgvector: ID `40824246ffba34bece411ff9655557f8ad5c3cee47cccf51e67e3c51e36b85d2`; name `/aihitl-task11-cnv-c0718190c50b441a8ca106abae485e99`; run identity fingerprint `64493d829d76b49796778e06f83fa154e188ecf566fdad3550fe850aeea767ac`; explicitly stopped for the readiness transition, then deleted.
+
+Harness debugging evidence:
+
+- First MCP behavior run failed before API startup because the CNV schema begins with `CREATE EXTENSION IF NOT EXISTS vector`, while the harness initially used vanilla PostgreSQL. The CNV-only target was corrected to the official `pgvector/pgvector:pg17` image; the application target remains `postgres:17-alpine`.
+- The first passing-path cleanup raced Windows file release for the self-contained MCP and hit a locked `clrjit.dll`. Cleanup validates the Task 11 temporary path and retries only `IOException`/`UnauthorizedAccessException` for a bounded 10 seconds. The caller now creates, validates, and records that directory before publish starts, so publish or executable-validation failures still reach cleanup. Cleanup attempts both containers and the directory even if an earlier disposal fails, then reports only a generic resource count.
+
+Ambient-target safety TDD proof:
+
+- Effective precedence is explicit: `RegulationDbOptions.Create` uses nonblank `CNV_REGULATION_DB_CONNECTION_STRING` before the lower configuration alias `RegulationDb__ConnectionString`.
+- RED: the test wrapped the full run in a restoring outer scope that set the higher-precedence variable to a non-secret, unreachable loopback target on port 1. `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~RequiredMcpReadinessTests" --verbosity minimal` exited `1`; 0 passed, 1 failed in `12s`, at `CNV disposable database migration failed with exit code -532462766.` This proved the migration child still honored the poison instead of its intended disposable target. RED app container ID `3f6e189cd59ad0fca06773b534bcd12c4186f6bfda7f4fa95950a1411ed91fbc`, run identity fingerprint `0892932d346803e8084fe7f6f7a5329366aa8228398943870a2ff900bacad4db`; RED CNV container ID `68fd496006c61a6e79a7677f4f24727f3813a8e6ecce1784eeeb2b9b6ea34387`, run identity fingerprint `48b3780367bcb6d7c018190a7058c34d50b1f87b918253133b5a62fd12a94ee0`; both deleted without schema migration.
+- GREEN: the migration `ProcessStartInfo.Environment` now sets both connection names to the same disposable CNV connection. The nested API/MCP-child environment scope also saves, sets, and restores both names to that disposable connection. The outer poison stays active outside the nested scope, so deleting either exact override makes the regression fail without consulting or exposing any ambient value.
+- GREEN focused MCP rerun before the timeout test: exit `0`; 1 passed, 0 failed in `24s`. The final required-MCP fixture run, including timeout proof, passed 2/2 in `19s`.
+- No ambient connection was inspected, printed, queried, or mutated. All process environment variables were restored after the test; child-process output and connection strings remained undisclosed.
+
+Process timeout and cleanup TDD proof:
+
+- RED: `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~RunProcessAsync_WhenTimeoutExpires" --verbosity minimal` exited `1` at compilation with `RequiredMcpReadinessTests.cs(138,17): error CS1501: Ninguna sobrecarga para el método 'RunProcessAsync' toma 3 argumentos`.
+- GREEN: publish has a 2-minute timeout and CNV migration has a 30-second timeout. Timeout kills the entire process tree, waits for exit plus silent stdout/stderr drains, disposes the process, and throws `TimeoutException` without exposing child output. A cross-platform delayed-child marker test passed 1/1 in `5s`; it first confirmed the child command had started, then waited beyond the child's delay and confirmed the completion marker remained absent.
+- Final exact ProductionIntegration command: exit `0`; 3 total, 3 passed, 0 failed; test time `28.0206s`; total build/test time `30.68s`; 0 build errors. Final focused non-container regressions: 70 passed, 0 failed, 0 skipped in `677ms`.
+- Final residue check found 0 matching Task 11/smoke containers, 0 smoke networks, 0 CNV MCP processes, 0 Task 11 publish directories, 0 timeout markers, and no `.render-smoke.env`.
+
+Quality-review follow-up:
+
+- Discriminating mutation RED: after making a unique descendant `.cmd`/`.sh` script own both markers while its parent shell waited synchronously, temporarily replacing tree-kill with parent-only `process.Kill()` and running `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~RunProcessAsync_WhenTimeoutExpires_KillsTheEntireProcessTree" --verbosity normal` exited `1`; 1 total, 1 failed in `12.0334s` with `Assert.False() Failure`, expected `False`, actual `True`. Tree-kill was restored immediately. The child script, started marker, and completion marker are all deleted in `finally`.
+- Harness RED after restarting Docker Desktop: the two parallel PostgreSQL starts remained pending for more than 120 seconds even though both disposable containers logged ready, passed `pg_isready`, and exposed reachable ephemeral ports; the single-container SignalR Fact passed 1/1 in `15.8024s`. Starts are now explicit and sequential. The next run reached publish and produced all 236 files, but persistent build-server children retained redirected handles; the same direct publish passed with exit `0` in `2.369s`. Task 11 publish now uses `--disable-build-servers`.
+- Final GREEN: the timeout Fact passed 1/1 in `6.4996s`; the required-MCP Fact passed 1/1 in `18.9177s`; the exact `Category=ProductionIntegration` command passed 3/3 in `29.7224s` (`32.13s` build/test). Final checks found 0 Task 11 containers, publish directories, timeout markers/scripts, MCP processes, or run-owned test processes; `git diff --check` exited `0` and added-line secret-pattern hits were `0`.
+- Exact-event review RED/GREEN: the SignalR receipt now uses `Assert.Equal(expected, receivedByA)` for all `ActivityEvent` record fields. Publishing the temporary mutation `expected with { Agent = "Task11-mismatch" }` made the focused SignalR Fact exit `1`, 1/1 failed in `8.7001s`, with expected `Agent = Task11` and actual `Agent = Task11-mismatch`; the mutation was restored immediately. The same Fact then exited `0`, 1/1 passed in `10.4770s`; the exact `Category=ProductionIntegration` command exited `0`, 3/3 passed in `29.3839s` (`31.74s` build/test).
+- Lifecycle deadline RED: the earlier two-container start exceeded 120 seconds and the nested publish left redirected output drains pending after its parent exited. After adding deterministic deadline/aggregation Facts first, `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~AwaitTaskWithDeadlineAsync_WhenTaskNeverCompletes|FullyQualifiedName~ThrowPrimaryOrCleanupFailures_WhenBothExist_PreservesBoth" --verbosity minimal` exited `1` before test execution with two expected `CS0103` errors for the missing helpers. Container start/stop/dispose, health requests/polling, process exit/output drain, and cleanup now have explicit deadlines; all cleanup attempts run, and primary plus cleanup failures are preserved without process output, environment, or connection details.
+- Normal-drain discriminating RED/GREEN: adding the focused never-completing-reader Fact before its helper made `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "FullyQualifiedName~DrainProcessOutputAsync_WhenReaderNeverCompletes_ThrowsWithinDeadline" --verbosity minimal` exit `1` before test execution with the expected `CS0103` for `DrainProcessOutputAsync`. After wiring that bounded helper into the normal-success path, the same Fact passed 1/1 in `127ms`.
+- Lifecycle deadline GREEN: the deterministic deadline/aggregation filter passed 2/2 in `124ms`; the process-tree Fact passed 1/1 in `5s`; SignalR passed 1/1 in `18s`; required MCP passed 1/1 in `41s`. The final exact `dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "Category=ProductionIntegration" --verbosity normal` command exited `0`, 6/6 passed in `29.0637s` (`31.36s` build/test).
+- Post-gate checks: 0 Task 11 containers/networks/temp entries, CNV MCP processes, or testhost processes; no `.render-smoke.env`; `git diff --check` exited `0`; added-line secret-pattern hits were `0`; only the two scoped integration test files and this progress file changed.
+
+### Built Image Smoke
+
+Image: `ai-orchestration-hitl:local`, inspected image ID `sha256:aef4dff4c11136a07873425cecd69f156dadc899648e12745546b021005a4729`.
+
+- New isolated network: ID `aa9d7027ee650ee31440e66e7159e4bec11d3d85ee91575e9288ed3dd73c51b2`; name `ai-hitl-smoke`.
+- New app PostgreSQL: ID `6eb404df8640b1f068657a1795022dff6c9d8ed7ef244c39a8b817a35398c173`; name `ai-hitl-smoke-app-postgres`; run identity fingerprint `42400d50c34a956d727457eae866aeb7bb70d7d8c8d577cba1724c71b8e5d127`.
+- New CNV PostgreSQL/pgvector: ID `33e783fb1099fa42a9c9d97ea9bd4ecf2fae006307dfaf05bd7afc2a6c327b67`; name `ai-hitl-smoke-cnv-postgres`; run identity fingerprint `8b09e2c29fdbadef7f7f741ae0bd18d773f8b7844e725bc51a9a6daede98acd3`.
+- Application `--migrate-only`: exit `0`. CNV `/app/mcp/CnvRegulation.McpServer migrate-db --storage postgres`: exit `0`.
+- Required-MCP API: ID `fdb3b18951d7bb7f43ba0d1b998e40651d2b60404a0236bb5a969ac680c4a912`; name `ai-orchestration-hitl-smoke`; `/alive` exact `200 Healthy`; `/health` exact `200 Healthy`.
+- `.render-smoke.env` was ignored, never printed, and deleted in `finally`. Exact API, migration, app-DB, and CNV-DB containers plus the network were absent after cleanup. No volumes were created.
+
+### Remaining Evidence and Gaps
+
+- Docker was available; no production-integration acceptance item remains open.
+- Existing warning: `Microsoft.OpenApi 2.4.1` reports `NU1903`; Task 11 did not modify that transitive dependency.
+- A fresh-database API/WebApplicationFactory process emits a transient pre-migration `42P01` log for missing `DataProtectionKeys`; this was not emitted by the separate `--migrate-only` process. The hosted migration then applies the schema and all Task 11 acceptance checks pass. This production-code startup-order observation is recorded for follow-up and intentionally not changed within Task 11's test-only scope.
