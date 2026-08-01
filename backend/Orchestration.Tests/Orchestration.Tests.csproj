@@ -12,6 +12,7 @@
     <PackageReference Include="CSnakes.Runtime" Version="1.2.1" />
     <PackageReference Include="FluentAssertions" Version="8.9.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.7" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.7" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.75.0" />
     <PackageReference Include="ModelContextProtocol" Version="1.3.0" />

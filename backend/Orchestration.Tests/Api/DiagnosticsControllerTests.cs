@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.FileProviders;
@@ -11,6 +12,15 @@ namespace Orchestration.Tests.Api;
 
 public class DiagnosticsControllerTests
 {
+    [Fact]
+    public void DiagnosticsController_Should_require_authorization()
+    {
+        typeof(DiagnosticsController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+            .Should()
+            .ContainSingle();
+    }
+
     [Fact]
     public async Task ExecuteToolCalling_Should_return_ok_in_development()
     {
