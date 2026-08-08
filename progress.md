@@ -159,7 +159,9 @@ Gate timestamp: `2026-08-08T11:30:30-03:00` (America/Buenos_Aires). Verified com
 
 ### Decision: CONDITIONAL GO
 
-All executable local code, test, frontend, Docker-image, official Blueprint-schema, invariant, and branch gates below passed. Production handoff is not yet a **GO** because no Render resources were provisioned, no authenticated Render operator validation was run, and no independently approved immutable CNV corpus/query bundle was ingested or accepted against the intended production database. Empty-corpus technical readiness proves MCP transport/database execution only; it does not prove production retrieval coverage or legal applicability.
+All executable local code, test, frontend, Docker-image, official Blueprint-schema, invariant, and branch gates below passed, including the final-review Bash correction and fresh image probes recorded below. Production handoff is not yet a **GO** because no Render resources were provisioned, no authenticated Render operator validation was run, and no independently approved immutable CNV corpus/query bundle was ingested or accepted against the intended production database. Empty-corpus technical readiness proves MCP transport/database execution only; it does not prove production retrieval coverage or legal applicability.
+
+Final review temporarily invalidated the earlier local Docker gate: the prior image registered `/bin/sh` for the runtime user even though the documented CNV SSH gate requires Bash. The decision remained withheld during correction. A fresh rebuild, shell/runbook smoke, retained-content probes, and the focused production integration suite all passed; the local decision is therefore restored to **CONDITIONAL GO**, subject to the unchanged operator gates below.
 
 No Render deployment, persistent CNV target, corpus ingestion, secret change, or production database mutation was performed by this gate.
 
@@ -194,10 +196,20 @@ Task 11's focused current-branch evidence remains part of this gate: exact `Cate
 
 | Exact command | Exit | Result |
 | --- | ---: | --- |
-| `docker build --progress=plain -t ai-orchestration-hitl:production-gate .` | 0 | Image built; inspected ID `sha256:8075f23b3e0dd0b99af869422e3c26eac8eb8c6ceaacc5a9af687c33bcee4be1`. |
+| `docker build --progress=plain -t ai-orchestration-hitl:production-gate .` | 0 | Final-review rebuild passed; inspected ID `sha256:d96200ca94a05594a29ee94985159fd111a76ae5ffdce87e5ee0620cbc07c520`. |
 | `render blueprints validate render.yaml` preflight through `Get-Command render` | 127 | Render CLI is absent; it was not installed or emulated. Authenticated CLI/operator validation remains pending. |
 | `Invoke-WebRequest -Uri 'https://render.com/schema/render.yaml.json'` to a unique temporary path, followed by `python -c` using the already-installed `yaml` and `jsonschema` modules against `render.yaml` | 0 | Official Render JSON Schema downloaded over HTTPS; schema itself and Blueprint both validated; temp schema deleted in `finally`. |
 | `docker image inspect ai-orchestration-hitl:production-gate --format "{{.Config.User}} {{json .Config.ExposedPorts}} {{json .Config.Healthcheck.Test}}"` | 0 | `1654 {"10000/tcp":{}} ["CMD-SHELL","curl --fail --silent http://127.0.0.1:10000/alive || exit 1"]`. |
+
+#### Final-review Bash gate correction
+
+- RED against prior image `sha256:8075f23b3e0dd0b99af869422e3c26eac8eb8c6ceaacc5a9af687c33bcee4be1`: `docker run --rm --entrypoint /usr/bin/getent ai-orchestration-hitl:production-gate passwd app` returned `app:x:1654:1654::/home/app:/bin/sh`; `/bin/sh -c 'set -o pipefail'` exited `2` with `Illegal option -o pipefail`. This disproved the earlier claim that the documented Bash gate was executable in the image.
+- GREEN: the final stage now verifies that `app` exists and sets its login shell with `usermod --shell /bin/bash app` before `USER $APP_UID`. The exact rebuild exited `0` and produced image ID `sha256:d96200ca94a05594a29ee94985159fd111a76ae5ffdce87e5ee0620cbc07c520`.
+- Image metadata remained `1654`, port `10000/tcp`, and the `/alive` healthcheck. `getent passwd app` now ends in `/bin/bash`; an explicit `/bin/bash -lc` login-shell probe confirmed `BASH_VERSION`, login-shell mode, and `set -euo pipefail` with exit `0`.
+- The runbook now requires `/bin/bash` and begins with the portable assertion `test -n "${BASH_VERSION:-}"` before enabling `pipefail`. A safe `/bin/bash -lc` smoke executed the documented startup/cleanup and input-validation preamble with non-secret dummy session values, printed none of them, and exited `0`. The same guard invoked through `/bin/sh` exited `1` with the expected secret-safe Bash-required message before reaching `pipefail`.
+- Retained image contract probes exited `0`: `/home/app/.ssh` remained owned by `1654:1654`, mode `0700`, and empty; API DLL, self-contained MCP executable, locked Python environment, `Python__Home`, OCR/PDF commands, and non-root UID remained present/correct (`tesseract 5.3.4`, `pdftoppm 24.02.0`, Python `3.12.9`).
+- Focused regression: `$env:ORCHESTRATION_TEST_PYTHON_HOME=(Resolve-Path 'python-agents/data_agent').Path; dotnet test backend/Orchestration.Tests/Orchestration.Tests.csproj --no-restore --filter "Category=ProductionIntegration" --verbosity normal` exited `0`; 6/6 passed in `29.9265s`. Existing `NU1903` and obsolete test-call warnings remained visible and unchanged.
+- Runbook checks passed for 7 required headings, 11 production flags, 5 critical commands, the local `render.yaml` link, and 10 balanced code fences. Added-line secret-pattern hits were `0`; tracked runtime/deploy secret-pattern hits were `0` after excluding test/quality fixtures and applying a token boundary to avoid CSS `mask-*` false positives. Final residue was exactly 0 Task 11 containers, networks, temp entries, `.render-smoke.env` files, CNV MCP processes, and testhost processes. `git diff --check` exited `0`, and the changed-file set was exactly `Dockerfile`, `docs/deployment/render.md`, and `progress.md`.
 
 Exact Render CLI preflight:
 

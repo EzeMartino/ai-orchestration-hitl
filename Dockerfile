@@ -62,7 +62,9 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:10000
 ENV Python__Home=/app/python/data_agent
 ENV PATH=/app/python/data_agent/.venv/bin:$PATH
 EXPOSE 10000
-RUN install -d -m 0700 -o $APP_UID -g $APP_UID /home/app/.ssh
+RUN getent passwd app >/dev/null \
+    && usermod --shell /bin/bash app \
+    && install -d -m 0700 -o $APP_UID -g $APP_UID /home/app/.ssh
 USER $APP_UID
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl --fail --silent http://127.0.0.1:10000/alive || exit 1

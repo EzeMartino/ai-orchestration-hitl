@@ -43,13 +43,17 @@ An independent approver must record the archive's immutable artifact reference, 
 
 Use Render's authenticated SSH access for the paid API service and connect to the running instance for the exact successful deploy identifier recorded in step 5. The SSH shell runs as the image's non-root runtime user and inherits that service instance's exact `CNV_REGULATION_DB_CONNECTION_STRING`; do not replace or re-enter the database URI.
 
-The deployed image is verified to give that runtime user (UID `1654`, home `/home/app`) an executable `/bin/sh` shell and an owned `/home/app/.ssh` directory with mode `0700`, as required for Render SSH access. The image creates only the directory; it contains no SSH key material.
+The deployed image is verified to give that runtime user (UID `1654`, home `/home/app`) `/bin/bash` as its executable login shell and an owned `/home/app/.ssh` directory with mode `0700`, as required for this Render SSH gate. The image creates only the directory; it contains no SSH key material. Do not run the gate from `/bin/sh` or another shell.
 
 Render one-off jobs snapshot base-service configuration and do not provide this runbook's required session-only environment overrides or writable mount. They are not used here. Using a one-off job would require a separately designed and approved solution with an independently packaged gate script and temporary service environment.
 
 In the authenticated SSH Bash session, disable tracing/history, create only the known writable temporary path, and install cleanup before entering any session-only values. Enter the secret or pre-signed URL with `read -rsp`, which neither echoes it nor places the value in shell history. Enter the independently authorized digests from the separate change record; do not calculate them from values in this session.
 
 ```bash
+if ! test -n "${BASH_VERSION:-}"; then
+  echo "CNV gate setup failed: /bin/bash is required; stop and reconnect using the image login shell." >&2
+  exit 1
+fi
 set -euo pipefail
 set +x
 set +o history
