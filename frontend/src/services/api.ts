@@ -16,8 +16,12 @@ import type {
   LoginResponse,
   RegisterRequest,
 } from "../types/domain.types";
+import { resolveApiBaseUrl } from "./apiBaseUrl";
 
-export const apiBaseUrl = import.meta.env.VITE_API_URL ?? "http://localhost:5148";
+export const apiBaseUrl = resolveApiBaseUrl(
+  import.meta.env?.VITE_API_URL,
+  import.meta.env?.DEV !== false
+);
 
 const getAuthToken = (): string | null => localStorage.getItem("auth_token");
 

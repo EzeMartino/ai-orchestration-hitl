@@ -18,6 +18,10 @@ The `PlannerAgent` coordinates reasoning and controlled tool plans, but the Stat
 
 A step-by-step production-like demo is available in [docs/demo-script.md](docs/demo-script.md).
 
+## Production Deployment
+
+Render first-deploy order, required API and frontend flags, the manual CNV corpus gate, rollback rules, and authenticated operator checks are documented in the [Render production deployment runbook](docs/deployment/render.md). Corpus changes remain explicit, target-confirmed persistent mutations; deployment does not turn retrieved regulatory evidence into legal advice or an automatic compliance determination.
+
 ## Current AI Status
 
 This project now supports **optional controlled LLM-assisted planner reasoning** and **controlled tool calling**.
@@ -1064,7 +1068,7 @@ After JSON, CSV, or PDF metrics are attached to the session, readiness refreshes
 
 When the session starts, the DataAgent loads persisted session metrics first and records `financialAnalysis.metricsInputSource=session_context`.
 
-![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk-evidence-session-context.png)
+![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk%2Devidence-session-context.png)
 
 ### Structured Input Configuration
 
@@ -1215,7 +1219,7 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 
 ### Financial Risk Evidence
 
-![Financial Risk Evidence](docs/screenshots/financial-risk-evidence.png)
+![Financial Risk Evidence](docs/screenshots/financial-risk%2Devidence.png)
 
 ### Structured Metrics Input
 
@@ -1235,15 +1239,15 @@ Structured metrics may be incomplete or manually provided. Missing data produces
 
 ### Financial Risk Evidence from Session Context
 
-![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk-evidence-session-context.png)
+![Financial Risk Evidence from Session Context](docs/screenshots/financial-risk%2Devidence-session-context.png)
 
 ### Financial Risk Evidence from Structured Input
 
-![Financial Risk Evidence from Structured Input](docs/screenshots/financial-risk-evidence-structured-input.png)
+![Financial Risk Evidence from Structured Input](docs/screenshots/financial-risk%2Devidence-structured-input.png)
 
 ### Financial Risk Evidence from Uploaded Metrics
 
-![Financial Risk Evidence from Uploaded Metrics](docs/screenshots/financial-risk-evidence-uploaded-metrics.png)
+![Financial Risk Evidence from Uploaded Metrics](docs/screenshots/financial-risk%2Devidence-uploaded-metrics.png)
 
 ### Compliance Evidence
 
@@ -1282,16 +1286,9 @@ Aspire starts:
 - optional CNV ingestion executable,
 - React frontend.
 
-### Authentication & Seed Credentials
+### Authentication & Local Bootstrap
 
-When the backend runs for the first time, database migrations will automatically apply and seed two default accounts for local development and testing:
-
-| Role | Email | Password |
-| --- | --- | --- |
-| **Administrator** | `admin@ezemartino.com` | `Password1!` |
-| **Standard User** | `user@ezemartino.com` | `Password1!` |
-
-You can also use the registration form on the login screen to create a new, isolated account.
+Database migrations apply independently of account creation. Identity bootstrap is disabled by default and contains no built-in accounts or passwords. For local development, explicitly configure any bootstrap users through local, uncommitted configuration; never reuse development credentials in a deployed environment. You can also use the registration form on the login screen to create a new, isolated account.
 
 ### Enabling LLM Planner Reasoning
 
