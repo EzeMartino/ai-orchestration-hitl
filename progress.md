@@ -152,3 +152,95 @@ Image: `ai-orchestration-hitl:local`, inspected image ID `sha256:aef4dff4c11136a
 - Docker was available; no production-integration acceptance item remains open.
 - Existing warning: `Microsoft.OpenApi 2.4.1` reports `NU1903`; Task 11 did not modify that transitive dependency.
 - A fresh-database API/WebApplicationFactory process emits a transient pre-migration `42P01` log for missing `DataProtectionKeys`; this was not emitted by the separate `--migrate-only` process. The hosted migration then applies the schema and all Task 11 acceptance checks pass. This production-code startup-order observation is recorded for follow-up and intentionally not changed within Task 11's test-only scope.
+
+## Task 12: Complete Production Gate
+
+Gate timestamp: `2026-08-08T11:30:30-03:00` (America/Buenos_Aires). Verified commit before this evidence update: `71ceec0f47718874fd5a3520ee543a3e5589ed9b`.
+
+### Decision: CONDITIONAL GO
+
+All executable local code, test, frontend, Docker-image, official Blueprint-schema, invariant, and branch gates below passed. Production handoff is not yet a **GO** because no Render resources were provisioned, no authenticated Render operator validation was run, and no independently approved immutable CNV corpus/query bundle was ingested or accepted against the intended production database. Empty-corpus technical readiness proves MCP transport/database execution only; it does not prove production retrieval coverage or legal applicability.
+
+No Render deployment, persistent CNV target, corpus ingestion, secret change, or production database mutation was performed by this gate.
+
+### Restore and Release build
+
+| Exact command | Exit | Evidence |
+| --- | ---: | --- |
+| `dotnet restore backend/Orchestration.slnx` | 0 | Restore completed; existing package advisories remained visible. |
+| `dotnet restore tools/CnvRegulation.McpServer/CnvRegulation.McpServer.sln` | 0 | Restore completed. |
+| `$env:ORCHESTRATION_TEST_PYTHON_HOME=(Resolve-Path 'python-agents/data_agent').Path; dotnet build backend/Orchestration.slnx --no-restore --configuration Release` | 0 | 0 errors, 29 warnings. |
+| `dotnet build tools/CnvRegulation.McpServer/CnvRegulation.McpServer.sln --no-restore --configuration Release` | 0 | 0 errors, 0 warnings. |
+
+The 29 backend build warnings are not hidden: 2 `NU1903` occurrences for transitive `Microsoft.OpenApi 2.4.1`; 11 `MessagePack 2.5.192` advisory occurrences in AppHost (9 `NU1902` moderate and 2 `NU1903` high); and 16 existing `CS0618` test-call warnings for obsolete `AnalysisSession.Create()`. They did not become build errors under current project policy, but the vulnerable dependencies remain remediation items.
+
+### Test, Python, and frontend gates
+
+| Exact command | Exit | Result |
+| --- | ---: | --- |
+| `$env:ORCHESTRATION_TEST_PYTHON_HOME=(Resolve-Path 'python-agents/data_agent').Path; dotnet test backend/Orchestration.slnx --no-build --configuration Release --verbosity minimal` | 0 | 1,866 passed, 0 failed, 0 skipped, 1,866 total; 36 s test duration. |
+| `dotnet test tools/CnvRegulation.McpServer/tests/CnvRegulation.Application.Tests/CnvRegulation.Application.Tests.csproj --configuration Release --verbosity minimal` | 0 | 126 passed, 0 failed, 22 skipped, 148 total. |
+| `dotnet test tools/CnvRegulation.McpServer/tests/CnvRegulation.McpServer.Tests/CnvRegulation.McpServer.Tests.csproj --configuration Release --verbosity minimal` | 0 | 20 passed, 0 failed, 0 skipped, 20 total. |
+| `python-agents/data_agent/.venv/Scripts/python.exe -m unittest discover -s python-agents/tests -p "test_*.py"` | 0 | 31 passed in 0.694 s; the suite emitted its existing `EOF marker not found` diagnostic and still completed `OK`. |
+| `npm --prefix frontend ci` | 0 | 40 packages installed/audited; npm reported 4 high-severity vulnerabilities. No automatic mutation (`npm audit fix`) was run. |
+| `npm --prefix frontend test` | 0 | 55 passed, 0 failed/skipped. |
+| `$env:VITE_API_URL='http://localhost:10000'; npm --prefix frontend run build` | 0 | TypeScript and Vite production build passed; the non-secret absolute local URL existed only in that process. |
+
+The 22 named MCP Application skips are all methods in `PostgresRegulationRepositoryIntegrationTests`; their shared explicit opt-in reason is: set `CNV_REGULATION_RUN_INTEGRATION_TESTS=true` and a disposable `CNV_REGULATION_DB_CONNECTION_STRING`. They were not force-enabled because Task 11 already exercised the required real MCP path against newly created disposable PostgreSQL/pgvector databases, while this gate was forbidden from using an ambient or persistent CNV target.
+
+Task 11's focused current-branch evidence remains part of this gate: exact `Category=ProductionIntegration` passed 6/6. Its Production `WebApplicationFactory` used two real users and two opaque-token SignalR clients; user A received the exact full event, user B received none during the bounded window, anonymous handshake returned `401`, and persisted ownership was enforced. The real required MCP migrated a disposable pgvector database, returned exact `200 Healthy` for an empty corpus, returned exact `503 Unhealthy` after that disposable target stopped, and failed startup for an invalid command. The full 1,866-test backend run above included those tests. Post-gate residue was 0 matching Task 11/smoke containers, networks, MCP/testhost processes, temp entries, and `.render-smoke.env` files.
+
+### Docker and Blueprint artifact proof
+
+| Exact command | Exit | Result |
+| --- | ---: | --- |
+| `docker build --progress=plain -t ai-orchestration-hitl:production-gate .` | 0 | Image built; inspected ID `sha256:8075f23b3e0dd0b99af869422e3c26eac8eb8c6ceaacc5a9af687c33bcee4be1`. |
+| `render blueprints validate render.yaml` preflight through `Get-Command render` | 127 | Render CLI is absent; it was not installed or emulated. Authenticated CLI/operator validation remains pending. |
+| `Invoke-WebRequest -Uri 'https://render.com/schema/render.yaml.json'` to a unique temporary path, followed by `python -c` using the already-installed `yaml` and `jsonschema` modules against `render.yaml` | 0 | Official Render JSON Schema downloaded over HTTPS; schema itself and Blueprint both validated; temp schema deleted in `finally`. |
+| `docker image inspect ai-orchestration-hitl:production-gate --format "{{.Config.User}} {{json .Config.ExposedPorts}} {{json .Config.Healthcheck.Test}}"` | 0 | `1654 {"10000/tcp":{}} ["CMD-SHELL","curl --fail --silent http://127.0.0.1:10000/alive || exit 1"]`. |
+
+Exact Render CLI preflight:
+
+```powershell
+$command = Get-Command render -ErrorAction SilentlyContinue; if ($null -eq $command) { Write-Output 'render-cli=absent'; exit 127 }; Write-Output ('render-cli=' + $command.Source); render blueprints validate render.yaml
+```
+
+Exact official-schema fallback (the unique temp path was removed in `finally`):
+
+```powershell
+$schemaPath = Join-Path ([System.IO.Path]::GetTempPath()) ('render-yaml-schema-' + [guid]::NewGuid().ToString('N') + '.json'); try { Invoke-WebRequest -Uri 'https://render.com/schema/render.yaml.json' -OutFile $schemaPath; python -c "import json,sys,yaml,jsonschema; schema=json.load(open(sys.argv[1], encoding='utf-8')); document=yaml.safe_load(open(sys.argv[2], encoding='utf-8')); jsonschema.Draft202012Validator.check_schema(schema); jsonschema.validate(document, schema); print('render-blueprint-official-schema=valid')" $schemaPath render.yaml } finally { if (Test-Path -LiteralPath $schemaPath) { Remove-Item -LiteralPath $schemaPath -Force } }
+```
+
+The fallback validates declared Blueprint structure only. It does not prove authenticated Render acceptance, provisioning, database references, deployed origins, or runtime service state.
+
+### Production invariant scans
+
+| Exact command | Exit | Interpretation |
+| --- | ---: | --- |
+| `rg -n "Password1!|admin@ezemartino\.com|user@ezemartino\.com" .` | 0 | At execution time, before this evidence table existed, matches were limited to four historical/design/plan documents, including Task 12's own literal scan command. The same four files match on `main`, and none differs in this branch. A final rerun also matches this progress row as evidence self-reference. This global command is therefore not represented as a zero-match scan. |
+| `rg -n "Password1!|admin@ezemartino\.com|user@ezemartino\.com" backend frontend python-agents tools Dockerfile render.yaml README.md` | 1 | Expected ripgrep no-match exit: zero matches in runtime source, deploy artifacts, frontend, tooling, Python, or README. |
+| `rg -n "Clients\.All|Clients\.Group" backend/Orchestration.Api` | 1 | Expected no-match exit: no broad SignalR publish path. |
+| `rg -n "MockRegulatoryKnowledgeSource" backend/Orchestration.Api backend/Orchestration.Infrastructure` | 0 | Definition plus one registration; source inspection confirms registration only when environment is Development or Test, otherwise disabled production uses `UnavailableRegulatoryKnowledgeSource`. |
+| `rg -n "UseSwagger|UseSwaggerUI|MapHealthChecks|UseForwardedHeaders" backend` | 0 | Swagger calls are inside `IsDevelopment`; `/health` and `/alive` map before environment-specific middleware; `UseForwardedHeaders` runs before HSTS/HTTPS when explicit Render proxy support is enabled. |
+| `git diff --check` and `git status --short` before this evidence update | 0 | No whitespace errors; clean worktree. |
+
+### Branch ancestry and final diff before evidence commit
+
+| Exact command | Exit | Result |
+| --- | ---: | --- |
+| `git merge-base --is-ancestor main HEAD` | 0 | Branch contains local `main`. |
+| `git rev-parse main` / `git rev-parse origin/main` | 0 | Both resolved to `0cf6d17d0392a0d356fb3450566838c98657bc45`. |
+| `git log --oneline --decorate main..HEAD` | 0 | Six scoped commits through `71ceec0`; Tasks 7-11 map to endpoint/health, container, topology, runbook, SSH, and isolation/readiness work. |
+| `git diff --stat main...HEAD` | 0 | 20 files; 2,683 insertions, 28 deletions before this Task 12 evidence update. |
+| `git diff --check main...HEAD` | 0 | No branch whitespace errors. |
+
+### Required operator actions before GO
+
+1. Use an authenticated/current Render CLI or Render dashboard to validate and create the Blueprint from `render.yaml`; keep API plus both PostgreSQL databases in `oregon`, one API instance, and record the deploy identifier without secrets.
+2. Confirm the final HTTPS origins: `Cors__AllowedOrigins__0` must be the static-site origin and frontend `VITE_API_URL` the API origin. Confirm database values come from Render `fromDatabase`, never pasted values.
+3. Confirm required production flags before restart/redeploy: `Mcp__CnvRegulation__Enabled=true`, `Mcp__CnvRegulation__Required=true`, command `/app/mcp/CnvRegulation.McpServer`, args `--storage postgres`; `ToolCalling__Enabled=true`, `ExecutionMode=PlanDriven`, and the whole replacement array contains both `data.analyze_transactions` and `legal.search_cnv_regulation`. Keep `Llm__Enabled=false`, both AI-review flags false, fixture fallback false, and `IdentityBootstrap__Enabled=false` unless separately approved/configured. MCP selection is bootstrap-scoped, so flag changes require restart/redeploy.
+4. Allow application and CNV schema migrations, then use authenticated Render SSH for the exact successful deploy. Independently approve the immutable, non-empty corpus/query bundle and expected target fingerprint; confirm exact CNV target without printing the URI; only then obtain separate authorization for the persistent one-time ingestion.
+5. Require non-empty coverage plus passing full-text search-quality evidence. Treat all retrieved/canonical content as documentary evidence for human review, not applicability, breach, compliance risk, or legal advice.
+6. Redeploy/restart, then verify final `/health`, two distinct user logins, cross-user SignalR isolation, Data analysis without fixture fallback, cited CNV retrieval with review disclaimers, and pre-restart token survival. Any failure changes this decision to **NO-GO**.
+
+Open local remediation risks that do not invalidate the recorded test outcomes: transitive .NET package advisories (`Microsoft.OpenApi 2.4.1`, `MessagePack 2.5.192`), npm's 4 high-severity audit findings, 16 obsolete test-call warnings, and the Task 11 fresh-database transient pre-migration `DataProtectionKeys` `42P01` observation. They must be triaged explicitly; none is claimed clean or fixed by Task 12.
