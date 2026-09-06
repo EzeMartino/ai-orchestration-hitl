@@ -6,6 +6,7 @@ using Orchestration.Application.Agents.Data.FinancialAnalysis;
 using Orchestration.Application.Agents.Legal;
 using Orchestration.Application.Agents.Legal.AiReview;
 using Orchestration.Application.Agents.Legal.Cnv;
+using Orchestration.Application.Agents.Legal.Regulations;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Application.Agents.Shared;
 using Orchestration.Infrastructure.Agents.Planner.ToolCalling;
@@ -67,7 +68,7 @@ public class ControlledToolExecutorTests
         result.Summary.Should().Be("Data analysis completed.");
         result.Engine.Should().Be("Fake DataAgent");
         result.Error.Should().BeNull();
-        result.OutputJson.Should().NotBe("{}");
+        result.OutputJson.Should().Be("{}");
 
         dataAgent.WasCalled.Should().BeTrue();
         dataAgent.ReceivedReport!.SubmittedAt.Should().Be(submittedAt);
@@ -81,13 +82,13 @@ public class ControlledToolExecutorTests
             )
         );
 
-        var output = JsonSerializer.Deserialize<DataAgentResult>(
-            result.OutputJson,
-            JsonOptions
-        );
+        var output = new ToolExecutionResultMapper().TryMapDataResult(results);
 
         output.Should().NotBeNull();
         output!.Summary.Should().Be("Data analysis completed.");
+        output.Evidence.Should().ContainSingle(evidence => evidence.Value == 4.5);
+        JsonSerializer.Serialize(result, JsonOptions).Should()
+            .NotContain("typedDataResult").And.NotContain("Above threshold.");
     }
 
     [Fact]
@@ -368,7 +369,7 @@ public class ControlledToolExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_LegalAggregate_RoundTripsThroughRealMapper()
+    public async Task ExecuteAsync_LegalAggregate_MapsWithoutSerializingPayload()
     {
         var legalResult = CreateAggregateLegalResult();
         var executor = CreateExecutor(
@@ -381,6 +382,9 @@ public class ControlledToolExecutorTests
         );
         var mapped = new ToolExecutionResultMapper().TryMapLegalResult(executed);
 
+        executed[0].OutputJson.Should().Be("{}");
+        JsonSerializer.Serialize(executed[0], JsonOptions).Should()
+            .NotContain("typedLegalResult").And.NotContain("Texto citado.");
         mapped.Should().NotBeNull();
         mapped!.HasComplianceRisk.Should().Be(legalResult.HasComplianceRisk);
         mapped.RiskLevel.Should().Be(legalResult.RiskLevel);
@@ -400,6 +404,78 @@ public class ControlledToolExecutorTests
         queryStrategy.Queries[1].ExecutionStatus.Should()
             .Be(LegalCnvQueryExecutionStatuses.Failed);
         queryStrategy.Queries[1].ResultCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DiagnosticResponseRetainsLegacyOutputJson()
+    {
+        var service = new ToolCallingDiagnosticService(
+            new ToolPlanNormalizer(), new ToolPlanValidator(),
+            new ToolExecutionPolicy(), CreateExecutor());
+        var call = CreateValidDataCall();
+
+        var audit = await service.ExecuteAsync(new ToolCallingDiagnosticRequest
+        {
+            ProposedCalls = [new ProposedToolCall(call.ToolName, call.Arguments, call.Reason)]
+        }, CancellationToken.None);
+
+        var executed = audit.ExecutedCalls.Should().ContainSingle().Subject;
+        var output = JsonSerializer.Deserialize<DataAgentResult>(executed.OutputJson, JsonOptions);
+        output.Should().NotBeNull();
+        output!.Evidence.Should().ContainSingle(evidence => evidence.Value == 4.5);
+        JsonSerializer.Serialize(audit, JsonOptions).Should().NotContain("typedDataResult");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LegalAssessmentKeepsDocumentaryBoundaryWithoutJson()
+    {
+        var result = CreateAggregateLegalResult() with
+        {
+            EvidenceAssessment = new RegulatoryEvidenceAssessment(
+                true, "None", "NotEstablished", "Strong", "Info", false, ["Retrieved only."]),
+            RequiresHumanReview = false
+        };
+        var executed = await CreateExecutor(legalAgent: new FakeLegalAgent(result)).ExecuteAsync(
+            [CreateCall("legal.search_cnv_regulation", new Dictionary<string, string>())],
+            CancellationToken.None, CreateRuntimeContext());
+
+        executed[0].OutputJson.Should().Be("{}");
+        var mapped = new ToolExecutionResultMapper().TryMapLegalResult(executed);
+        mapped.Should().NotBeNull();
+        mapped!.HasComplianceRisk.Should().BeFalse();
+        mapped.RiskLevel.Should().Be("NotEstablished");
+        mapped.RequiresHumanReview.Should().BeFalse();
+        mapped.Evidence.Should().ContainSingle();
+        mapped.LegalReview!.PossibleRegulatoryReviewAreas.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DataPreservesEvidenceAndExecutionReviewGateWithoutJson()
+    {
+        var financialAnalysis = CreateFinancialAnalysis("review-document") with
+        {
+            Execution = new FinancialAnalysisExecution(
+                FinancialAnalysisExecutionStatus.Succeeded,
+                FinancialAnalysisOperations.All.Select(operation =>
+                    new FinancialAnalysisStageExecution(
+                        operation,
+                        FinancialAnalysisExecutionStatus.Failed,
+                        0,
+                        FinancialAnalysisFailureCodes.PythonInvocationFailed)).ToArray())
+        };
+        var executor = CreateExecutor(new FakeDataAgent(CreateDataResult(financialAnalysis)));
+
+        var executed = await executor.ExecuteAsync(
+            [CreateValidDataCall()], CancellationToken.None);
+        var mapped = new ToolExecutionResultMapper().TryMapDataResult(executed);
+
+        executed[0].OutputJson.Should().Be("{}");
+        mapped.Should().NotBeNull();
+        mapped!.RequiresHumanReview.Should().BeTrue();
+        mapped.FinancialAnalysis!.DocumentId.Should().Be("review-document");
+        mapped.FinancialAnalysis.Execution.OverallStatus.Should()
+            .Be(FinancialAnalysisExecutionStatus.Failed);
+        mapped.FinancialAnalysis.Execution.Stages.Should().HaveCount(4);
     }
 
     [Fact]
@@ -655,7 +731,7 @@ public class ControlledToolExecutorTests
         );
     }
 
-    private sealed class FakeDataAgent : IDataAgent
+    private sealed class FakeDataAgent(DataAgentResult? result = null) : IDataAgent
     {
         public bool WasCalled { get; private set; }
 
@@ -669,7 +745,7 @@ public class ControlledToolExecutorTests
             ReceivedReport = report;
 
             return Task.FromResult(
-                new DataAgentResult(
+                result ?? new DataAgentResult(
                     HasAnomaly: true,
                     Severity: "High",
                     Summary: "Data analysis completed.",

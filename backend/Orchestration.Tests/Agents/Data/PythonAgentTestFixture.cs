@@ -47,11 +47,9 @@ public sealed class PythonAgentTestFixture : IDisposable
         services.AddSingleton<Orchestration.Application.FinancialAnalysis.Thresholds.IFinancialRiskThresholdProfileProvider, Orchestration.Application.FinancialAnalysis.Thresholds.InMemoryFinancialRiskThresholdProfileProvider>();
         services.AddScoped<CSnakesDataAgent>();
         services.AddPythonFinancialAnalysis();
-        services.AddScoped<PythonAnomalyDetectionPlugin>();
         services.AddSingleton(Options.Create(new DataAgentOptions()));
-        services.AddScoped<SemanticKernelDataAgent>();
         services.AddScoped<ILegacyDataAgent>(provider =>
-            provider.GetRequiredService<SemanticKernelDataAgent>());
+            provider.GetRequiredService<CSnakesDataAgent>());
         services.AddScoped<IStructuredFinancialMetricsProvider, FixtureStructuredFinancialMetricsProvider>();
         services.AddScoped<DeterministicDataAgentAiReviewService>();
         services.AddScoped<IDataAgentAiReviewService>(provider =>

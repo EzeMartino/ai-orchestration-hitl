@@ -81,7 +81,7 @@ public sealed class SignalRActivityEventPublisherTests
     }
 
     [Fact]
-    public async Task PublishAsync_OwnershipLookupThrows_PersistsEventAndPropagatesWithoutDelivery()
+    public async Task PublishAsync_OwnershipLookupThrows_PreservesCommittedEventWithoutInterruptingWorkflow()
     {
         var options = CreateOptions();
         await using var realDbContext = new OrchestrationDbContext(options);
@@ -96,10 +96,7 @@ public sealed class SignalRActivityEventPublisherTests
             new RecordingLogger<SignalRActivityEventPublisher>());
         var activityEvent = CreateEvent(Guid.NewGuid());
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => publisher.PublishAsync(activityEvent));
-
-        Assert.Same(expectedException, exception);
+        await publisher.PublishAsync(activityEvent);
         await using var verificationContext = new OrchestrationDbContext(options);
         Assert.Equal(1, await verificationContext.ActivityEvents.CountAsync());
         Assert.Empty(hubContext.Clients.RequestedUsers);

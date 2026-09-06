@@ -51,6 +51,7 @@ public class OrchestrationDbContext :
 
             builder.Property(x => x.Status)
                 .HasConversion<string>()
+                .IsConcurrencyToken()
                 .IsRequired();
 
             builder.Property(x => x.ContextJson)

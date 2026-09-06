@@ -85,9 +85,8 @@ builder.Services.AddScoped<CSnakesDataAgent>();
 builder.Services.AddSingleton<IFinancialRiskThresholdProfileProvider, InMemoryFinancialRiskThresholdProfileProvider>();
 builder.Services.AddPythonFinancialAnalysis();
 builder.Services.AddDataAgentAiReview(builder.Configuration);
-builder.Services.AddScoped<SemanticKernelDataAgent>();
 builder.Services.AddScoped<ILegacyDataAgent>(provider =>
-    provider.GetRequiredService<SemanticKernelDataAgent>());
+    provider.GetRequiredService<CSnakesDataAgent>());
 builder.Services.AddScoped<IStructuredFinancialMetricsValidator, StructuredFinancialMetricsValidator>();
 builder.Services.AddScoped<IFinancialMetricInputMapper, FinancialMetricInputMapper>();
 builder.Services.AddScoped<IStructuredFinancialMetricsCsvParser, StructuredFinancialMetricsCsvParser>();
@@ -118,7 +117,6 @@ builder.Services.AddScoped<IStructuredFinancialMetricsProvider>(provider =>
 );
 builder.Services.AddScoped<IDataAgentFinancialAnalysisWorkflow, DataAgentFinancialAnalysisWorkflow>();
 builder.Services.AddScoped<IDataAgent, ConfigurableDataAgent>();
-builder.Services.AddScoped<PythonAnomalyDetectionPlugin>();
 
 // Python environment configuration for CSnakes
 var defaultPythonHome = Path.GetFullPath(

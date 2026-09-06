@@ -4,7 +4,7 @@ using Orchestration.Application.Agents.Shared;
 
 namespace Orchestration.Infrastructure.Agents.Data;
 
-public sealed class CSnakesDataAgent(IPythonEnvironment pythonEnvironment) : IDataAgent
+public sealed class CSnakesDataAgent(IPythonEnvironment pythonEnvironment) : ILegacyDataAgent
 {
     private readonly IPythonEnvironment _pythonEnvironment = pythonEnvironment;
 
@@ -12,6 +12,7 @@ public sealed class CSnakesDataAgent(IPythonEnvironment pythonEnvironment) : IDa
         FinancialReportContext report,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var module = _pythonEnvironment.AnomalyDetection();
 
         var (hasAnomaly, severity, summary, evidence) = module.AnalyzeTransactions(

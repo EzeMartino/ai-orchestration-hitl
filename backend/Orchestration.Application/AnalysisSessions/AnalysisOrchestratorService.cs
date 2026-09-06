@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Orchestration.Application.Activity;
 using Orchestration.Application.Persistence;
 using Orchestration.Domain.AnalysisSessions;
@@ -21,19 +22,22 @@ namespace Orchestration.Application.AnalysisSessions
         private readonly IActivityEventPublisher _activityPublisher;
         private readonly IPlannerAgent _plannerAgent;
         private readonly IFinancialReportContextResolver _reportContextResolver;
+        private readonly ILogger<AnalysisOrchestratorService>? _logger;
 
         public AnalysisOrchestratorService(
             IOrchestrationDbContext dbContext,
             AnalysisSessionWorkflowService workflow,
             IActivityEventPublisher activityPublisher,
             IPlannerAgent plannerAgent,
-            IFinancialReportContextResolver reportContextResolver)
+            IFinancialReportContextResolver reportContextResolver,
+            ILogger<AnalysisOrchestratorService>? logger = null)
         {
             _dbContext = dbContext;
             _workflow = workflow;
             _activityPublisher = activityPublisher;
             _plannerAgent = plannerAgent;
             _reportContextResolver = reportContextResolver;
+            _logger = logger;
         }
 
         public async Task<AnalysisSessionDto?> StartAnalysisAsync(
@@ -59,7 +63,6 @@ namespace Orchestration.Application.AnalysisSessions
             {
                 session.SetCurrentAgent(null);
                 session.MarkFailed(reportResolution.ErrorMessage!);
-                await _dbContext.SaveChangesAsync(cancellationToken);
                 await PublishAsync(
                     session.Id,
                     "financial_report_context_invalid",
@@ -70,6 +73,9 @@ namespace Orchestration.Application.AnalysisSessions
                 return ToDto(session);
             }
 
+            session.SetStatus(dataGatheringStatus);
+            session.SetCurrentAgent("PlannerAgent");
+
             await PublishAsync(
                 session.Id,
                 "state_transition_requested",
@@ -78,21 +84,43 @@ namespace Orchestration.Application.AnalysisSessions
                 cancellationToken
             );
 
-            session.SetStatus(dataGatheringStatus);
-            session.SetCurrentAgent("PlannerAgent");
+            try
+            {
+                await PublishAsync(
+                    session.Id,
+                    "state_changed",
+                    "Orchestrator",
+                    $"La sesión cambió al estado: {session.Status}.",
+                    cancellationToken
+                );
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
+                return await RunPlannerAsync(session, reportResolution.Report, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                await FailExecutionAsync(session.Id, "La ejecución del análisis fue cancelada.");
+                throw;
+            }
+            catch (InvalidOperationException ex) when (ex.InnerException is DbUpdateConcurrencyException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Analysis execution failed for session {SessionId}.", session.Id);
+                return await FailExecutionAsync(
+                    session.Id,
+                    "No se pudo completar la ejecución del análisis. Vuelve a intentarlo en una nueva sesión.");
+            }
+        }
 
-            await PublishAsync(
-                session.Id,
-                "state_changed",
-                "Orchestrator",
-                $"La sesión cambió al estado: {session.Status}.",
-                cancellationToken
-            );
-
+        private async Task<AnalysisSessionDto> RunPlannerAsync(
+            AnalysisSession session,
+            FinancialReportContext report,
+            CancellationToken cancellationToken)
+        {
             var plannerResult = await _plannerAgent.RunAsync(
-                reportResolution.Report,
+                report,
                 cancellationToken
             );
 
@@ -107,8 +135,6 @@ namespace Orchestration.Application.AnalysisSessions
 
                 session.SetStatus(awaitingApprovalStatus);
                 session.SetCurrentAgent(null);
-
-                await _dbContext.SaveChangesAsync(cancellationToken);
 
                 await PublishAsync(
                     session.Id,
@@ -137,8 +163,6 @@ namespace Orchestration.Application.AnalysisSessions
             session.SetStatus(completedStatus);
             session.SetCurrentAgent("Orchestrator");
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
             await PublishAsync(
                 session.Id,
                 "state_changed",
@@ -155,6 +179,25 @@ namespace Orchestration.Application.AnalysisSessions
                 cancellationToken
             );
 
+            return ToDto(session);
+        }
+
+        private async Task<AnalysisSessionDto> FailExecutionAsync(Guid sessionId, string reason)
+        {
+            _dbContext.ClearTrackedChanges();
+            var session = await _dbContext.AnalysisSessions.SingleAsync(
+                item => item.Id == sessionId,
+                CancellationToken.None);
+
+            if (session.Status != AnalysisSessionStatus.DataGathering)
+            {
+                return ToDto(session);
+            }
+
+            session.SetStatus(_workflow.ApplyTrigger(session, AnalysisSessionTrigger.Fail));
+            session.SetCurrentAgent(null);
+            session.MarkFailed(reason);
+            await PublishAsync(session.Id, "analysis_failed", "Orchestrator", reason, CancellationToken.None);
             return ToDto(session);
         }
 
@@ -176,6 +219,9 @@ namespace Orchestration.Application.AnalysisSessions
                 AnalysisSessionTrigger.HumanApproved
             );
 
+            session.SetStatus(completedStatus);
+            session.SetCurrentAgent("Orchestrator");
+
             await PublishAsync(
                 session.Id,
                 "human_decision_received",
@@ -183,11 +229,6 @@ namespace Orchestration.Application.AnalysisSessions
                 $"Aprobación recibida. Motivo: {request.Reason ?? "No se proporcionó ningún motivo."}",
                 cancellationToken
             );
-
-            session.SetStatus(completedStatus);
-            session.SetCurrentAgent("Orchestrator");
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
 
             await PublishAsync(
                 session.Id,
@@ -226,6 +267,10 @@ namespace Orchestration.Application.AnalysisSessions
                 AnalysisSessionTrigger.HumanRejected
             );
 
+            session.SetStatus(failedStatus);
+            session.SetCurrentAgent(null);
+            session.MarkFailed(request.Reason ?? "Rechazado por el auditor humano.");
+
             await PublishAsync(
                 session.Id,
                 "human_decision_received",
@@ -233,12 +278,6 @@ namespace Orchestration.Application.AnalysisSessions
                 $"Rechazo recibido. Motivo: {request.Reason ?? "No se proporcionó ningún motivo."}",
                 cancellationToken
             );
-
-            session.SetStatus(failedStatus);
-            session.SetCurrentAgent(null);
-            session.MarkFailed(request.Reason ?? "Rechazado por el auditor humano.");
-
-            await _dbContext.SaveChangesAsync(cancellationToken);
 
             await PublishAsync(
                 session.Id,
@@ -266,16 +305,26 @@ namespace Orchestration.Application.AnalysisSessions
             string message,
             CancellationToken cancellationToken)
         {
-            await _activityPublisher.PublishAsync(
-                new ActivityEvent(
-                    sessionId,
-                    type,
-                    agent,
-                    message,
-                    DateTimeOffset.UtcNow
-                ),
-                cancellationToken
-            );
+            try
+            {
+                await _activityPublisher.PublishAsync(
+                    new ActivityEvent(
+                        sessionId,
+                        type,
+                        agent,
+                        message,
+                        DateTimeOffset.UtcNow
+                    ),
+                    cancellationToken
+                );
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                _dbContext.ClearTrackedChanges();
+                throw new InvalidOperationException(
+                    "La sesión cambió durante la operación. Vuelve a cargarla antes de continuar.", ex);
+            }
         }
 
         private static AnalysisSessionDto ToDto(AnalysisSession session)
@@ -380,7 +429,7 @@ namespace Orchestration.Application.AnalysisSessions
                             source = ratio.Source,
                             inputMetrics = ratio.Inputs,
                             sourcePage = (int?)null,
-                            confidence = 0.75m,
+                            confidence = (decimal?)null,
                             interpretation = ratio.Interpretation
                         }),
                         comparisons = plannerResult.DataResult.FinancialAnalysis.Comparisons.Select(comparison => new
@@ -414,7 +463,7 @@ namespace Orchestration.Application.AnalysisSessions
                                 reason = signal.Reason,
                                 explanation = signal.Reason ?? signal.Summary,
                                 sourcePage = (int?)null,
-                                confidence = 0.75m
+                                confidence = (decimal?)null
                             };
                         }),
                         riskEvidence = plannerResult.DataResult.FinancialAnalysis.RiskEvidence.Select(evidence => new
@@ -433,7 +482,7 @@ namespace Orchestration.Application.AnalysisSessions
                             engine = plannerResult.DataResult.FinancialAnalysis.Engine,
                             sourceDocumentId = plannerResult.DataResult.FinancialAnalysis.DocumentId,
                             sourcePage = (int?)null,
-                            confidence = 0.75m
+                            confidence = (decimal?)null
                         }),
                         warnings = plannerResult.DataResult.FinancialAnalysis.Warnings,
                         limitations = plannerResult.DataResult.FinancialAnalysis.Limitations,
