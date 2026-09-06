@@ -101,6 +101,12 @@ def compare_periods(request_json: str) -> str:
             )
             continue
 
+        if not _compatible_dimensions([base_metric, comparison_metric]):
+            warnings.append(
+                f"La métrica {metric_name} tiene unidades o monedas incompatibles para la comparación."
+            )
+            continue
+
         base_value = _number(base_metric.get("value"))
         comparison_value = _number(comparison_metric.get("value"))
         if base_value is None or comparison_value is None:
@@ -258,8 +264,8 @@ def detect_financial_risk_signals(request_json: str) -> str:
         limitations.append("No hay suficientes periodos comparables para detectar señales de riesgo basadas en tendencias.")
     else:
         _detect_margin_compression(signals, evidence, ratio_index, limitations)
-        _detect_revenue_drop(signals, evidence, metric_index)
-        _detect_capex_spike(signals, evidence, metric_index)
+        _detect_revenue_drop(signals, evidence, metric_index, warnings)
+        _detect_capex_spike(signals, evidence, metric_index, warnings)
         _detect_forecast_dependency(signals, evidence, metric_index)
 
     return _dumps(
@@ -450,6 +456,8 @@ def _compute_ratio(
     if direct_metric is not None:
         direct_value = _number(direct_metric.get("value"))
         if direct_value is not None:
+            if str(direct_metric.get("unit") or "").strip() == "%":
+                direct_value /= 100
             return {
                 "name": ratio_name,
                 "period": period,
@@ -464,20 +472,17 @@ def _compute_ratio(
 
     if "sum_numerator" in spec:
         numerator = 0.0
-        found_any = False
         for metric_name in spec["sum_numerator"]:
             metric = metrics.get(metric_name)
             if metric is None:
-                continue
+                warnings.append(f"Falta el numerador {metric_name} para {ratio_name} en {period}.")
+                return None
             value = _number(metric.get("value"))
             if value is None:
-                continue
+                warnings.append(f"Numerador no válido para {ratio_name} en {period}.")
+                return None
             numerator += value
             inputs.append(metric)
-            found_any = True
-        if not found_any:
-            warnings.append(f"Faltan insumos del numerador para {ratio_name} en {period}.")
-            return None
     else:
         metric = _first_metric(metrics, spec["numerator"])
         if metric is None:
@@ -502,6 +507,9 @@ def _compute_ratio(
         return None
 
     inputs.append(denominator_metric)
+    if not _compatible_dimensions(inputs):
+        warnings.append(f"Los insumos para {ratio_name} en {period} tienen unidades o monedas incompatibles.")
+        return None
     value = numerator / denominator
 
     return {
@@ -530,7 +538,31 @@ def _first_metric(
 
 def _reported_ratio_unit(unit: Any, fallback: str) -> str:
     normalized = str(unit or "").strip()
-    return normalized if normalized in {"ratio", "x", "%"} else fallback
+    return normalized if normalized in {"ratio", "x"} else fallback
+
+
+def _compatible_dimensions(items: list[dict[str, Any]]) -> bool:
+    for field in ("unit", "currency"):
+        values = {
+            str(item.get(field) or "").strip().casefold()
+            for item in items
+        }
+        if len(values) > 1:
+            return False
+    return True
+
+
+def _trend_dimensions_compatible(
+    items: list[dict[str, Any]],
+    metric_name: str,
+    warnings: list[str],
+) -> bool:
+    if _compatible_dimensions(items):
+        return True
+    warnings.append(
+        f"No se evaluó la tendencia de {metric_name}: las unidades o monedas entre periodos son incompatibles."
+    )
+    return False
 
 
 def _comparison_severity(
@@ -786,6 +818,7 @@ def _detect_revenue_drop(
     signals: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
     metric_index: dict[tuple[str, str], dict[str, Any]],
+    warnings: list[str],
 ) -> None:
     _detect_drop_signal(
         signals,
@@ -795,6 +828,7 @@ def _detect_revenue_drop(
         "REVENUE_DROP",
         0.15,
         "Los ingresos disminuyeron más de 15%. Se recomienda revisión humana.",
+        warnings,
     )
 
 
@@ -802,6 +836,7 @@ def _detect_capex_spike(
     signals: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
     metric_index: dict[tuple[str, str], dict[str, Any]],
+    warnings: list[str],
 ) -> None:
     capex_metrics = [
         metric
@@ -811,13 +846,16 @@ def _detect_capex_spike(
     capex_metrics.sort(key=lambda item: str(item.get("period", "")))
     if len(capex_metrics) < 2:
         return
-    previous = _number(capex_metrics[-2].get("value"))
-    current = _number(capex_metrics[-1].get("value"))
+    selected_metrics = capex_metrics[-2:]
+    if not _trend_dimensions_compatible(selected_metrics, "capex", warnings):
+        return
+    previous = _number(selected_metrics[0].get("value"))
+    current = _number(selected_metrics[1].get("value"))
     if previous is None or current is None or previous <= 0:
         return
     increase = (current - previous) / previous
     if increase > 0.25:
-        period = str(capex_metrics[-1].get("period"))
+        period = str(selected_metrics[1].get("period"))
         threshold = previous * 1.25
         reason = _threshold_reason("capex", current, ">", threshold)
         item = _evidence_item(
@@ -825,7 +863,7 @@ def _detect_capex_spike(
             period,
             current,
             threshold,
-            capex_metrics[-1].get("unit") or "",
+            selected_metrics[1].get("unit") or "",
             "Medium",
             reason,
         )
@@ -896,6 +934,7 @@ def _detect_drop_signal(
     signal_name: str,
     threshold: float,
     summary: str,
+    warnings: list[str],
 ) -> None:
     metrics = [
         metric
@@ -905,13 +944,16 @@ def _detect_drop_signal(
     metrics.sort(key=lambda item: str(item.get("period", "")))
     if len(metrics) < 2:
         return
-    previous = _number(metrics[-2].get("value"))
-    current = _number(metrics[-1].get("value"))
+    selected_metrics = metrics[-2:]
+    if not _trend_dimensions_compatible(selected_metrics, metric_name, warnings):
+        return
+    previous = _number(selected_metrics[0].get("value"))
+    current = _number(selected_metrics[1].get("value"))
     if previous is None or current is None or previous == 0:
         return
     decline = (previous - current) / abs(previous)
     if decline > threshold:
-        period = str(metrics[-1].get("period"))
+        period = str(selected_metrics[1].get("period"))
         threshold_value = previous * (1 - threshold)
         reason = _threshold_reason(metric_name, current, "<", threshold_value)
         item = _evidence_item(
@@ -919,7 +961,7 @@ def _detect_drop_signal(
             period,
             current,
             threshold_value,
-            metrics[-1].get("unit") or "",
+            selected_metrics[1].get("unit") or "",
             "High",
             reason,
         )
@@ -1026,7 +1068,7 @@ def _min_confidence(items: list[dict[str, Any]]) -> float:
         value if value is not None else DEFAULT_CONFIDENCE
         for value in confidences
     ]
-    return _round(min(resolved) if resolved else DEFAULT_CONFIDENCE) or DEFAULT_CONFIDENCE
+    return round(min(resolved), 6) if resolved else DEFAULT_CONFIDENCE
 
 
 def _distinct(values: list[str]) -> list[str]:

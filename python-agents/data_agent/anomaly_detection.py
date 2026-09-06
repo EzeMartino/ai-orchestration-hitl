@@ -45,9 +45,9 @@ def analyze_transactions(
             transaction_amount_z_score,
             amount_threshold,
             (
-                "El monto de la transacción está significativamente por encima del rango esperado."
+                "La heurística fija de monto promedio por transacción supera el umbral."
                 if has_amount_anomaly
-                else "El monto de la transacción está dentro del rango esperado."
+                else "La heurística fija de monto promedio por transacción no supera el umbral."
             ),
         ),
         (
@@ -55,9 +55,9 @@ def analyze_transactions(
             velocity_score,
             velocity_threshold,
             (
-                "La frecuencia transaccional aumentó anormalmente en una ventana de tiempo corta."
+                "La heurística fija de cantidad de transacciones supera el umbral."
                 if has_velocity_anomaly
-                else "La frecuencia transaccional está dentro del rango esperado."
+                else "La heurística fija de cantidad de transacciones no supera el umbral."
             ),
         ),
     ]
