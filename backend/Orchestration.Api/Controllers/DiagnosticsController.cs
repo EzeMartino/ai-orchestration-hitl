@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Orchestration.Application.Agents.Planner.ToolCalling;
 using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
@@ -5,6 +6,7 @@ using Orchestration.Infrastructure.Agents.Legal.Regulations.Mcp;
 namespace Orchestration.Api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/diagnostics")]
 public class DiagnosticsController(
     ICnvRegulationMcpClient client,

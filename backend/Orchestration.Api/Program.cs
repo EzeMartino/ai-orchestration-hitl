@@ -198,6 +198,10 @@ if (string.IsNullOrWhiteSpace(orchestrationConnectionString))
 builder.Configuration["ConnectionStrings:orchestrationdb"] =
     PostgresConnectionStringNormalizer.Normalize(orchestrationConnectionString);
 builder.AddNpgsqlDbContext<OrchestrationDbContext>("orchestrationdb");
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<OrchestrationDbContext>(
+        "orchestration_db",
+        tags: ["ready"]);
 builder.Services.AddScoped<IOrchestrationDbContext>(provider =>
     provider.GetRequiredService<OrchestrationDbContext>());
 builder.Services.AddAuthentication();
@@ -234,8 +238,11 @@ app.MapDefaultEndpoints();
 
 app.UseProductionHosting();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -268,3 +275,5 @@ static string ResolvePythonHome(string pythonHome)
 
     return resolvedPath;
 }
+
+public partial class Program;
