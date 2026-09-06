@@ -343,13 +343,13 @@ function AuthenticatedApp({ token, onLogout }: { token: string; onLogout: () => 
 
           {session?.status === "Completed" && (
             <div className="finalDecision finalDecisionSuccess">
-              El auditor humano aprobó este flujo de trabajo. El análisis ha finalizado.
+              Análisis completado. Consulte la evidencia y el historial de actividad para conocer el resultado.
             </div>
           )}
 
           {session?.status === "Failed" && (
             <div className="finalDecision finalDecisionDanger">
-              El auditor humano rechazó este flujo de trabajo. El análisis ha sido detenido.
+              El análisis finalizó con estado fallido. Consulte la evidencia y el historial de actividad para conocer el motivo.
             </div>
           )}
 

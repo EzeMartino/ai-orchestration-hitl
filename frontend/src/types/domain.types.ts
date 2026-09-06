@@ -221,7 +221,7 @@ export type FinancialRatioContext = {
   source?: string;
   inputMetrics?: string[];
   sourcePage?: number | null;
-  confidence?: number;
+  confidence?: number | null;
   interpretation?: string;
 };
 
@@ -251,7 +251,7 @@ export type FinancialRiskSignalContext = {
   reason?: string | null;
   explanation: string;
   sourcePage?: number | null;
-  confidence?: number;
+  confidence?: number | null;
 };
 
 export type FinancialRiskEvidenceContext = {
@@ -266,7 +266,7 @@ export type FinancialRiskEvidenceContext = {
   engine: string;
   sourceDocumentId?: string | null;
   sourcePage?: number | null;
-  confidence?: number;
+  confidence?: number | null;
 };
 
 export type FinancialAnalysisAiKeyFindingContext = {

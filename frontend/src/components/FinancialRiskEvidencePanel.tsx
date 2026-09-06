@@ -355,10 +355,12 @@ export function FinancialRiskEvidencePanel({
                   <dt>Umbral</dt>
                   <dd>{formatNumber(item.threshold)}</dd>
                 </div>
-                <div>
-                  <dt>Confianza</dt>
-                  <dd>{formatPercent(item.confidence)}</dd>
-                </div>
+                {item.confidence !== null && item.confidence !== undefined && (
+                  <div>
+                    <dt>Confianza</dt>
+                    <dd>{formatPercent(item.confidence)}</dd>
+                  </div>
+                )}
                 <div>
                   <dt>Página de origen</dt>
                   <dd>{item.sourcePage ?? "-"}</dd>
