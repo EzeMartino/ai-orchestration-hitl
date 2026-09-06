@@ -2,7 +2,7 @@
 
 AI-ready orchestration platform for supervised financial analysis workflows, combining deterministic agents, controlled LLM advisory layers, structured Python/Pandas analytics, regulatory evidence retrieval, controlled tool calling, real-time telemetry, and human-in-the-loop approval.
 
-This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval remains mandatory.
+This repository is best described as a **controlled LLM-assisted human-in-the-loop orchestration platform**. LLM reasoning is advisory, workflow control remains deterministic, and human approval is mandatory when the evidence indicates risk or requires review. Sessions that do not require review can complete automatically.
 
 ## Project Overview
 
@@ -33,7 +33,7 @@ Current implementation:
 - In `Shadow` mode, tool calls are not dynamically executed by the workflow.
 - In `PlanDriven` mode, approved read-only tool calls can execute through a controlled executor.
 - If LLM reasoning is disabled or fails, the system falls back to deterministic planner reasoning.
-- `DataAgent` runs Python-based anomaly detection through Semantic Kernel + CSnakes.
+- `DataAgent` runs Python-based fixed-threshold anomaly heuristics directly through CSnakes.
 - `DataAgent` can optionally run structured financial analysis with Python/Pandas through CSnakes.
 - `LegalAgent` retrieves cited CNV regulatory evidence through Semantic Kernel + MCP.
 - The workflow pauses for human approval when risk is detected.
@@ -87,7 +87,7 @@ Controlled tool calling has two execution modes:
 
 Current core allowlist:
 
-- `data.analyze_transactions`: read-only statistical anomaly analysis owned by `DataAgent`.
+- `data.analyze_transactions`: read-only financial analysis and fixed-threshold anomaly heuristics owned by `DataAgent`.
 - `legal.search_cnv_regulation`: read-only CNV regulatory retrieval owned by `LegalAgent` / MCP.
 
 This typed production catalog is the source for proposal metadata, allowlist validation, controlled dispatch, result mapping, policy, and audit ownership. Structured ratio, comparison, signal, and evidence operations remain internal to the aggregate `DataAgent` workflow rather than separate Planner-callable tools.
@@ -223,7 +223,7 @@ This project does **not** currently include:
 The PlannerAgent may use an LLM for advisory reasoning summaries and controlled tool proposals only.
 
 The LegalAgent retrieves regulatory evidence. It does not provide legal conclusions.
-The DataAgent detects statistical anomalies and optional financial risk signals from structured metrics. It does not make operational decisions.
+The DataAgent flags fixed amount/count heuristics and optional financial risk signals from structured metrics. Its legacy scores do not estimate statistical significance or changes in frequency over time. It does not make operational decisions.
 The human auditor remains responsible for approval or rejection.
 
 ## Architecture Overview
@@ -286,9 +286,7 @@ ASP.NET Core API
         |
         |-- DataAgent
         |     |-- ConfigurableDataAgent
-        |     |     |-- legacy SemanticKernelDataAgent
-        |     |     |     |-- PythonAnomalyDetectionPlugin
-        |     |     |     |-- CSnakesDataAgent
+        |     |     |-- legacy CSnakesDataAgent
         |     |     |     |-- Python anomaly_detection.py
         |     |     |
         |     |     |-- DataAgentFinancialAnalysisWorkflow optional
@@ -370,7 +368,7 @@ requiresHumanApproval =
 
 Current implementation: configurable Python analytics path.
 
-By default, the DataAgent uses the legacy Semantic Kernel anomaly-detection path.
+By default, the DataAgent calls the legacy CSnakes fixed-threshold analyzer directly.
 
 When `DataAgent__FinancialAnalysisToolsEnabled=true`, it can run the structured financial-analysis workflow.
 
@@ -379,7 +377,7 @@ Pipeline:
 ```text
 DataAgent
   -> ConfigurableDataAgent
-      -> legacy SemanticKernelDataAgent
+      -> legacy CSnakesDataAgent
       OR
       -> DataAgentFinancialAnalysisWorkflow
           -> StructuredFinancialMetricsProvider
@@ -487,7 +485,7 @@ Main states:
 - `Pending`: analysis session was created.
 - `DataGathering`: agents are collecting evidence.
 - `AwaitingHumanApproval`: workflow is paused and requires human decision.
-- `Completed`: human auditor approved the workflow.
+- `Completed`: analysis completed automatically or following human approval.
 - `Failed`: human auditor rejected the workflow or the workflow failed.
 
 The system does not allow risky workflows to complete without explicit human approval.
@@ -504,7 +502,7 @@ When the DataAgent or LegalAgent detects risk:
 4. the approval panel is displayed,
 5. a human auditor must approve or reject the session.
 
-The system only moves to `Completed` after explicit approval.
+When a session is awaiting human approval, it only moves to `Completed` after explicit approval. Sessions that require no human review can complete automatically.
 If rejected, the session moves to `Failed`.
 
 ## Multi-User Authentication & Session Isolation
@@ -593,8 +591,7 @@ The DataAgent executes Python code from the .NET workflow using CSnakes.
 Current flow:
 
 ```text
-SemanticKernelDataAgent
-  -> PythonAnomalyDetectionPlugin
+ConfigurableDataAgent
   -> CSnakesDataAgent
   -> anomaly_detection.py
 ```
@@ -635,7 +632,7 @@ Financial-analysis architecture:
 ```text
 DataAgent
   -> ConfigurableDataAgent
-      -> legacy SemanticKernelDataAgent
+      -> legacy CSnakesDataAgent
       OR
       -> DataAgentFinancialAnalysisWorkflow
           -> StructuredFinancialMetricsProvider
@@ -1505,11 +1502,11 @@ dotnet test
 
 ```bash
 cd frontend
+npm test
 npm run build
 ```
 
-Latest validated backend suite: 439 tests.
-Latest validated Python financial-analysis suite: 13 tests.
+The PostgreSQL concurrency and rollback tests run when `ORCHESTRATION_TEST_POSTGRES` contains a connection string for a disposable PostgreSQL server. The test account needs permission to create databases. Each test migrates an isolated database and drops it afterward; without this variable, these relational tests are explicitly skipped.
 
 Current test coverage includes:
 
@@ -1578,7 +1575,7 @@ This project is not legal, financial, or investment advice.
 
 The LegalAgent retrieves regulatory evidence from CNV-related sources. It does not determine legal compliance.
 
-The DataAgent detects statistical anomalies. It does not block transactions, move money, freeze accounts, or make operational decisions.
+The DataAgent flags fixed-threshold heuristics and financial risk signals. It does not block transactions, move money, freeze accounts, or make operational decisions.
 
 Financial risk signals are advisory. The DataAgent does not determine fraud, legal violations, credit decisions, or operational actions.
 
