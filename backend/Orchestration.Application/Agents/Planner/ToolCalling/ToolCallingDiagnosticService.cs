@@ -1,7 +1,11 @@
+using System.Text.Json;
+
 namespace Orchestration.Application.Agents.Planner.ToolCalling;
 
 public sealed class ToolCallingDiagnosticService : IToolCallingDiagnosticService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly IToolPlanNormalizer _normalizer;
     private readonly IToolPlanValidator _validator;
     private readonly IToolExecutionPolicy _policy;
@@ -70,7 +74,14 @@ public sealed class ToolCallingDiagnosticService : IToolCallingDiagnosticService
         {
             if (decision.Status == ToolExecutionStatus.Executed)
             {
-                executedCalls.Add(executionResults[executionIndex]);
+                var result = executionResults[executionIndex];
+                object? payload = (object?)result.TypedDataResult ?? result.TypedLegalResult;
+                executedCalls.Add(payload is null ? result : result with
+                {
+                    OutputJson = JsonSerializer.Serialize(payload, JsonOptions),
+                    TypedDataResult = null,
+                    TypedLegalResult = null
+                });
                 executionIndex++;
                 continue;
             }

@@ -634,7 +634,7 @@ public sealed class ProductionLikeWorkflowE2ETests
     }
 
     [Fact]
-    public async Task ProductionLikeWorkflow_PlanDrivenCancellationBetweenStages_ShouldNotMutateWorkflowOrRunLegal()
+    public async Task ProductionLikeWorkflow_PlanDrivenCancellationBetweenStages_ShouldFailWithoutRunningLegal()
     {
         await using var dbContext = StructuredFinancialMetricsSessionServiceTests.CreateDbContext();
         using var cancellation = new CancellationTokenSource();
@@ -672,8 +672,10 @@ public sealed class ProductionLikeWorkflowE2ETests
         var persistedSession = await dbContext.AnalysisSessions
             .AsNoTracking()
             .SingleAsync(candidate => candidate.Id == session.Id);
-        persistedSession.Status.Should().Be(AnalysisSessionStatus.DataGathering);
-        persistedSession.CurrentAgent.Should().Be("PlannerAgent");
+        persistedSession.Status.Should().Be(AnalysisSessionStatus.Failed);
+        persistedSession.CurrentAgent.Should().BeNull();
+        persistedSession.CompletedAt.Should().NotBeNull();
+        persistedSession.FailureReason.Should().Be("La ejecución del análisis fue cancelada.");
         persistedSession.ContextJson.Should().NotContain("\"toolPlan\"");
         cnvClient.ReceivedRequests.Should().BeEmpty();
 
@@ -687,6 +689,7 @@ public sealed class ProductionLikeWorkflowE2ETests
         activityTypes.Should().NotContain("agent_completed");
         activityTypes.Should().NotContain("human_approval_required");
         activityTypes.Should().NotContain("analysis_completed");
+        activityTypes.Should().ContainSingle(type => type == "analysis_failed");
     }
 
     [Fact]

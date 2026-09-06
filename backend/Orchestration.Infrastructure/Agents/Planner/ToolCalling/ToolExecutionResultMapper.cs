@@ -78,6 +78,11 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             return null;
         }
 
+        if (call.TypedDataResult is { } typedResult)
+        {
+            return NormalizeDataResult(typedResult);
+        }
+
         try
         {
             if (HasAmbiguousFinancialAnalysisMetadata(call.OutputJson))
@@ -87,42 +92,60 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
 
             var normalizedJson = NormalizeFinancialExecutionJson(
                 call.OutputJson,
-                out var executionMetadataValid);
+                out _);
             var result = JsonSerializer.Deserialize<DataAgentResult>(
                 normalizedJson,
                 JsonOptions
             );
 
-            if (result?.FinancialAnalysis is not { } financialAnalysis)
-            {
-                return result;
-            }
-
-            var receivedExecution = financialAnalysis.Execution;
-            var execution = executionMetadataValid && receivedExecution is not null
-                ? FinancialAnalysisExecution.FromStages(receivedExecution.Stages)
-                : FinancialAnalysisExecution.LegacyUnknown;
-            var statusContradiction = executionMetadataValid &&
-                receivedExecution is not null &&
-                receivedExecution.OverallStatus != execution.OverallStatus;
-            var normalizedFinancialAnalysis = financialAnalysis with
-            {
-                Execution = execution
-            };
-            var requiresHumanReview = result.RequiresHumanReview ||
-                statusContradiction ||
-                execution.OverallStatus != FinancialAnalysisExecutionStatus.Succeeded;
-
-            return result with
-            {
-                FinancialAnalysis = normalizedFinancialAnalysis,
-                RequiresHumanReview = requiresHumanReview
-            };
+            return NormalizeDataResult(result);
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    private static DataAgentResult? NormalizeDataResult(DataAgentResult? result)
+    {
+        if (result?.FinancialAnalysis is not { } financialAnalysis)
+        {
+            return result;
+        }
+
+        var receivedExecution = financialAnalysis.Execution;
+        var valid = IsValidExecutionMetadata(receivedExecution);
+        var execution = valid
+            ? FinancialAnalysisExecution.FromStages(receivedExecution!.Stages)
+            : FinancialAnalysisExecution.LegacyUnknown;
+
+        return result with
+        {
+            FinancialAnalysis = financialAnalysis with { Execution = execution },
+            RequiresHumanReview = result.RequiresHumanReview ||
+                valid && receivedExecution!.OverallStatus != execution.OverallStatus ||
+                execution.OverallStatus != FinancialAnalysisExecutionStatus.Succeeded
+        };
+    }
+
+    private static bool IsValidExecutionMetadata(FinancialAnalysisExecution? execution)
+    {
+        if (execution is null || !Enum.IsDefined(execution.OverallStatus) ||
+            execution.Stages.Count != FinancialAnalysisOperations.All.Count)
+        {
+            return false;
+        }
+
+        var operations = new HashSet<string>(StringComparer.Ordinal);
+        return execution.Stages.All(stage => stage is not null &&
+            FinancialAnalysisOperations.All.Contains(stage.Operation, StringComparer.Ordinal) &&
+            operations.Add(stage.Operation) &&
+            stage.Status is FinancialAnalysisExecutionStatus.LegacyUnknown or
+                FinancialAnalysisExecutionStatus.Succeeded or FinancialAnalysisExecutionStatus.Failed &&
+            stage.DurationMilliseconds >= 0 &&
+            (stage.Status == FinancialAnalysisExecutionStatus.Failed
+                ? stage.FailureCode is not null && FinancialFailureCodes.Contains(stage.FailureCode)
+                : stage.FailureCode is null));
     }
 
     private static string NormalizeFinancialExecutionJson(
@@ -371,14 +394,33 @@ public sealed class ToolExecutionResultMapper : IToolExecutionResultMapper
             var results = new List<LegalAgentResult>(calls.Length);
             foreach (var call in calls)
             {
-                if (!HasValidRawLegalAuditStatus(call.OutputJson))
+                LegalAggregatePayload? payload;
+                if (call.TypedLegalResult is { } typedResult)
                 {
-                    return null;
+                    if (typedResult.QueryStrategy is not null and not LegalQueryStrategyAudit)
+                    {
+                        return null;
+                    }
+
+                    payload = new LegalAggregatePayload(
+                        typedResult.HasComplianceRisk, typedResult.RiskLevel,
+                        typedResult.Summary, typedResult.Engine, typedResult.Evidence,
+                        typedResult.Warnings, typedResult.QueryStrategy as LegalQueryStrategyAudit,
+                        typedResult.LegalReview, typedResult.RequiresHumanReview,
+                        typedResult.EvidenceAssessment, typedResult.EvidenceEnrichments);
+                }
+                else
+                {
+                    if (!HasValidRawLegalAuditStatus(call.OutputJson))
+                    {
+                        return null;
+                    }
+
+                    payload = JsonSerializer.Deserialize<LegalAggregatePayload>(
+                        call.OutputJson,
+                        JsonOptions);
                 }
 
-                var payload = JsonSerializer.Deserialize<LegalAggregatePayload>(
-                    call.OutputJson,
-                    JsonOptions);
                 var result = TryCreateLegalResult(payload);
                 if (result is null)
                 {

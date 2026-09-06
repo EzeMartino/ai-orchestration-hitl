@@ -135,10 +135,13 @@ public class ToolExecutionResultMapperTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
     public void TryMapLegalResult_Should_combine_all_assessed_legal_calls_regardless_of_order(
-        bool strongResultFirst)
+        bool strongResultFirst,
+        bool typed)
     {
         var irrelevant = CreateAssessedLegalResult(
             relevance: "None",
@@ -157,7 +160,8 @@ public class ToolExecutionResultMapperTests
         var result = new ToolExecutionResultMapper().TryMapLegalResult(payloads
             .Select(payload => CreateExecutionResult(
                 "legal.search_cnv_regulation",
-                JsonSerializer.Serialize(payload, JsonOptions)))
+                typed ? "{}" : JsonSerializer.Serialize(payload, JsonOptions)) with
+                { TypedLegalResult = typed ? payload : null })
             .ToArray());
 
         result.Should().NotBeNull();
@@ -198,6 +202,87 @@ public class ToolExecutionResultMapperTests
         queryStrategy.Queries.Select(query => query.Index).Should()
             .Equal(1, 2, 3, 4);
         queryStrategy.Queries.Should().OnlyContain(query => query.Total == 4);
+    }
+
+    [Fact]
+    public void TryMapLegalResult_TypedCanonicalDocumentWithMissingMetadata_IsRejected()
+    {
+        var enrichment = CreateEnrichment("typed", 1, RegulatoryEvidenceEnrichmentStatuses.Verified);
+        enrichment = enrichment with { Document = enrichment.Document! with { Metadata = null! } };
+        var call = CreateExecutionResult("legal.search_cnv_regulation", "{}") with
+        {
+            TypedLegalResult = CreateEnrichedLegalResult(enrichment)
+        };
+
+        new ToolExecutionResultMapper().TryMapLegalResult([call]).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(ToolExecutionStatus.Failed, false)]
+    [InlineData(ToolExecutionStatus.SkippedDisabled, true)]
+    [InlineData(ToolExecutionStatus.Executed, false)]
+    public void TryMapResult_TypedPayloadDoesNotOverrideExecutionGate(
+        ToolExecutionStatus status,
+        bool succeeded)
+    {
+        var dataCall = CreateExecutionResult("data.analyze_transactions", "{}") with
+        {
+            Status = status,
+            Succeeded = succeeded,
+            TypedDataResult = CreateDataResult()
+        };
+        var legalCall = CreateExecutionResult("legal.search_cnv_regulation", "{}") with
+        {
+            Status = status,
+            Succeeded = succeeded,
+            TypedLegalResult = CreateLegalResult()
+        };
+        var mapper = new ToolExecutionResultMapper();
+
+        mapper.TryMapDataResult([dataCall]).Should().BeNull();
+        mapper.TryMapLegalResult([legalCall]).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("negative_duration")]
+    [InlineData("duplicate_operation")]
+    [InlineData("missing_stage")]
+    [InlineData("unknown_operation")]
+    [InlineData("unknown_status")]
+    [InlineData("degraded_stage")]
+    [InlineData("null_stage")]
+    [InlineData("failed_without_code")]
+    [InlineData("failed_unknown_code")]
+    [InlineData("succeeded_with_code")]
+    [InlineData("unknown_aggregate")]
+    public void TryMapDataResult_TypedMalformedExecutionRequiresReview(string invalidPart)
+    {
+        var stages = CreateCompleteStages().ToArray();
+        var status = FinancialAnalysisExecutionStatus.Succeeded;
+        switch (invalidPart)
+        {
+            case "negative_duration": stages[0] = stages[0] with { DurationMilliseconds = -1 }; break;
+            case "duplicate_operation": stages[1] = stages[0]; break;
+            case "missing_stage": stages = stages[..^1]; break;
+            case "unknown_operation": stages[0] = stages[0] with { Operation = "unknown" }; break;
+            case "unknown_status": stages[0] = stages[0] with { Status = (FinancialAnalysisExecutionStatus)99 }; break;
+            case "degraded_stage": stages[0] = stages[0] with { Status = FinancialAnalysisExecutionStatus.Degraded }; break;
+            case "null_stage": stages[0] = null!; break;
+            case "failed_without_code": stages[0] = stages[0] with { Status = FinancialAnalysisExecutionStatus.Failed }; break;
+            case "failed_unknown_code": stages[0] = stages[0] with { Status = FinancialAnalysisExecutionStatus.Failed, FailureCode = "unknown" }; break;
+            case "succeeded_with_code": stages[0] = stages[0] with { FailureCode = FinancialAnalysisFailureCodes.PythonInvocationFailed }; break;
+            case "unknown_aggregate": status = (FinancialAnalysisExecutionStatus)99; break;
+        }
+        var call = CreateExecutionResult("data.analyze_transactions", "{ invalid-json") with
+        {
+            TypedDataResult = CreateDataResult(status, stages: stages)
+        };
+
+        var result = new ToolExecutionResultMapper().TryMapDataResult([call]);
+
+        result.Should().NotBeNull();
+        result!.RequiresHumanReview.Should().BeTrue();
+        result.FinancialAnalysis!.Execution.Should().BeSameAs(FinancialAnalysisExecution.LegacyUnknown);
     }
 
     [Fact]

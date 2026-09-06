@@ -20,11 +20,30 @@ import {
   shouldLoadFinancialMetricsReview,
 } from "../utils/financialMetricsReview";
 
+function isSameActivityEvent(left: ActivityEvent, right: ActivityEvent) {
+  return left.sessionId === right.sessionId &&
+    left.type === right.type &&
+    left.agent === right.agent &&
+    left.message === right.message &&
+    left.timestamp === right.timestamp;
+}
+
 export function useAnalysisSession() {
+  const isMounted = useRef(true);
   const activeSessionId = useRef<string | null>(null);
+  const sessionGeneration = useRef(0);
+  const workflowGeneration = useRef(0);
+  const sessionDetailsGeneration = useRef(0);
+  const sessionEventsGeneration = useRef(0);
+  const savedSessionsGeneration = useRef(0);
+  const structuredMetricsGeneration = useRef(0);
+  const startPreflightGeneration = useRef(0);
+  const sessionStartGeneration = useRef(0);
+  const decisionGeneration = useRef(0);
+  const metricsSaveGeneration = useRef(0);
+  const financialMetricsReviewSaveGeneration = useRef(0);
   const financialMetricsReviewGeneration = useRef(0);
   const financialMetricsUploadSessionId = useRef<string | null>(null);
-  const financialMetricsUploadGeneration = useRef(0);
   const [session, setSession] = useState<AnalysisSessionResponse | null>(null);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [isCreating, setIsCreating] = useState(false);
@@ -50,31 +69,64 @@ export function useAnalysisSession() {
   const [isCheckingStartPreflight, setIsCheckingStartPreflight] = useState(false);
   const [startPreflightError, setStartPreflightError] = useState<string | null>(null);
 
-  const invalidateFinancialMetricsReviewWork = () => {
-    activeSessionId.current = null;
+  const isCurrentGeneration = (generation: number) =>
+    isMounted.current && sessionGeneration.current === generation;
+
+  const isCurrentSession = (sessionId: string, generation: number) =>
+    isMounted.current && isCurrentSessionRequest(
+      sessionId,
+      generation,
+      activeSessionId.current,
+      sessionGeneration.current,
+    );
+
+  const beginSessionChange = (sessionId: string | null) => {
+    const generation = sessionGeneration.current + 1;
+    sessionGeneration.current = generation;
+    workflowGeneration.current += 1;
+    sessionDetailsGeneration.current += 1;
+    activeSessionId.current = sessionId;
+    sessionEventsGeneration.current += 1;
+    structuredMetricsGeneration.current += 1;
+    startPreflightGeneration.current += 1;
+    sessionStartGeneration.current += 1;
+    decisionGeneration.current += 1;
+    metricsSaveGeneration.current += 1;
+    financialMetricsReviewSaveGeneration.current += 1;
     financialMetricsReviewGeneration.current += 1;
     financialMetricsUploadSessionId.current = null;
-    financialMetricsUploadGeneration.current += 1;
+    setSession(null);
+    setEvents([]);
+    setIsCreating(false);
+    setIsStarting(false);
+    setDecisionReason("");
+    setIsSubmittingDecision(false);
+    setErrorMessage(null);
+    setStructuredMetrics(null);
+    setFinancialReportSummary(null);
+    setIsLoadingStructuredMetrics(false);
+    setIsSavingStructuredMetrics(false);
+    setMetricsSaveResult(null);
+    setMetricsSaveError(null);
     setFinancialMetricsReview(null);
     setFinancialMetricsReviewError(null);
     setIsLoadingFinancialMetricsReview(false);
     setIsSavingFinancialMetricsReview(false);
-    setIsLoadingStructuredMetrics(false);
-    setFinancialReportSummary(null);
-    setIsSavingStructuredMetrics(false);
+    setStartPreflight(null);
+    setStartPreflightError(null);
     setIsCheckingStartPreflight(false);
+    return generation;
   };
 
   // Helper to add activity events from SignalR
   const addActivityEvent = useCallback((event: ActivityEvent) => {
     setEvents((currentEvents) => {
-      const alreadyExists = currentEvents.some(
-        (currentEvent) =>
-          currentEvent.sessionId === event.sessionId &&
-          currentEvent.type === event.type &&
-          currentEvent.agent === event.agent &&
-          currentEvent.message === event.message &&
-          currentEvent.timestamp === event.timestamp
+      if (event.sessionId !== activeSessionId.current) {
+        return currentEvents;
+      }
+
+      const alreadyExists = currentEvents.some((currentEvent) =>
+        isSameActivityEvent(currentEvent, event)
       );
 
       if (alreadyExists) {
@@ -85,79 +137,166 @@ export function useAnalysisSession() {
     });
   }, []);
 
-  const loadSessionEvents = async (sessionId: string) => {
+  const loadSessionEvents = async (
+    sessionId: string,
+    requestSessionGeneration = sessionGeneration.current,
+  ) => {
+    if (!isCurrentSession(sessionId, requestSessionGeneration)) {
+      return;
+    }
+    const requestGeneration = sessionEventsGeneration.current + 1;
+    sessionEventsGeneration.current = requestGeneration;
     try {
       const historicalEvents = await api.loadSessionEvents(sessionId);
-      setEvents(historicalEvents);
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        sessionEventsGeneration.current === requestGeneration
+      ) {
+        const sessionEvents = historicalEvents.filter((event) => event.sessionId === sessionId);
+        setEvents((currentEvents) => [
+          ...currentEvents,
+          ...sessionEvents.filter((historicalEvent) =>
+            !currentEvents.some((currentEvent) =>
+              isSameActivityEvent(currentEvent, historicalEvent)
+            )
+          ),
+        ].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)));
+      }
     } catch (error) {
       console.error(error);
-      throw error;
     }
   };
 
   const loadSavedSessions = async () => {
+    const requestGeneration = savedSessionsGeneration.current + 1;
+    savedSessionsGeneration.current = requestGeneration;
     try {
       const sessions = await api.loadSavedSessions();
-      setSavedSessions(sessions);
-      if (sessions.length > 0 && !selectedSessionId) {
-        setSelectedSessionId(sessions[0].id);
+      if (isMounted.current && savedSessionsGeneration.current === requestGeneration) {
+        setSavedSessions(sessions);
+        setSelectedSessionId((current) => current || sessions[0]?.id || "");
       }
     } catch (error) {
       console.error(error);
-      throw error;
+      if (isMounted.current && savedSessionsGeneration.current === requestGeneration) {
+        throw error;
+      }
     }
   };
 
-  const loadStructuredFinancialMetrics = async (sessionId: string) => {
-    if (activeSessionId.current !== sessionId) {
+  const loadStructuredFinancialMetrics = async (
+    sessionId: string,
+    requestSessionGeneration = sessionGeneration.current,
+  ) => {
+    if (!isCurrentSession(sessionId, requestSessionGeneration)) {
       return;
     }
+    const requestGeneration = structuredMetricsGeneration.current + 1;
+    structuredMetricsGeneration.current = requestGeneration;
     setIsLoadingStructuredMetrics(true);
     try {
       const payload = await api.loadStructuredFinancialMetrics(sessionId);
-      if (activeSessionId.current === sessionId) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        structuredMetricsGeneration.current === requestGeneration
+      ) {
         setStructuredMetrics(payload.context ?? null);
         setFinancialReportSummary(payload.reportSummary ?? null);
       }
+    } catch (error) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        structuredMetricsGeneration.current === requestGeneration
+      ) {
+        throw error;
+      }
     } finally {
-      if (activeSessionId.current === sessionId) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        structuredMetricsGeneration.current === requestGeneration
+      ) {
         setIsLoadingStructuredMetrics(false);
       }
     }
   };
 
-  const refreshStartPreflight = async (sessionId: string) => {
-    if (activeSessionId.current !== sessionId) {
+  const loadCurrentSessionDetails = async (
+    sessionId: string,
+    requestSessionGeneration: number,
+  ) => {
+    if (!isCurrentSession(sessionId, requestSessionGeneration)) {
+      return null;
+    }
+    const requestGeneration = sessionDetailsGeneration.current + 1;
+    sessionDetailsGeneration.current = requestGeneration;
+    try {
+      const details = await api.loadSessionDetails(sessionId);
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        sessionDetailsGeneration.current === requestGeneration
+      ) {
+        return details;
+      }
+    } catch (error) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        sessionDetailsGeneration.current === requestGeneration
+      ) {
+        throw error;
+      }
+    }
+    return null;
+  };
+
+  const refreshStartPreflight = async (
+    sessionId: string,
+    requestSessionGeneration = sessionGeneration.current,
+  ) => {
+    if (!isCurrentSession(sessionId, requestSessionGeneration)) {
       return;
     }
+    const requestGeneration = startPreflightGeneration.current + 1;
+    startPreflightGeneration.current = requestGeneration;
     setIsCheckingStartPreflight(true);
     setStartPreflightError(null);
     try {
       const preflight = await api.getStartPreflight(sessionId);
-      if (activeSessionId.current === sessionId) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        startPreflightGeneration.current === requestGeneration
+      ) {
         setStartPreflight(preflight);
       }
     } catch (error) {
       console.error(error);
-      if (activeSessionId.current === sessionId) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        startPreflightGeneration.current === requestGeneration
+      ) {
         setStartPreflight(null);
         setStartPreflightError(
           "No se pudo verificar la preparación de inicio. La validación previa del servidor se ejecutará al iniciar de todos modos."
         );
       }
     } finally {
-      if (activeSessionId.current === sessionId) {
+      if (
+        isCurrentSession(sessionId, requestSessionGeneration) &&
+        startPreflightGeneration.current === requestGeneration
+      ) {
         setIsCheckingStartPreflight(false);
       }
     }
   };
 
-  const loadFinancialMetricsReview = async (sessionId: string) => {
+  const loadFinancialMetricsReview = async (
+    sessionId: string,
+    requestSessionGeneration = sessionGeneration.current,
+  ) => {
     if (!shouldLoadFinancialMetricsReview(
       sessionId,
       activeSessionId.current,
       financialMetricsUploadSessionId.current,
-    )) {
+    ) || !isCurrentSession(sessionId, requestSessionGeneration)) {
       return null;
     }
     const requestGeneration = financialMetricsReviewGeneration.current + 1;
@@ -166,23 +305,24 @@ export function useAnalysisSession() {
     setFinancialMetricsReviewError(null);
     try {
       const draft = await api.getFinancialMetricsReview(sessionId);
-      if (isCurrentSessionRequest(
-        sessionId,
-        requestGeneration,
-        activeSessionId.current,
-        financialMetricsReviewGeneration.current,
-      )) {
+      if (isCurrentSession(sessionId, requestSessionGeneration) && isCurrentSessionRequest(
+          sessionId,
+          requestGeneration,
+          activeSessionId.current,
+          financialMetricsReviewGeneration.current,
+        )) {
         setFinancialMetricsReview(draft);
+        return draft;
       }
-      return draft;
+      return null;
     } catch (error) {
       console.error(error);
-      if (isCurrentSessionRequest(
-        sessionId,
-        requestGeneration,
-        activeSessionId.current,
-        financialMetricsReviewGeneration.current,
-      )) {
+      if (isCurrentSession(sessionId, requestSessionGeneration) && isCurrentSessionRequest(
+          sessionId,
+          requestGeneration,
+          activeSessionId.current,
+          financialMetricsReviewGeneration.current,
+        )) {
         setFinancialMetricsReview(null);
         setFinancialMetricsReviewError(
           error instanceof Error
@@ -192,73 +332,98 @@ export function useAnalysisSession() {
       }
       return null;
     } finally {
-      if (isCurrentSessionRequest(
-        sessionId,
-        requestGeneration,
-        activeSessionId.current,
-        financialMetricsReviewGeneration.current,
-      )) {
+      if (isCurrentSession(sessionId, requestSessionGeneration) && isCurrentSessionRequest(
+          sessionId,
+          requestGeneration,
+          activeSessionId.current,
+          financialMetricsReviewGeneration.current,
+        )) {
         setIsLoadingFinancialMetricsReview(false);
       }
     }
   };
 
-  const refreshAfterFinancialMetricsReview = async (sessionId: string) => {
-    await loadStructuredFinancialMetrics(sessionId);
-    if (activeSessionId.current !== sessionId) {
+  const refreshAfterFinancialMetricsReview = async (
+    sessionId: string,
+    requestSessionGeneration: number,
+  ) => {
+    await loadStructuredFinancialMetrics(sessionId, requestSessionGeneration);
+    if (!isCurrentSession(sessionId, requestSessionGeneration)) {
       return;
     }
-    const updated = await api.loadSessionDetails(sessionId);
-    if (activeSessionId.current !== sessionId) {
+    const updated = await loadCurrentSessionDetails(sessionId, requestSessionGeneration);
+    if (!updated) {
       return;
     }
     setSession(updated);
-    await refreshStartPreflight(sessionId);
+    await refreshStartPreflight(sessionId, requestSessionGeneration);
   };
 
   const createSession = async () => {
-    const previousSessionId = activeSessionId.current;
-    invalidateFinancialMetricsReviewWork();
+    const previousSession = session;
+    const requestSessionGeneration = beginSessionChange(null);
+    const requestWorkflowGeneration = workflowGeneration.current;
+    const isCurrentCreate = () =>
+      isCurrentGeneration(requestSessionGeneration) &&
+      workflowGeneration.current === requestWorkflowGeneration;
     setIsCreating(true);
-    setErrorMessage(null);
     try {
       const createdSession = await api.createSession();
+      if (!isCurrentCreate()) {
+        return;
+      }
       activeSessionId.current = createdSession.id;
       setSession(createdSession);
-      setEvents([]);
-      setStructuredMetrics(null);
-      setFinancialMetricsReview(null);
-      setMetricsSaveResult(null);
-      setMetricsSaveError(null);
-      setFinancialMetricsReviewError(null);
       setSelectedSessionId(createdSession.id);
 
       await loadSavedSessions();
-      await refreshStartPreflight(createdSession.id);
+      if (isCurrentSession(createdSession.id, requestSessionGeneration)) {
+        await refreshStartPreflight(createdSession.id, requestSessionGeneration);
+      }
     } catch (error) {
       console.error(error);
-      setErrorMessage("No se pudo crear la sesión de análisis.");
-    } finally {
-      if (activeSessionId.current === null && previousSessionId) {
-        activeSessionId.current = previousSessionId;
-        void loadStructuredFinancialMetrics(previousSessionId);
-        void loadFinancialMetricsReview(previousSessionId);
-        void refreshStartPreflight(previousSessionId);
+      if (isCurrentCreate()) {
+        if (previousSession) {
+          beginSessionChange(previousSession.id);
+          setSession(previousSession);
+        }
+        setErrorMessage("No se pudo crear la sesión de análisis.");
       }
-      setIsCreating(false);
+    } finally {
+      if (isCurrentCreate()) {
+        setIsCreating(false);
+      }
     }
   };
 
   const startSession = async () => {
     if (!session) return;
+    const requestSessionId = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = sessionStartGeneration.current + 1;
+    sessionStartGeneration.current = requestGeneration;
+    const requestWorkflowGeneration = workflowGeneration.current + 1;
+    workflowGeneration.current = requestWorkflowGeneration;
+    const isCurrentStartOperation = () =>
+      isCurrentSession(requestSessionId, requestSessionGeneration) &&
+      sessionStartGeneration.current === requestGeneration;
+    const isCurrentStart = () =>
+      isCurrentStartOperation() &&
+      workflowGeneration.current === requestWorkflowGeneration;
     setIsStarting(true);
     setErrorMessage(null);
     try {
-      const response = await api.startSession(session.id);
+      const response = await api.startSession(requestSessionId);
+      if (!isCurrentStart()) {
+        return;
+      }
       if (!response.ok) {
         if (response.status === 409) {
           try {
             const conflictPayload = await response.json();
+            if (!isCurrentStart()) {
+              return;
+            }
             const isPreflight =
               conflictPayload &&
               typeof conflictPayload === "object" &&
@@ -276,7 +441,7 @@ export function useAnalysisSession() {
                   ? "Se requieren métricas financieras estructuradas antes de iniciar este análisis. Adjunte métricas en formato JSON/CSV/PDF e intente nuevamente."
                   : conflictPayload.errors[0]?.message ?? "No se pudo iniciar la sesión de análisis."
               );
-              await loadSessionEvents(session.id);
+              await loadSessionEvents(requestSessionId, requestSessionGeneration);
               return;
             }
 
@@ -287,7 +452,9 @@ export function useAnalysisSession() {
             );
             return;
           } catch {
-            setErrorMessage("No se pudo iniciar la sesión de análisis.");
+            if (isCurrentStart()) {
+              setErrorMessage("No se pudo iniciar la sesión de análisis.");
+            }
             return;
           }
         }
@@ -295,24 +462,47 @@ export function useAnalysisSession() {
       }
 
       const updatedSession = await response.json() as AnalysisSessionResponse;
+      if (!isCurrentStart()) {
+        return;
+      }
       setSession((currentSession) => ({
-        ...currentSession,
+        ...(currentSession?.id === requestSessionId ? currentSession : session),
         ...updatedSession,
       }));
 
-      await loadSessionEvents(updatedSession.id);
-      await loadSavedSessions();
-      await refreshStartPreflight(updatedSession.id);
+      await loadSessionEvents(requestSessionId, requestSessionGeneration);
+      if (isCurrentStart()) {
+        await loadSavedSessions();
+      }
+      if (isCurrentStart()) {
+        await refreshStartPreflight(requestSessionId, requestSessionGeneration);
+      }
     } catch (error) {
       console.error(error);
-      setErrorMessage("No se pudo iniciar la sesión de análisis.");
+      if (isCurrentStart()) {
+        setErrorMessage("No se pudo iniciar la sesión de análisis.");
+      }
     } finally {
-      setIsStarting(false);
+      if (isCurrentStartOperation()) {
+        setIsStarting(false);
+      }
     }
   };
 
   const submitHumanDecision = async (decision: "approve" | "reject") => {
     if (!session) return;
+    const requestSessionId = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = decisionGeneration.current + 1;
+    decisionGeneration.current = requestGeneration;
+    const requestWorkflowGeneration = workflowGeneration.current + 1;
+    workflowGeneration.current = requestWorkflowGeneration;
+    const isCurrentDecisionOperation = () =>
+      isCurrentSession(requestSessionId, requestSessionGeneration) &&
+      decisionGeneration.current === requestGeneration;
+    const isCurrentDecision = () =>
+      isCurrentDecisionOperation() &&
+      workflowGeneration.current === requestWorkflowGeneration;
     setIsSubmittingDecision(true);
     setErrorMessage(null);
     try {
@@ -322,74 +512,102 @@ export function useAnalysisSession() {
           : "Rechazado por el auditor humano.";
       const reason = decisionReason.trim().length > 0 ? decisionReason : fallbackReason;
 
-      const updatedSession = await api.submitHumanDecision(session.id, decision, reason);
+      const updatedSession = await api.submitHumanDecision(requestSessionId, decision, reason);
+      if (!isCurrentDecision()) {
+        return;
+      }
       setSession((currentSession) => ({
-        ...currentSession,
+        ...(currentSession?.id === requestSessionId ? currentSession : session),
         ...updatedSession,
       }));
 
-      await loadSessionEvents(updatedSession.id);
-      await loadSavedSessions();
-      setDecisionReason("");
+      await loadSessionEvents(requestSessionId, requestSessionGeneration);
+      if (isCurrentDecision()) {
+        await loadSavedSessions();
+      }
+      if (isCurrentDecision()) {
+        setDecisionReason("");
+      }
     } catch (error) {
       console.error(error);
-      setErrorMessage(`No se pudo ${decision === "approve" ? "aprobar" : "rechazar"} la sesión de análisis.`);
+      if (isCurrentDecision()) {
+        setErrorMessage(`No se pudo ${decision === "approve" ? "aprobar" : "rechazar"} la sesión de análisis.`);
+      }
     } finally {
-      setIsSubmittingDecision(false);
+      if (isCurrentDecisionOperation()) {
+        setIsSubmittingDecision(false);
+      }
     }
   };
 
   const loadExistingSession = async (sessionId?: string) => {
     const idToLoad = sessionId ?? selectedSessionId;
     if (!idToLoad) return;
-    const previousSessionId = activeSessionId.current;
-    invalidateFinancialMetricsReviewWork();
-    setErrorMessage(null);
+    const previousSession = session;
+    const requestSessionGeneration = beginSessionChange(idToLoad);
+    const requestWorkflowGeneration = workflowGeneration.current;
+    const isCurrentLoad = () =>
+      isCurrentSession(idToLoad, requestSessionGeneration) &&
+      workflowGeneration.current === requestWorkflowGeneration;
     try {
-      const loadedSession = await api.loadSessionDetails(idToLoad);
+      const loadedSession = await loadCurrentSessionDetails(idToLoad, requestSessionGeneration);
+      if (!loadedSession || !isCurrentLoad()) {
+        return;
+      }
       activeSessionId.current = loadedSession.id;
       setSession(loadedSession);
-      await loadSessionEvents(loadedSession.id);
-      await refreshStartPreflight(loadedSession.id);
+      await loadSessionEvents(loadedSession.id, requestSessionGeneration);
+      if (isCurrentSession(loadedSession.id, requestSessionGeneration)) {
+        await refreshStartPreflight(loadedSession.id, requestSessionGeneration);
+      }
     } catch (error) {
       console.error(error);
-      setErrorMessage("No se pudo cargar la sesión de análisis.");
-    } finally {
-      if (activeSessionId.current === null && previousSessionId) {
-        activeSessionId.current = previousSessionId;
-        void loadStructuredFinancialMetrics(previousSessionId);
-        void loadFinancialMetricsReview(previousSessionId);
-        void refreshStartPreflight(previousSessionId);
+      if (isCurrentLoad()) {
+        if (previousSession) {
+          beginSessionChange(previousSession.id);
+          setSession(previousSession);
+        }
+        setErrorMessage("No se pudo cargar la sesión de análisis.");
       }
     }
   };
 
-  const saveJsonMetrics = async (input: StructuredFinancialMetricsInput) => {
+  const saveStructuredMetrics = async <TInput,>(
+    input: TInput,
+    save: (sessionId: string, input: TInput) => Promise<SaveFinancialMetricsResponse>,
+  ) => {
     if (!session) return;
     const saveSessionId = session.id;
-    const isCurrentSave = () => activeSessionId.current === saveSessionId;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = metricsSaveGeneration.current + 1;
+    metricsSaveGeneration.current = requestGeneration;
+    const isCurrentSave = () =>
+      isCurrentSession(saveSessionId, requestSessionGeneration) &&
+      metricsSaveGeneration.current === requestGeneration;
     setIsSavingStructuredMetrics(true);
     setMetricsSaveError(null);
     setMetricsSaveResult(null);
     try {
-      const result = await api.saveJsonMetrics(saveSessionId, input);
+      const result = await save(saveSessionId, input);
       if (!isCurrentSave()) {
         return;
       }
       setMetricsSaveResult(result);
       if (result.isValid) {
         setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(saveSessionId);
+        await loadStructuredFinancialMetrics(saveSessionId, requestSessionGeneration);
         if (!isCurrentSave()) {
           return;
         }
-        const updated = await api.loadSessionDetails(saveSessionId);
-        if (!isCurrentSave()) {
+        const updated = await loadCurrentSessionDetails(saveSessionId, requestSessionGeneration);
+        if (!updated || !isCurrentSave()) {
           return;
         }
         setSession(updated);
       }
-      await refreshStartPreflight(saveSessionId);
+      if (isCurrentSave()) {
+        await refreshStartPreflight(saveSessionId, requestSessionGeneration);
+      }
     } catch (error) {
       console.error(error);
       if (isCurrentSave()) {
@@ -402,43 +620,11 @@ export function useAnalysisSession() {
     }
   };
 
-  const saveCsvMetrics = async (input: StructuredFinancialMetricsCsvInput) => {
-    if (!session) return;
-    const saveSessionId = session.id;
-    const isCurrentSave = () => activeSessionId.current === saveSessionId;
-    setIsSavingStructuredMetrics(true);
-    setMetricsSaveError(null);
-    setMetricsSaveResult(null);
-    try {
-      const result = await api.saveCsvMetrics(saveSessionId, input);
-      if (!isCurrentSave()) {
-        return;
-      }
-      setMetricsSaveResult(result);
-      if (result.isValid) {
-        setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(saveSessionId);
-        if (!isCurrentSave()) {
-          return;
-        }
-        const updated = await api.loadSessionDetails(saveSessionId);
-        if (!isCurrentSave()) {
-          return;
-        }
-        setSession(updated);
-      }
-      await refreshStartPreflight(saveSessionId);
-    } catch (error) {
-      console.error(error);
-      if (isCurrentSave()) {
-        setMetricsSaveError("No se pudieron guardar las métricas financieras estructuradas.");
-      }
-    } finally {
-      if (isCurrentSave()) {
-        setIsSavingStructuredMetrics(false);
-      }
-    }
-  };
+  const saveJsonMetrics = (input: StructuredFinancialMetricsInput) =>
+    saveStructuredMetrics(input, api.saveJsonMetrics);
+
+  const saveCsvMetrics = (input: StructuredFinancialMetricsCsvInput) =>
+    saveStructuredMetrics(input, api.saveCsvMetrics);
 
   const uploadFinancialMetricsFile = async (
     file: File,
@@ -446,14 +632,12 @@ export function useAnalysisSession() {
   ) => {
     if (!session) return;
     const uploadSessionId = session.id;
-    const uploadGeneration = financialMetricsUploadGeneration.current + 1;
-    financialMetricsUploadGeneration.current = uploadGeneration;
-    const isCurrentUpload = () => isCurrentSessionRequest(
-      uploadSessionId,
-      uploadGeneration,
-      activeSessionId.current,
-      financialMetricsUploadGeneration.current,
-    );
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = metricsSaveGeneration.current + 1;
+    metricsSaveGeneration.current = requestGeneration;
+    const isCurrentUpload = () =>
+      isCurrentSession(uploadSessionId, requestSessionGeneration) &&
+      metricsSaveGeneration.current === requestGeneration;
     financialMetricsReviewGeneration.current += 1;
     financialMetricsUploadSessionId.current = uploadSessionId;
     setIsLoadingFinancialMetricsReview(false);
@@ -473,19 +657,21 @@ export function useAnalysisSession() {
         setFinancialMetricsReview(result.reviewDraft ?? null);
       } else if (outcome === "accepted" && result.isValid) {
         setFinancialMetricsReview(null);
-        await loadStructuredFinancialMetrics(uploadSessionId);
+        await loadStructuredFinancialMetrics(uploadSessionId, requestSessionGeneration);
         if (!isCurrentUpload()) {
           return;
         }
-        const updated = await api.loadSessionDetails(uploadSessionId);
-        if (!isCurrentUpload()) {
+        const updated = await loadCurrentSessionDetails(uploadSessionId, requestSessionGeneration);
+        if (!updated || !isCurrentUpload()) {
           return;
         }
         setSession(updated);
       } else if (outcome === "failed") {
         setFinancialMetricsReview(null);
       }
-      await refreshStartPreflight(uploadSessionId);
+      if (isCurrentUpload()) {
+        await refreshStartPreflight(uploadSessionId, requestSessionGeneration);
+      }
     } catch (error) {
       console.error(error);
       if (isCurrentUpload()) {
@@ -509,18 +695,25 @@ export function useAnalysisSession() {
   ) => {
     if (!session) return null;
     const reviewSessionId = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = financialMetricsReviewSaveGeneration.current + 1;
+    financialMetricsReviewSaveGeneration.current = requestGeneration;
+    const isCurrentSave = () =>
+      isCurrentSession(reviewSessionId, requestSessionGeneration) &&
+      financialMetricsReviewSaveGeneration.current === requestGeneration;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
       const draft = await api.updateFinancialMetricsReview(reviewSessionId, draftId, request);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReview(draft);
-        await refreshStartPreflight(reviewSessionId);
+        await refreshStartPreflight(reviewSessionId, requestSessionGeneration);
+        return draft;
       }
-      return draft;
+      return null;
     } catch (error) {
       console.error(error);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReviewError(
           error instanceof Error
             ? error.message
@@ -529,7 +722,7 @@ export function useAnalysisSession() {
       }
       return null;
     } finally {
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setIsSavingFinancialMetricsReview(false);
       }
     }
@@ -541,18 +734,24 @@ export function useAnalysisSession() {
   ) => {
     if (!session) return;
     const reviewSessionId = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = financialMetricsReviewSaveGeneration.current + 1;
+    financialMetricsReviewSaveGeneration.current = requestGeneration;
+    const isCurrentSave = () =>
+      isCurrentSession(reviewSessionId, requestSessionGeneration) &&
+      financialMetricsReviewSaveGeneration.current === requestGeneration;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
       await api.confirmFinancialMetricsReview(reviewSessionId, draftId, request);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReview(null);
         setMetricsSaveResult(null);
-        await refreshAfterFinancialMetricsReview(reviewSessionId);
+        await refreshAfterFinancialMetricsReview(reviewSessionId, requestSessionGeneration);
       }
     } catch (error) {
       console.error(error);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReviewError(
           error instanceof Error
             ? error.message
@@ -560,7 +759,7 @@ export function useAnalysisSession() {
         );
       }
     } finally {
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setIsSavingFinancialMetricsReview(false);
       }
     }
@@ -569,18 +768,24 @@ export function useAnalysisSession() {
   const discardFinancialMetricsReview = async (draftId: string) => {
     if (!session) return;
     const reviewSessionId = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
+    const requestGeneration = financialMetricsReviewSaveGeneration.current + 1;
+    financialMetricsReviewSaveGeneration.current = requestGeneration;
+    const isCurrentSave = () =>
+      isCurrentSession(reviewSessionId, requestSessionGeneration) &&
+      financialMetricsReviewSaveGeneration.current === requestGeneration;
     setIsSavingFinancialMetricsReview(true);
     setFinancialMetricsReviewError(null);
     try {
       await api.discardFinancialMetricsReview(reviewSessionId, draftId);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReview(null);
         setMetricsSaveResult(null);
-        await refreshAfterFinancialMetricsReview(reviewSessionId);
+        await refreshAfterFinancialMetricsReview(reviewSessionId, requestSessionGeneration);
       }
     } catch (error) {
       console.error(error);
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setFinancialMetricsReviewError(
           error instanceof Error
             ? error.message
@@ -588,11 +793,19 @@ export function useAnalysisSession() {
         );
       }
     } finally {
-      if (activeSessionId.current === reviewSessionId) {
+      if (isCurrentSave()) {
         setIsSavingFinancialMetricsReview(false);
       }
     }
   };
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+      sessionGeneration.current += 1;
+    };
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -607,7 +820,6 @@ export function useAnalysisSession() {
     setMetricsSaveError(null);
 
     if (!session?.id) {
-      activeSessionId.current = null;
       setStructuredMetrics(null);
       setFinancialMetricsReview(null);
       setFinancialMetricsReviewError(null);
@@ -620,22 +832,27 @@ export function useAnalysisSession() {
     }
 
     activeSessionId.current = session.id;
+    const requestSessionGeneration = sessionGeneration.current;
     setStartPreflight(null);
     setStartPreflightError(null);
 
-    loadStructuredFinancialMetrics(session.id).catch((error) => {
+    loadSessionEvents(session.id, requestSessionGeneration).catch((error) => {
+      console.error("Failed to load session events:", error);
+    });
+
+    loadStructuredFinancialMetrics(session.id, requestSessionGeneration).catch((error) => {
       console.error("Failed to load structured financial metrics:", error);
-      if (activeSessionId.current === session.id) {
+      if (isCurrentSession(session.id, requestSessionGeneration)) {
         setStructuredMetrics(null);
         setFinancialReportSummary(null);
       }
     });
 
-    loadFinancialMetricsReview(session.id).catch((error) => {
+    loadFinancialMetricsReview(session.id, requestSessionGeneration).catch((error) => {
       console.error("Failed to load financial metrics review:", error);
     });
 
-    refreshStartPreflight(session.id).catch((error) => {
+    refreshStartPreflight(session.id, requestSessionGeneration).catch((error) => {
       console.error("Failed to load start preflight:", error);
     });
   }, [session?.id]);

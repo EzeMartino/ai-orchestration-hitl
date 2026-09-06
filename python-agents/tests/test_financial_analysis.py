@@ -8,15 +8,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python-agents" / "data_agent"))
 
 import financial_analysis  # noqa: E402
+import anomaly_detection  # noqa: E402
 
 
-def metric(name, period, value, confidence=0.9):
+def metric(name, period, value, confidence=0.9, unit="USD millions", currency="USD"):
     return {
         "name": name,
         "period": period,
         "value": value,
-        "unit": "USD millions",
-        "currency": "USD",
+        "unit": unit,
+        "currency": currency,
         "source": "unit_test",
         "sourcePage": 1,
         "confidence": confidence,
@@ -122,6 +123,154 @@ class FinancialAnalysisRatioTests(unittest.TestCase):
         self.assertGreaterEqual(len(response["ratios"]), 9)
         self.assertEqual(response["warnings"], [])
 
+    def test_rejects_ratio_inputs_with_incompatible_units(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("current_assets", "2024A", 2, unit="millions"),
+                    metric("current_liabilities", "2024A", 500000, unit="units"),
+                ],
+                "requestedRatios": ["current_ratio"],
+            },
+        )
+
+        self.assertEqual(response["ratios"], [])
+        self.assertTrue(response["warnings"])
+
+    def test_rejects_ratio_when_only_one_operand_has_a_unit(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("current_assets", "2024A", 2, unit="millions"),
+                    metric("current_liabilities", "2024A", 0.5, unit=""),
+                ],
+                "requestedRatios": ["current_ratio"],
+            },
+        )
+
+        self.assertEqual(response["ratios"], [])
+        self.assertTrue(response["warnings"])
+
+    def test_rejects_ratio_inputs_with_incompatible_currencies(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("current_assets", "2024A", 2, unit="millions", currency="USD"),
+                    metric(
+                        "current_liabilities",
+                        "2024A",
+                        0.5,
+                        unit="millions",
+                        currency="ARS",
+                    ),
+                ],
+                "requestedRatios": ["current_ratio"],
+            },
+        )
+
+        self.assertEqual(response["ratios"], [])
+        self.assertTrue(response["warnings"])
+
+    def test_computes_ratio_when_unit_and_currency_match(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("current_assets", "2024A", 2, unit="millions"),
+                    metric("current_liabilities", "2024A", 0.5, unit="millions"),
+                ],
+                "requestedRatios": ["current_ratio"],
+            },
+        )
+
+        self.assertEqual(response["warnings"], [])
+        self.assertEqual(response["ratios"][0]["value"], 4.0)
+
+    def test_uses_supported_operand_alias_with_matching_dimensions(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("ebit", "2024A", 20),
+                    metric("revenue", "2024A", 100),
+                ],
+                "requestedRatios": ["operating_margin"],
+            },
+        )
+
+        self.assertEqual(response["warnings"], [])
+        self.assertEqual(response["ratios"][0]["value"], 0.2)
+        self.assertEqual(response["ratios"][0]["inputs"], ["ebit", "revenue"])
+
+    def test_normalizes_reported_percent_margin_before_risk_detection(self):
+        metrics = [
+            metric("ebitda_margin", "2024A", 25, unit="%"),
+            metric("ebitda_margin", "2025A", 24, unit="%"),
+        ]
+        ratio_response = call(
+            financial_analysis.compute_financial_ratios,
+            {"metrics": metrics, "requestedRatios": ["ebitda_margin"]},
+        )
+        ratios = ratio_response["ratios"]
+        signals = call(
+            financial_analysis.detect_financial_risk_signals,
+            {"metrics": metrics, "ratios": ratios},
+        )["signals"]
+
+        self.assertEqual(ratios[0]["value"], 0.25)
+        self.assertEqual(ratios[1]["value"], 0.24)
+        self.assertTrue(all(ratio["unit"] == "ratio" for ratio in ratios))
+        self.assertFalse(any(signal["code"] == "MARGIN_COMPRESSION" for signal in signals))
+
+    def test_requires_every_quick_ratio_numerator(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("cash", "2024A", 20),
+                    metric("current_liabilities", "2024A", 100),
+                ],
+                "requestedRatios": ["quick_ratio"],
+            },
+        )
+
+        self.assertEqual(response["ratios"], [])
+        self.assertTrue(response["warnings"])
+
+    def test_accepts_explicit_zero_quick_ratio_numerators(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("cash", "2024A", 20),
+                    metric("short_term_investments", "2024A", 0),
+                    metric("receivables", "2024A", 0),
+                    metric("current_liabilities", "2024A", 100),
+                ],
+                "requestedRatios": ["quick_ratio"],
+            },
+        )
+
+        self.assertEqual(response["warnings"], [])
+        self.assertEqual(response["ratios"][0]["value"], 0.2)
+
+    def test_preserves_zero_confidence(self):
+        response = call(
+            financial_analysis.compute_financial_ratios,
+            {
+                "metrics": [
+                    metric("current_assets", "2024A", 10, confidence=0),
+                    metric("current_liabilities", "2024A", 10),
+                ],
+                "requestedRatios": ["current_ratio"],
+            },
+        )
+
+        self.assertEqual(response["ratios"][0]["confidence"], 0)
+
 
 class FinancialAnalysisComparisonTests(unittest.TestCase):
     def test_computes_absolute_and_percentage_change(self):
@@ -171,6 +320,40 @@ class FinancialAnalysisComparisonTests(unittest.TestCase):
 
         self.assertEqual(response["comparisons"], [])
         self.assertTrue(any("Falta la métrica revenue" in item for item in response["warnings"]))
+
+    def test_rejects_period_comparison_with_incompatible_units(self):
+        response = call(
+            financial_analysis.compare_periods,
+            {
+                "metrics": [
+                    metric("revenue", "2024A", 2, unit="millions"),
+                    metric("revenue", "2025A", 500000, unit="units"),
+                ],
+                "basePeriod": "2024A",
+                "comparisonPeriod": "2025A",
+                "metricsToCompare": ["revenue"],
+            },
+        )
+
+        self.assertEqual(response["comparisons"], [])
+        self.assertTrue(response["warnings"])
+
+    def test_rejects_period_comparison_with_incompatible_currencies(self):
+        response = call(
+            financial_analysis.compare_periods,
+            {
+                "metrics": [
+                    metric("revenue", "2024A", 2, unit="millions", currency="USD"),
+                    metric("revenue", "2025A", 2, unit="millions", currency="ARS"),
+                ],
+                "basePeriod": "2024A",
+                "comparisonPeriod": "2025A",
+                "metricsToCompare": ["revenue"],
+            },
+        )
+
+        self.assertEqual(response["comparisons"], [])
+        self.assertTrue(response["warnings"])
 
 
 class FinancialAnalysisRiskSignalTests(unittest.TestCase):
@@ -280,6 +463,83 @@ class FinancialAnalysisRiskSignalTests(unittest.TestCase):
         self.assertEqual(response["signals"], [])
         self.assertTrue(response["limitations"])
 
+    def test_rejects_revenue_drop_with_incompatible_dimensions(self):
+        cases = [
+            (
+                "unit",
+                metric("revenue", "2024A", 500000, unit="units"),
+                metric("revenue", "2025A", 2, unit="millions"),
+            ),
+            (
+                "currency",
+                metric("revenue", "2024A", 100, currency="USD"),
+                metric("revenue", "2025A", 10, currency="ARS"),
+            ),
+        ]
+
+        for dimension, previous, current in cases:
+            with self.subTest(dimension=dimension):
+                response = call(
+                    financial_analysis.detect_financial_risk_signals,
+                    {"metrics": [previous, current], "ratios": []},
+                )
+
+                self.assertNotIn(
+                    "REVENUE_DROP",
+                    {signal["code"] for signal in response["signals"]},
+                )
+                self.assertTrue(
+                    any("revenue" in warning and "incompatibles" in warning for warning in response["warnings"])
+                )
+
+    def test_rejects_capex_spike_with_incompatible_dimensions(self):
+        cases = [
+            (
+                "unit",
+                metric("capex", "2024A", 2, unit="millions"),
+                metric("capex", "2025A", 500000, unit="units"),
+            ),
+            (
+                "currency",
+                metric("capex", "2024A", 10, currency="USD"),
+                metric("capex", "2025A", 20, currency="ARS"),
+            ),
+        ]
+
+        for dimension, previous, current in cases:
+            with self.subTest(dimension=dimension):
+                response = call(
+                    financial_analysis.detect_financial_risk_signals,
+                    {"metrics": [previous, current], "ratios": []},
+                )
+
+                self.assertNotIn(
+                    "CAPEX_SPIKE",
+                    {signal["code"] for signal in response["signals"]},
+                )
+                self.assertTrue(
+                    any("capex" in warning and "incompatibles" in warning for warning in response["warnings"])
+                )
+
+    def test_preserves_trend_signals_when_dimensions_are_wholly_unknown(self):
+        response = call(
+            financial_analysis.detect_financial_risk_signals,
+            {
+                "metrics": [
+                    metric("revenue", "2024A", 100, unit="", currency=""),
+                    metric("revenue", "2025A", 50, unit="", currency=""),
+                    metric("capex", "2024A", 10, unit="", currency=""),
+                    metric("capex", "2025A", 20, unit="", currency=""),
+                ],
+                "ratios": [],
+            },
+        )
+
+        codes = {signal["code"] for signal in response["signals"]}
+        self.assertIn("REVENUE_DROP", codes)
+        self.assertIn("CAPEX_SPIKE", codes)
+        self.assertEqual(response["warnings"], [])
+
 
 class FinancialAnalysisEvidenceSummaryTests(unittest.TestCase):
     def test_summarizes_highest_severity_first_and_respects_max_items(self):
@@ -350,6 +610,31 @@ class FinancialAnalysisEvidenceSummaryTests(unittest.TestCase):
 
         self.assertEqual(response["evidence"], [])
         self.assertTrue(response["limitations"])
+
+
+class LegacyAnomalyDescriptionTests(unittest.TestCase):
+    def test_describes_fixed_amount_and_count_heuristics(self):
+        _, _, _, evidence = anomaly_detection.analyze_transactions(100000, 40)
+
+        self.assertEqual(
+            evidence[0][3],
+            "La heurística fija de monto promedio por transacción supera el umbral.",
+        )
+        self.assertEqual(
+            evidence[1][3],
+            "La heurística fija de cantidad de transacciones supera el umbral.",
+        )
+
+    def test_describes_non_triggered_fixed_amount_and_count_heuristics(self):
+        _, _, _, evidence = anomaly_detection.analyze_transactions(0, 0)
+
+        self.assertEqual(
+            [item[3] for item in evidence],
+            [
+                "La heurística fija de monto promedio por transacción no supera el umbral.",
+                "La heurística fija de cantidad de transacciones no supera el umbral.",
+            ],
+        )
 
 
 def sample_metrics():

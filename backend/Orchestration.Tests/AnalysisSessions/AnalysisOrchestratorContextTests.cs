@@ -825,6 +825,9 @@ public class AnalysisOrchestratorContextTests
         financialAnalysis.GetProperty("company").GetString().Should().Be("Vista Energy");
         financialAnalysis.GetProperty("ratios")[0].GetProperty("name").GetString().Should().Be("current_ratio");
         financialAnalysis.GetProperty("ratios")[0].GetProperty("source").GetString().Should().Be("computed");
+        financialAnalysis.GetProperty("ratios")[0].GetProperty("confidence").ValueKind.Should().Be(JsonValueKind.Null);
+        financialAnalysis.GetProperty("riskSignals")[0].GetProperty("confidence").ValueKind.Should().Be(JsonValueKind.Null);
+        financialAnalysis.GetProperty("riskEvidence")[0].GetProperty("confidence").ValueKind.Should().Be(JsonValueKind.Null);
         financialAnalysis.GetProperty("ratios")[0].GetProperty("inputMetrics")[0].GetString().Should().Be("current_assets");
         financialAnalysis.GetProperty("comparisons")[0].GetProperty("metricName").GetString().Should().Be("revenue");
         financialAnalysis.GetProperty("riskSignals")[0].GetProperty("code").GetString().Should().Be("LOW_CURRENT_RATIO");

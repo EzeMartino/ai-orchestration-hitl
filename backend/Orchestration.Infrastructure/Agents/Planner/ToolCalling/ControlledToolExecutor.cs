@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Orchestration.Application.Agents.Data;
 using Orchestration.Application.Agents.Legal;
@@ -11,11 +10,6 @@ namespace Orchestration.Infrastructure.Agents.Planner.ToolCalling;
 public sealed class ControlledToolExecutor : IControlledToolExecutor
 {
     private const string EngineName = "Controlled Tool Executor";
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true
-    };
 
     private readonly IDataAgent _dataAgent;
     private readonly ILegalAgent _legalAgent;
@@ -114,9 +108,8 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         return Succeeded(
             call.ToolName,
             result.Summary,
-            result.Engine,
-            result
-        );
+            result.Engine
+        ) with { TypedDataResult = result };
     }
 
     private async Task<ToolExecutionResult> ExecuteLegalSearchAsync(
@@ -149,9 +142,8 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
         return Succeeded(
             call.ToolName,
             result.Summary,
-            result.Engine,
-            result
-        );
+            result.Engine
+        ) with { TypedLegalResult = result };
     }
 
     private static bool IsTrustedRuntimeContextValid(
@@ -169,8 +161,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
     private static ToolExecutionResult Succeeded(
         string toolName,
         string summary,
-        string engine,
-        object output)
+        string engine)
     {
         return new ToolExecutionResult(
             ToolName: toolName,
@@ -178,7 +169,7 @@ public sealed class ControlledToolExecutor : IControlledToolExecutor
             Succeeded: true,
             Summary: summary,
             Engine: engine,
-            OutputJson: JsonSerializer.Serialize(output, JsonOptions),
+            OutputJson: "{}",
             Error: null
         );
     }

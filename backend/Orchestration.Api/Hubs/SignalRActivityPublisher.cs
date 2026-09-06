@@ -38,24 +38,31 @@ public sealed class SignalRActivityEventPublisher : IActivityEventPublisher
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var ownerId = await _dbContext.AnalysisSessions
-            .Where(session => session.Id == activityEvent.SessionId)
-            .Select(session => (Guid?)session.UserId)
-            .SingleOrDefaultAsync(cancellationToken);
-
-        if (ownerId is null)
+        try
         {
-            _logger.LogWarning(
-                "Realtime activity delivery skipped because session ownership was not found.");
-            return;
-        }
+            var ownerId = await _dbContext.AnalysisSessions
+                .Where(session => session.Id == activityEvent.SessionId)
+                .Select(session => (Guid?)session.UserId)
+                .SingleOrDefaultAsync(cancellationToken);
 
-        await _hubContext.Clients
-            .User(ownerId.Value.ToString())
-            .SendAsync(
-                "activityEventReceived",
-                activityEvent,
-                cancellationToken
-            );
+            if (ownerId is null)
+            {
+                _logger.LogWarning(
+                    "Realtime activity delivery skipped because session ownership was not found.");
+                return;
+            }
+
+            await _hubContext.Clients
+                .User(ownerId.Value.ToString())
+                .SendAsync(
+                    "activityEventReceived",
+                    activityEvent,
+                    cancellationToken
+                );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Realtime delivery failed after activity was persisted.");
+        }
     }
 }
